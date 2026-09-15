@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Camera, Check, MapPin, Video } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Camera, Check, MapPin, Video } from "lucide-react";
 import { requireUser } from "@/lib/auth";
-import type { Viewing } from "@/lib/types";
+import { hydrateViewingMedia } from "@/lib/share";
+import type { Viewing, ViewingAudioNote } from "@/lib/types";
 
 function formatWhen(iso: string) {
   return new Intl.DateTimeFormat("zh-TW", {
@@ -24,12 +25,20 @@ export default async function ViewingDetailPage({
   let { data, error } = await supabase
     .from("viewings")
     .select(
-      "id, address, tags, market, questions, photo_urls, video_urls, property, created_at, updated_at",
+      "id, address, tags, market, questions, notes, pros, risks, photo_urls, video_urls, audio_urls, share_token, property, created_at, updated_at",
     )
     .eq("id", id)
     .maybeSingle();
 
-  if (error?.message?.includes("property")) {
+  if (error?.message?.includes("notes") || error?.message?.includes("pros") || error?.message?.includes("share_token")) {
+    ({ data, error } = await supabase
+      .from("viewings")
+      .select(
+        "id, address, tags, market, questions, photo_urls, video_urls, property, created_at, updated_at",
+      )
+      .eq("id", id)
+      .maybeSingle());
+  } else if (error?.message?.includes("property")) {
     ({ data, error } = await supabase
       .from("viewings")
       .select(
@@ -59,13 +68,17 @@ export default async function ViewingDetailPage({
 
   if (!data) notFound();
 
-  const viewing = data as Viewing;
+  const viewing = await hydrateViewingMedia(data as Viewing);
   const questions = viewing.questions ?? [];
   const checked = questions.filter((q) => q.checked);
+  const notes = (viewing.notes ?? []) as ViewingAudioNote[];
+  const pros = viewing.pros ?? [];
+  const risks = viewing.risks ?? [];
   const photos = viewing.photo_urls ?? [];
   const videos = viewing.video_urls ?? [];
   const property = (viewing.property ?? {}) as Record<string, unknown>;
   const openData = (property.openData ?? null) as Record<string, unknown> | null;
+  const sharePath = viewing.share_token ? `/s/${viewing.share_token}` : "";
   const propertyRows = [
     ["來源", property.source],
     ["城市", property.city],
@@ -119,7 +132,51 @@ export default async function ViewingDetailPage({
               </span>
             ))}
           </div>
+          {sharePath && (
+            <Link
+              href={sharePath}
+              className="mt-3 inline-block text-[11px] text-white/80 underline underline-offset-2 break-all"
+            >
+              分享連結：{sharePath}
+            </Link>
+          )}
         </div>
+
+        {(pros.length > 0 || risks.length > 0) && (
+          <div className="grid grid-cols-2 gap-3 mb-4">
+            <div className="rounded-[22px] bg-[#F0FDF4] border border-[#BBF7D0] p-4">
+              <p className="text-[11px] font-bold text-[#166534] mb-2">✓ 優點</p>
+              <ul className="space-y-1.5 text-[12px] text-[#14532D]">
+                {pros.map((item) => (
+                  <li key={item}>• {item}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="rounded-[22px] bg-[#FEF2F2] border border-[#FECACA] p-4">
+              <p className="text-[11px] font-bold text-[#991B1B] mb-2 flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3" /> 風險
+              </p>
+              <ul className="space-y-1.5 text-[12px] text-[#7F1D1D]">
+                {risks.map((item) => (
+                  <li key={item}>• {item}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
+
+        {notes.length > 0 && (
+          <div className="bg-white rounded-[22px] border border-black/[0.05] shadow-[0_4px_20px_rgba(0,0,0,0.04)] p-4 mb-4">
+            <span className="text-[12px] font-[800] tracking-widest">NOTES 錄音摘要</span>
+            <div className="mt-3 space-y-2">
+              {notes.map((note) => (
+                <p key={note.id} className="text-[12px] leading-[1.5] text-[#374151]">
+                  「{note.transcript}」
+                </p>
+              ))}
+            </div>
+          </div>
+        )}
 
         {propertyRows.length > 0 && (
           <div className="bg-white rounded-[22px] border border-black/[0.05] shadow-[0_4px_20px_rgba(0,0,0,0.04)] p-4 mb-4">

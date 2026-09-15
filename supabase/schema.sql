@@ -39,12 +39,22 @@ create table if not exists public.viewings (
   questions jsonb not null default '[]'::jsonb,
   photo_urls text[] not null default '{}',
   video_urls text[] not null default '{}',
+  audio_urls text[] not null default '{}',
+  notes jsonb not null default '[]'::jsonb,
+  pros text[] not null default '{}',
+  risks text[] not null default '{}',
+  share_token text,
+  client_updated_at timestamptz,
   property jsonb not null default '{}'::jsonb,
   is_pro boolean not null default false,
   property_id uuid references public.properties (id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+create unique index if not exists viewings_share_token_uidx
+  on public.viewings (share_token)
+  where share_token is not null;
 
 create index if not exists viewings_user_id_idx on public.viewings (user_id);
 create index if not exists viewings_property_id_idx on public.viewings (property_id);
@@ -94,15 +104,15 @@ grant select on public.subscriptions to authenticated;
 grant all on public.subscriptions to service_role;
 
 insert into storage.buckets (id, name, public)
-values ('viewing-media', 'viewing-media', true)
-on conflict (id) do nothing;
+values ('viewing-media', 'viewing-media', false)
+on conflict (id) do update set public = excluded.public;
 
 drop policy if exists "users can upload own viewing media" on storage.objects;
 create policy "users can upload own viewing media"
   on storage.objects for insert to authenticated
   with check (
     bucket_id = 'viewing-media'
-    and (storage.foldername(name))[1] = auth.uid()::text
+    and (storage.foldername(name))[1] = (select auth.uid())::text
   );
 
 drop policy if exists "users can update own viewing media" on storage.objects;
@@ -110,18 +120,38 @@ create policy "users can update own viewing media"
   on storage.objects for update to authenticated
   using (
     bucket_id = 'viewing-media'
-    and (storage.foldername(name))[1] = auth.uid()::text
+    and (storage.foldername(name))[1] = (select auth.uid())::text
   )
   with check (
     bucket_id = 'viewing-media'
-    and (storage.foldername(name))[1] = auth.uid()::text
+    and (storage.foldername(name))[1] = (select auth.uid())::text
   );
 
 drop policy if exists "public can read viewing media" on storage.objects;
-create policy "public can read viewing media"
-  on storage.objects for select
-  using (bucket_id = 'viewing-media');
 
+drop policy if exists "users can read own viewing media" on storage.objects;
+create policy "users can read own viewing media"
+  on storage.objects for select to authenticated
+  using (
+    bucket_id = 'viewing-media'
+    and (storage.foldername(name))[1] = (select auth.uid())::text
+  );
+
+create or replace function public.get_viewing_by_share_token(p_token text)
+returns setof public.viewings
+language sql
+security definer
+set search_path = public
+as $$
+  select *
+  from public.viewings
+  where share_token is not null
+    and share_token = nullif(trim(p_token), '')
+  limit 1;
+$$;
+
+revoke all on function public.get_viewing_by_share_token(text) from public;
+grant execute on function public.get_viewing_by_share_token(text) to anon, authenticated, service_role;
 create or replace function public.find_or_create_property(
   p_normalized_address text,
   p_lat double precision,

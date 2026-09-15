@@ -15,6 +15,43 @@ export type Messages = {
     noKeys: string;
     freeQuota: string;
   };
+  sync: {
+    savedLocal: string;
+    pending: string;
+    syncing: string;
+    synced: string;
+    failed: string;
+    conflict: string;
+    retry: string;
+  };
+  wizard: {
+    step1: string;
+    step2: string;
+    step3: string;
+    back: string;
+    next: string;
+    checklistTitle: string;
+    checkAddress: string;
+    checkViewingAt: string;
+    checkFieldContent: string;
+    checkSyncOk: string;
+    progress: string;
+    textNotesTitle: string;
+    textNotesPlaceholder: string;
+    textNotesAdd: string;
+    editCard: string;
+    saveEdits: string;
+  };
+  setup: {
+    title: string;
+    viewingAt: string;
+    unitLabel: string;
+    priceLabel: string;
+    layoutLabel: string;
+    listingUrl: string;
+    setupNotes: string;
+    lookupOptional: string;
+  };
   intro: string;
   address: {
     placeholder: string;

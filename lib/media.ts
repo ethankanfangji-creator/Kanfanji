@@ -1,4 +1,7 @@
 import { getSupabase, MEDIA_BUCKET } from "./supabase";
+import { extensionFor, toStoragePath } from "./media-paths";
+
+const SIGNED_TTL_SECONDS = 60 * 60; // 1 hour
 
 async function requireAuthedClient() {
   const supabase = getSupabase();
@@ -18,12 +21,14 @@ async function requireAuthedClient() {
   return { supabase, user };
 }
 
+export type MediaFolder = "photos" | "videos" | "audios";
+
 export async function uploadViewingFile(
   viewingId: string,
-  folder: "photos" | "videos",
+  folder: MediaFolder,
   file: Blob,
   filename: string,
-) {
+): Promise<string> {
   const { supabase, user } = await requireAuthedClient();
 
   const path = `${user.id}/${viewingId}/${folder}/${filename}`;
@@ -33,31 +38,82 @@ export async function uploadViewingFile(
   });
   if (error) throw error;
 
-  const { data } = supabase.storage.from(MEDIA_BUCKET).getPublicUrl(path);
-  return data.publicUrl;
+  // Persist storage path (not public URL) — bucket is private.
+  return path;
 }
 
-export async function appendViewingUrl(
+export async function createSignedMediaUrl(
+  pathOrUrl: string,
+  expiresIn = SIGNED_TTL_SECONDS,
+): Promise<string | null> {
+  const path = toStoragePath(pathOrUrl);
+  if (!path) return pathOrUrl.startsWith("http") ? pathOrUrl : null;
+
+  const supabase = getSupabase();
+  if (!supabase) return null;
+
+  const { data, error } = await supabase.storage
+    .from(MEDIA_BUCKET)
+    .createSignedUrl(path, expiresIn);
+  if (error || !data?.signedUrl) return null;
+  return data.signedUrl;
+}
+
+export async function createSignedMediaUrls(
+  pathsOrUrls: string[],
+  expiresIn = SIGNED_TTL_SECONDS,
+): Promise<string[]> {
+  const results = await Promise.all(
+    pathsOrUrls.map(async (item) => (await createSignedMediaUrl(item, expiresIn)) ?? ""),
+  );
+  return results.filter(Boolean);
+}
+
+/**
+ * Append a storage path to a media URL array with a compare-and-set style read.
+ * Last successful writer wins for the array contents (LWW at row level is handled by sync).
+ */
+export async function appendViewingPath(
   viewingId: string,
-  column: "photo_urls" | "video_urls",
-  url: string,
+  column: "photo_urls" | "video_urls" | "audio_urls",
+  path: string,
 ) {
   const { supabase } = await requireAuthedClient();
 
   const { data, error } = await supabase
     .from("viewings")
-    .select("photo_urls, video_urls")
+    .select("photo_urls, video_urls, audio_urls")
     .eq("id", viewingId)
     .single();
   if (error) throw error;
 
-  const current = (data?.[column] ?? []) as string[];
+  const current = ((data as Record<string, string[] | undefined>)?.[column] ?? []) as string[];
+  if (current.includes(path)) return;
+
   const { error: updateError } = await supabase
     .from("viewings")
     .update({
-      [column]: [...current, url],
+      [column]: [...current, path],
       updated_at: new Date().toISOString(),
     })
     .eq("id", viewingId);
-  if (updateError) throw updateError;
+  if (updateError) {
+    // Older DBs may lack audio_urls — fall back silently for that column only.
+    if (column === "audio_urls" && updateError.message.includes("audio_urls")) {
+      return;
+    }
+    throw updateError;
+  }
 }
+
+/** @deprecated Prefer appendViewingPath; kept for call-site compatibility during migrate. */
+export async function appendViewingUrl(
+  viewingId: string,
+  column: "photo_urls" | "video_urls",
+  url: string,
+) {
+  const path = toStoragePath(url) ?? url;
+  await appendViewingPath(viewingId, column, path);
+}
+
+export { extensionFor };

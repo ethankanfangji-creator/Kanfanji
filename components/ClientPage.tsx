@@ -11,22 +11,36 @@ import {
   Copy,
   FileText,
   List,
-  MapPin,
   Mic,
-  Search,
   Share2,
-  Sparkles,
   Upload,
   Video,
   X,
-  Zap,
 } from "lucide-react";
 import { ClientAuthBar } from "@/components/ClientAuthBar";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { SyncStatusBanner } from "@/components/SyncStatusBanner";
+import { StepSetup } from "@/components/viewing-wizard/StepSetup";
+import { StepShare } from "@/components/viewing-wizard/StepShare";
+import { WizardBottomNav, WizardStepper } from "@/components/viewing-wizard/WizardStepper";
 import { useI18n } from "@/components/I18nProvider";
 import { bankQuestions } from "@/lib/i18n";
-import { appendViewingUrl, uploadViewingFile } from "@/lib/media";
+import { emptyDraft, getActiveDraft, listMedia, putActiveDraft, putMedia, saveBlobAsMedia } from "@/lib/idb/draft-store";
+import { createEntityId } from "@/lib/draft-db";
+import { createSignedMediaUrl, extensionFor } from "@/lib/media";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
+import { getSyncEngine, syncStatusToUi, type SessionUiStatus } from "@/lib/sync";
+import {
+  canEnterStep,
+  canGenerateShareCard,
+  fromDatetimeLocalValue,
+  getShareChecklist,
+  getStepStatus,
+  isStep1Complete,
+  mirrorSetupIntoPropertyDraft,
+  toDatetimeLocalValue,
+  type WizardStep,
+} from "@/lib/viewing-wizard/readiness";
 import type { User } from "@supabase/supabase-js";
 
 type Question = {
@@ -45,6 +59,8 @@ type AudioNote = {
   duration: number;
   transcript: string;
   matched: number[];
+  mediaId?: string;
+  kind?: "transcript" | "text";
 };
 
 type Clip = {
@@ -54,29 +70,37 @@ type Clip = {
   durationSec?: number;
   url?: string;
   file?: Blob;
+  mediaId?: string;
+  remotePath?: string;
 };
 
 type Photo = {
   id: number;
-  url: string;
+  url?: string;
   tag: string;
   file?: File;
+  mediaId?: string;
+  remotePath?: string;
 };
-
-function extensionFor(file: Blob, fallback: string) {
-  if (file.type.includes("webm")) return "webm";
-  if (file.type.includes("mp4")) return "mp4";
-  if (file.type.includes("png")) return "png";
-  if (file.type.includes("webp")) return "webp";
-  if (file.type.includes("jpeg") || file.type.includes("jpg")) return "jpg";
-  return fallback;
-}
 
 const FREE_VIEWING_LIMIT = 3;
 
 export function ClientPage() {
   const { locale, messages, t } = useI18n();
-  const [address, setAddress] = useState("1200 Westwood St, Coquitlam");
+  const [wizardStep, setWizardStep] = useState<WizardStep>(1);
+  const [address, setAddress] = useState("");
+  const [viewingAt, setViewingAt] = useState("");
+  const [unitLabel, setUnitLabel] = useState("");
+  const [priceLabel, setPriceLabel] = useState("");
+  const [layoutLabel, setLayoutLabel] = useState("");
+  const [listingUrl, setListingUrl] = useState("");
+  const [setupNotes, setSetupNotes] = useState("");
+  const [textNoteDraft, setTextNoteDraft] = useState("");
+  const [lookupError, setLookupError] = useState(false);
+  const [captureError, setCaptureError] = useState(false);
+  const [activeClipId, setActiveClipId] = useState<number | null>(null);
+  const [expandedPhotoId, setExpandedPhotoId] = useState<number | null>(null);
+  const [editingCard, setEditingCard] = useState(false);
   const [lookingUp, setLookingUp] = useState(false);
   const [identified, setIdentified] = useState(false);
   const [tags, setTags] = useState<string[]>([]);
@@ -106,7 +130,11 @@ export function ClientPage() {
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [syncingCard, setSyncingCard] = useState(false);
   const [viewingId, setViewingId] = useState<string | null>(null);
+  const [shareToken, setShareToken] = useState<string | null>(null);
+  const [shareUrl, setShareUrl] = useState("");
+  const [draftReady, setDraftReady] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
+  const [sessionUiStatus, setSessionUiStatus] = useState<SessionUiStatus | null>(null);
   const [propertyDraft, setPropertyDraft] = useState<Record<string, unknown>>({});
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -115,9 +143,49 @@ export function ClientPage() {
   const [user, setUser] = useState<User | null>(null);
   const [freeCount, setFreeCount] = useState(0);
   const [isPro, setIsPro] = useState(false);
+  const clientUpdatedAtRef = useRef(new Date().toISOString());
+  const autosaveTimer = useRef<number | null>(null);
+  const draftHydratedRef = useRef(false);
+  const persistGenerationRef = useRef(0);
+  const notesRef = useRef<AudioNote[]>([]);
+  const draftSessionIdRef = useRef<string | null>(null);
+  const mediaUrlsReadyRef = useRef(false);
+  const pendingMediaRef = useRef<
+    Array<{
+      id: string;
+      kind: "photo" | "video";
+      clientNumericId: number;
+      label: string;
+      mimeType: string;
+      createdAt: string;
+      blob: Blob;
+      remotePath: string | null;
+      uploadStatus: string;
+    }>
+  >([]);
+  const draftSnapshotRef = useRef({
+    address: "",
+    tags: [] as string[],
+    marketCode: "CA" as "CA" | "TH" | "OTHER",
+    identified: false,
+    questions: [] as Question[],
+    notes: [] as AudioNote[],
+    pros: [] as string[],
+    risks: [] as string[],
+    propertyDraft: {} as Record<string, unknown>,
+    viewingId: null as string | null,
+    shareToken: null as string | null,
+    localSessionId: null as string | null,
+    wizardStep: 1 as WizardStep,
+    viewingAt: "",
+    unitLabel: "",
+    priceLabel: "",
+    layoutLabel: "",
+    listingUrl: "",
+    setupNotes: "",
+  });
 
   const configured = isSupabaseConfigured();
-  const canShare = identified && (notes.length > 0 || photos.length > 0 || clips.length > 0);
   const market = marketCode === "TH" ? "TH" : "CA";
 
   useEffect(() => {
@@ -132,6 +200,63 @@ export function ClientPage() {
     });
     return () => subscription.unsubscribe();
   }, []);
+
+  // Resume recoverable sync queue after login / page reopen (drain only; no silent create).
+  useEffect(() => {
+    if (!user || !draftReady || !configured) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const draft = await getActiveDraft();
+        if (draft?.localSessionId) draftSessionIdRef.current = draft.localSessionId;
+        const engine = await getSyncEngine({ isPro });
+        const result = await engine.processQueue();
+        if (cancelled) return;
+        if (draftSessionIdRef.current) {
+          await refreshSessionUi(draftSessionIdRef.current);
+          const session = await engine.getSession(draftSessionIdRef.current);
+          if (session?.remoteViewingId) setViewingId(session.remoteViewingId);
+        }
+        if (result.skippedOffline) {
+          setSyncMessage("目前離線，變更已保存在本機，恢復網路後會繼續同步");
+        } else if (result.processed > 0) {
+          setSyncMessage(
+            result.failed > 0 || result.conflicts > 0
+              ? "同步佇列已恢復，仍有項目待處理"
+              : "同步佇列已恢復完成",
+          );
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setSyncMessage(error instanceof Error ? error.message : "恢復同步失敗");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, draftReady, configured]);
+
+  // When network returns, continue pending uploads.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onOnline = () => {
+      if (!user || !draftReady) return;
+      void (async () => {
+        try {
+          const engine = await getSyncEngine({ isPro });
+          await engine.processQueue();
+          if (draftSessionIdRef.current) await refreshSessionUi(draftSessionIdRef.current);
+        } catch (error) {
+          setSyncMessage(error instanceof Error ? error.message : "恢復網路後同步失敗");
+        }
+      })();
+    };
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, draftReady, isPro]);
 
   useEffect(() => {
     const supabase = getSupabase();
@@ -181,6 +306,540 @@ export function ClientPage() {
   useEffect(() => {
     clipsRef.current = clips;
   }, [clips]);
+
+  useEffect(() => {
+    notesRef.current = notes;
+  }, [notes]);
+
+  // Keep latest draft fields for flush without stale closures.
+  useEffect(() => {
+    draftSnapshotRef.current = {
+      address,
+      tags,
+      marketCode,
+      identified,
+      questions,
+      notes,
+      pros,
+      risks,
+      propertyDraft,
+      viewingId,
+      shareToken,
+      localSessionId: draftSessionIdRef.current,
+      wizardStep,
+      viewingAt,
+      unitLabel,
+      priceLabel,
+      layoutLabel,
+      listingUrl,
+      setupNotes,
+    };
+  }, [
+    address,
+    tags,
+    marketCode,
+    identified,
+    questions,
+    notes,
+    pros,
+    risks,
+    propertyDraft,
+    viewingId,
+    shareToken,
+    wizardStep,
+    viewingAt,
+    unitLabel,
+    priceLabel,
+    layoutLabel,
+    listingUrl,
+    setupNotes,
+  ]);
+
+  async function ensureLocalSessionId(): Promise<string> {
+    if (draftSessionIdRef.current) return draftSessionIdRef.current;
+    const existing = await getActiveDraft();
+    if (existing?.localSessionId) {
+      draftSessionIdRef.current = existing.localSessionId;
+      return existing.localSessionId;
+    }
+    const id = createEntityId();
+    draftSessionIdRef.current = id;
+    return id;
+  }
+
+  async function refreshSessionUi(sessionId?: string | null) {
+    const id = sessionId ?? draftSessionIdRef.current;
+    if (!id) {
+      setSessionUiStatus(
+        user
+          ? syncStatusToUi("pending")
+          : syncStatusToUi("local_only"),
+      );
+      return;
+    }
+    try {
+      const engine = await getSyncEngine({ isPro });
+      const ui = await engine.getSessionUiStatus(id);
+      setSessionUiStatus(ui ?? syncStatusToUi(user ? "pending" : "local_only"));
+    } catch {
+      setSessionUiStatus(syncStatusToUi(user ? "pending" : "local_only"));
+    }
+  }
+
+  async function flushDraftToIdb(
+    patch?: Partial<{
+      address: string;
+      tags: string[];
+      marketCode: "CA" | "TH" | "OTHER";
+      identified: boolean;
+      questions: Question[];
+      notes: AudioNote[];
+      pros: string[];
+      risks: string[];
+      propertyDraft: Record<string, unknown>;
+      viewingId: string | null;
+      shareToken: string | null;
+      localSessionId: string | null;
+      syncStatus: SessionUiStatus["status"] | "local" | "pending_upload" | "error";
+      lastError: string | null;
+      wizardStep: WizardStep;
+      viewingAt: string;
+      unitLabel: string;
+      priceLabel: string;
+      layoutLabel: string;
+      listingUrl: string;
+      setupNotes: string;
+    }>,
+  ) {
+    if (!draftHydratedRef.current) return;
+    if (patch) {
+      draftSnapshotRef.current = { ...draftSnapshotRef.current, ...patch };
+      if (patch.localSessionId) draftSessionIdRef.current = patch.localSessionId;
+    }
+    try {
+      const snap = draftSnapshotRef.current;
+      const existing = (await getActiveDraft()) ?? emptyDraft();
+      const now = new Date().toISOString();
+      clientUpdatedAtRef.current = now;
+      const localSessionId =
+        snap.localSessionId || draftSessionIdRef.current || existing.localSessionId || null;
+      const propertyDraft = mirrorSetupIntoPropertyDraft(snap.propertyDraft, {
+        viewingAt: snap.viewingAt,
+        unitLabel: snap.unitLabel,
+        priceLabel: snap.priceLabel,
+        layoutLabel: snap.layoutLabel,
+        listingUrl: snap.listingUrl,
+        setupNotes: snap.setupNotes,
+      });
+      await putActiveDraft({
+        ...existing,
+        localSessionId,
+        address: snap.address,
+        tags: snap.tags,
+        market: snap.marketCode,
+        identified: snap.identified,
+        questions: snap.questions,
+        notes: snap.notes,
+        pros: snap.pros,
+        risks: snap.risks,
+        propertyDraft,
+        remoteViewingId: snap.viewingId,
+        shareToken: snap.shareToken,
+        clientUpdatedAt: now,
+        syncStatus: patch?.syncStatus ?? (snap.viewingId ? "pending" : "local_only"),
+        lastError: patch?.lastError ?? null,
+        wizardStep: snap.wizardStep,
+        viewingAt: snap.viewingAt,
+        unitLabel: snap.unitLabel,
+        priceLabel: snap.priceLabel,
+        layoutLabel: snap.layoutLabel,
+        listingUrl: snap.listingUrl,
+        setupNotes: snap.setupNotes,
+      });
+      if (!sessionUiStatus || sessionUiStatus.status === "local_only" || !user) {
+        setSessionUiStatus(syncStatusToUi(snap.viewingId && user ? "pending" : "local_only"));
+      }
+    } catch (error) {
+      setSyncMessage(error instanceof Error ? error.message : "本機草稿儲存失敗");
+    }
+  }
+
+  /**
+   * Bridge UI/lib/idb draft → DraftDb, enqueue syncQueue, process per-item uploads.
+   * Uses existing Supabase helpers via ViewingSyncAdapter (no new HTTP routes).
+   */
+  async function syncViaQueue(options?: { openCard?: boolean }) {
+    const engine = await getSyncEngine({ isPro });
+    const sessionId = await ensureLocalSessionId();
+    const mediaRows = await listMedia();
+    const snap = draftSnapshotRef.current;
+
+    await engine.importActiveDraft({
+      sessionId,
+      userId: user?.id ?? null,
+      remoteViewingId: snap.viewingId,
+      shareToken: snap.shareToken,
+      address: snap.address.trim(),
+      tags: snap.tags,
+      market: snap.marketCode,
+      identified: snap.identified,
+      questions: snap.questions,
+      notes: snap.notes,
+      pros: snap.pros,
+      risks: snap.risks,
+      propertyDraft: snap.propertyDraft,
+      clientUpdatedAt: clientUpdatedAtRef.current,
+      isPro,
+      media: mediaRows.map((row) => ({
+        id: row.id,
+        kind: row.kind,
+        label: row.label,
+        mimeType: row.mimeType,
+        size: row.size,
+        blob: row.blob,
+        remotePath: row.remotePath,
+        uploadStatus: row.uploadStatus,
+        durationSec: null,
+      })),
+    });
+
+    if (!user) {
+      await flushDraftToIdb({ localSessionId: sessionId, syncStatus: "local_only" });
+      await refreshSessionUi(sessionId);
+      return { sessionId, skippedOffline: true as const, remoteViewingId: null };
+    }
+
+    setSessionUiStatus(syncStatusToUi("syncing"));
+    await engine.enqueueSession(sessionId, { userId: user.id });
+    const result = await engine.processQueue();
+    const session = await engine.getSession(sessionId);
+    const ui = await engine.getSessionUiStatus(sessionId);
+
+    if (session?.remoteViewingId) {
+      setViewingId(session.remoteViewingId);
+      const token =
+        typeof session.propertyDraft.shareToken === "string"
+          ? session.propertyDraft.shareToken
+          : shareToken;
+      if (token) {
+        setShareToken(token);
+        setShareUrl(`${window.location.origin}/s/${token}`);
+      }
+    }
+
+    // Mirror DraftDb upload results back to lib/idb media for reopen continuity.
+    const syncedMedia = await engine.listSessionMedia(sessionId);
+    const localMedia = await listMedia();
+    for (const row of syncedMedia) {
+      const local = localMedia.find((item) => item.id === row.id);
+      if (!local) continue;
+      if (row.storagePath && row.uploadStatus === "uploaded") {
+        await putMedia({
+          ...local,
+          remotePath: row.storagePath,
+          uploadStatus: "uploaded",
+        });
+      }
+    }
+
+    await flushDraftToIdb({
+      localSessionId: sessionId,
+      viewingId: session?.remoteViewingId ?? snap.viewingId,
+      shareToken:
+        (typeof session?.propertyDraft.shareToken === "string"
+          ? session.propertyDraft.shareToken
+          : snap.shareToken) ?? null,
+      syncStatus: ui?.status ?? "pending",
+      lastError: ui?.errorMessage ?? null,
+    });
+    setSessionUiStatus(ui);
+
+    if (result.skippedOffline) {
+      setSyncMessage("目前離線，變更已保存在本機，恢復網路後會繼續同步");
+    } else if (ui?.status === "conflict") {
+      setSyncMessage(ui.errorMessage || "本機與雲端衝突，未覆寫任一方");
+    } else if (ui?.status === "failed") {
+      setSyncMessage(ui.errorMessage || "同步失敗");
+    } else if (ui?.status === "synced") {
+      setSyncMessage("已上傳雲端 · 分享連結已就緒");
+      if (options?.openCard) {
+        setShowLoginGate(false);
+        setShowCard(true);
+      }
+    } else if (ui?.status === "pending") {
+      setSyncMessage("案件已建立，媒體上傳佇列處理中…");
+      if (options?.openCard && session?.remoteViewingId) {
+        setShowLoginGate(false);
+        setShowCard(true);
+      }
+    }
+
+    return { sessionId, result, ui, remoteViewingId: session?.remoteViewingId ?? null };
+  }
+
+  async function retrySyncQueue() {
+    if (!user || !draftSessionIdRef.current) return;
+    setSyncingCard(true);
+    setSessionUiStatus(syncStatusToUi("syncing"));
+    try {
+      const engine = await getSyncEngine({ isPro });
+      await engine.retryFailed(draftSessionIdRef.current);
+      const session = await engine.getSession(draftSessionIdRef.current);
+      const ui = await engine.getSessionUiStatus(draftSessionIdRef.current);
+      if (session?.remoteViewingId) setViewingId(session.remoteViewingId);
+      setSessionUiStatus(ui);
+      setSyncMessage(ui?.errorMessage || (ui?.status === "synced" ? "同步完成" : "已重試同步"));
+      await flushDraftToIdb({
+        syncStatus: ui?.status ?? "pending",
+        lastError: ui?.errorMessage ?? null,
+        viewingId: session?.remoteViewingId ?? viewingId,
+      });
+    } catch (error) {
+      setSyncMessage(error instanceof Error ? error.message : "重試失敗");
+    } finally {
+      setSyncingCard(false);
+    }
+  }
+
+  // Hydrate single active draft from IndexedDB (metadata first; media URLs lazy on Step 2).
+  useEffect(() => {
+    let cancelled = false;
+    draftHydratedRef.current = false;
+    mediaUrlsReadyRef.current = false;
+
+    void (async () => {
+      try {
+        const draft = await getActiveDraft();
+        const mediaRows = await listMedia();
+        if (cancelled) return;
+
+        const pending = mediaRows
+          .filter((row) => row.kind === "photo" || row.kind === "video")
+          .map((row) => ({
+            id: row.id,
+            kind: row.kind as "photo" | "video",
+            clientNumericId: row.clientNumericId,
+            label: row.label,
+            mimeType: row.mimeType,
+            createdAt: row.createdAt,
+            blob: row.blob,
+            remotePath: row.remotePath,
+            uploadStatus: row.uploadStatus,
+          }));
+        pendingMediaRef.current = pending;
+
+        const nextPhotos: Photo[] = pending
+          .filter((row) => row.kind === "photo")
+          .map((row) => ({
+            id: row.clientNumericId,
+            tag: row.label,
+            mediaId: row.id,
+            remotePath: row.remotePath ?? undefined,
+            file:
+              row.uploadStatus === "uploaded"
+                ? undefined
+                : row.blob instanceof File
+                  ? row.blob
+                  : new File([row.blob], `${row.clientNumericId}.jpg`, { type: row.mimeType }),
+          }));
+        const nextClips: Clip[] = pending
+          .filter((row) => row.kind === "video")
+          .map((row) => ({
+            id: row.clientNumericId,
+            label: row.label,
+            time: new Date(row.createdAt).toLocaleTimeString("zh-TW", {
+              hour: "2-digit",
+              minute: "2-digit",
+            }),
+            mediaId: row.id,
+            remotePath: row.remotePath ?? undefined,
+            file: row.uploadStatus === "uploaded" ? undefined : row.blob,
+          }));
+
+        if (draft) {
+          clientUpdatedAtRef.current = draft.clientUpdatedAt || new Date().toISOString();
+          if (draft.localSessionId) draftSessionIdRef.current = draft.localSessionId;
+          if (draft.address) setAddress(draft.address);
+          setTags(draft.tags ?? []);
+          setMarketCode(draft.market ?? "CA");
+          setIdentified(Boolean(draft.identified));
+          if (draft.questions?.length) setQuestions(draft.questions);
+          if (draft.notes?.length) {
+            setNotes(
+              draft.notes.map((note) => ({
+                ...note,
+                kind: note.kind === "text" ? "text" : note.kind === "transcript" ? "transcript" : undefined,
+              })),
+            );
+          }
+          if (draft.pros?.length) setPros(draft.pros);
+          if (draft.risks?.length) setRisks(draft.risks);
+          setPropertyDraft(draft.propertyDraft ?? {});
+          setViewingId(draft.remoteViewingId);
+          setShareToken(draft.shareToken);
+          if (draft.shareToken) {
+            setShareUrl(`${window.location.origin}/s/${draft.shareToken}`);
+          }
+          if (draft.wizardStep === 1 || draft.wizardStep === 2 || draft.wizardStep === 3) {
+            setWizardStep(draft.wizardStep);
+          }
+          setViewingAt(
+            draft.viewingAt ||
+              (typeof draft.propertyDraft?.viewingAt === "string"
+                ? draft.propertyDraft.viewingAt
+                : ""),
+          );
+          setUnitLabel(
+            draft.unitLabel ||
+              (typeof draft.propertyDraft?.unitLabel === "string"
+                ? draft.propertyDraft.unitLabel
+                : ""),
+          );
+          setPriceLabel(
+            draft.priceLabel ||
+              (typeof draft.propertyDraft?.priceLabel === "string"
+                ? draft.propertyDraft.priceLabel
+                : ""),
+          );
+          setLayoutLabel(
+            draft.layoutLabel ||
+              (typeof draft.propertyDraft?.layoutLabel === "string"
+                ? draft.propertyDraft.layoutLabel
+                : ""),
+          );
+          setListingUrl(
+            draft.listingUrl ||
+              (typeof draft.propertyDraft?.listingUrl === "string"
+                ? draft.propertyDraft.listingUrl
+                : ""),
+          );
+          setSetupNotes(
+            draft.setupNotes ||
+              (typeof draft.propertyDraft?.setupNotes === "string"
+                ? draft.propertyDraft.setupNotes
+                : ""),
+          );
+          setSessionUiStatus(
+            syncStatusToUi(
+              draft.syncStatus === "local" || draft.syncStatus === "pending_upload"
+                ? draft.syncStatus === "local"
+                  ? "local_only"
+                  : "pending"
+                : draft.syncStatus === "error"
+                  ? "failed"
+                  : (draft.syncStatus as SessionUiStatus["status"]),
+              draft.lastError,
+            ),
+          );
+          setSyncMessage(
+            draft.remoteViewingId
+              ? "已還原本機草稿 · 登入後會自動同步"
+              : "已還原本機草稿（IndexedDB）",
+          );
+        } else if (nextPhotos.length || nextClips.length) {
+          setSessionUiStatus(syncStatusToUi("local_only"));
+          setSyncMessage("已還原本機媒體（IndexedDB）");
+        } else {
+          setSessionUiStatus(syncStatusToUi("local_only"));
+        }
+        if (nextPhotos.length) setPhotos(nextPhotos);
+        if (nextClips.length) setClips(nextClips);
+      } catch (error) {
+        if (!cancelled) {
+          setSyncMessage(error instanceof Error ? error.message : "本機草稿讀取失敗");
+        }
+      } finally {
+        if (!cancelled) {
+          // Allow persist only after React has applied hydrated state.
+          window.setTimeout(() => {
+            if (cancelled) return;
+            draftHydratedRef.current = true;
+            persistGenerationRef.current += 1;
+            setDraftReady(true);
+          }, 0);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      // Do not revoke URLs here — Strict Mode remount would break restored previews.
+    };
+  }, []);
+
+  // Lazy-create object URLs / signed URLs when user reaches capture step.
+  useEffect(() => {
+    if (wizardStep < 2 || mediaUrlsReadyRef.current) return;
+    if (pendingMediaRef.current.length === 0) {
+      mediaUrlsReadyRef.current = true;
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const pending = pendingMediaRef.current;
+      const photoUrls = new Map<number, string>();
+      const clipUrls = new Map<number, string>();
+      for (const row of pending) {
+        const localUrl = URL.createObjectURL(row.blob);
+        let url = localUrl;
+        if (row.remotePath) {
+          url = (await createSignedMediaUrl(row.remotePath)) || localUrl;
+        }
+        if (cancelled) {
+          URL.revokeObjectURL(localUrl);
+          return;
+        }
+        if (row.kind === "photo") photoUrls.set(row.clientNumericId, url);
+        else clipUrls.set(row.clientNumericId, url);
+      }
+      if (cancelled) return;
+      mediaUrlsReadyRef.current = true;
+      setPhotos((current) =>
+        current.map((photo) =>
+          photo.url ? photo : { ...photo, url: photoUrls.get(photo.id) ?? photo.url },
+        ),
+      );
+      setClips((current) =>
+        current.map((clip) =>
+          clip.url ? clip : { ...clip, url: clipUrls.get(clip.id) ?? clip.url },
+        ),
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [wizardStep]);
+
+  // Persist metadata draft to IndexedDB (media blobs saved at capture time).
+  useEffect(() => {
+    if (!draftReady || !draftHydratedRef.current) return;
+    const handle = window.setTimeout(() => {
+      void flushDraftToIdb();
+    }, 450);
+
+    return () => window.clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    draftReady,
+    address,
+    tags,
+    marketCode,
+    identified,
+    questions,
+    notes,
+    pros,
+    risks,
+    propertyDraft,
+    viewingId,
+    shareToken,
+    wizardStep,
+    viewingAt,
+    unitLabel,
+    priceLabel,
+    layoutLabel,
+    listingUrl,
+    setupNotes,
+  ]);
 
   useEffect(() => {
     if (audioState === "recording") {
@@ -298,16 +957,31 @@ export function ClientPage() {
           .map((item) => item.id) ?? [];
       const generated = payload.new_questions ?? [];
 
-      setNotes((current) => [
-        ...current,
-        {
-          id: Date.now(),
-          duration,
-          transcript,
-          matched,
-        },
-      ]);
+      let mediaId: string | undefined;
+      try {
+        const saved = await saveBlobAsMedia({
+          kind: "audio",
+          label: `recording-${Date.now()}`,
+          blob,
+          clientNumericId: Date.now(),
+        });
+        mediaId = saved.id;
+      } catch {
+        // Audio blob persist is best-effort; transcript still kept.
+      }
 
+      const nextNote: AudioNote = {
+        id: Date.now(),
+        duration,
+        transcript,
+        matched,
+        mediaId,
+      };
+      const nextNotes = [...notesRef.current, nextNote];
+      notesRef.current = nextNotes;
+      setNotes(nextNotes);
+
+      let nextQuestions: Question[] = [];
       setQuestions((current) => {
         const base = current.length > 0 ? current : bank;
         const updated = base.map((q) => {
@@ -338,20 +1012,32 @@ export function ClientPage() {
           nextId += 1;
         }
 
-        return [...updated, ...extras];
+        nextQuestions = [...updated, ...extras];
+        return nextQuestions;
       });
 
-      if (payload.pros?.length) setPros(payload.pros.slice(0, 3));
-      if (payload.risks?.length) setRisks(payload.risks.slice(0, 3));
+      const nextPros = payload.pros?.length ? payload.pros.slice(0, 3) : pros;
+      const nextRisks = payload.risks?.length ? payload.risks.slice(0, 3) : risks;
+      if (payload.pros?.length) setPros(nextPros);
+      if (payload.risks?.length) setRisks(nextRisks);
+
+      await flushDraftToIdb({
+        notes: nextNotes,
+        questions: nextQuestions.length ? nextQuestions : questions,
+        pros: nextPros,
+        risks: nextRisks,
+      });
 
       const followUpCount = generated.length;
       const pendingCount =
         (payload.answers?.filter((item) => item.status === "pending").length ?? 0) +
         generated.filter((item) => item.status !== "answered").length;
       setSyncMessage(
-        `AI 已整理：答到 ${matched.length} 題，新增 ${followUpCount} 個追問，${pendingCount} 題待確認`,
+        `AI 已整理：答到 ${matched.length} 題，新增 ${followUpCount} 個追問，${pendingCount} 題待確認 · 已存本機`,
       );
+      setCaptureError(false);
     } catch (error) {
+      setCaptureError(true);
       setSyncMessage(error instanceof Error ? error.message : "錄音處理失敗");
     } finally {
       setAudioState("idle");
@@ -440,85 +1126,12 @@ export function ClientPage() {
     await processRecording(file, duration);
   }
 
-  async function saveViewing(
-    nextTags: string[],
-    nextQuestions: Question[],
-    nextMarket: "CA" | "TH" | "OTHER",
-    property?: Record<string, unknown>,
-  ) {
-    const supabase = getSupabase();
-    if (!supabase) {
-      throw new Error("尚未設定 Supabase");
-    }
-
-    const {
-      data: { user: currentUser },
-    } = await supabase.auth.getUser();
-    if (!currentUser) {
-      throw new Error("請先登入後再上傳");
-    }
-
-    const payload = {
-      address: address.trim(),
-      tags: nextTags,
-      market: nextMarket === "OTHER" ? "CA" : nextMarket,
-      questions: nextQuestions,
-      property: property ?? propertyDraft ?? {},
-      user_id: currentUser.id,
-      is_pro: isPro,
-      property_id:
-        typeof (property ?? propertyDraft)?.propertyId === "string"
-          ? ((property ?? propertyDraft).propertyId as string)
-          : null,
-      updated_at: new Date().toISOString(),
-    };
-
-    if (viewingId) {
-      let { error } = await supabase.from("viewings").update(payload).eq("id", viewingId);
-      if (error?.message?.includes("property_id")) {
-        const { property_id: _propertyId, ...withoutPropertyId } = payload;
-        ({ error } = await supabase.from("viewings").update(withoutPropertyId).eq("id", viewingId));
-      }
-      if (error?.message?.includes("property")) {
-        const { property: _property, ...withoutProperty } = payload;
-        ({ error } = await supabase.from("viewings").update(withoutProperty).eq("id", viewingId));
-      }
-      if (error) throw error;
-      return viewingId;
-    }
-
-    let { data, error } = await supabase
-      .from("viewings")
-      .insert({ ...payload, photo_urls: [], video_urls: [] })
-      .select("id")
-      .single();
-    if (error?.message?.includes("property_id")) {
-      const { property_id: _propertyId, ...withoutPropertyId } = payload;
-      ({ data, error } = await supabase
-        .from("viewings")
-        .insert({ ...withoutPropertyId, photo_urls: [], video_urls: [] })
-        .select("id")
-        .single());
-    }
-    if (error?.message?.includes("property")) {
-      const { property: _property, ...withoutProperty } = payload;
-      ({ data, error } = await supabase
-        .from("viewings")
-        .insert({ ...withoutProperty, photo_urls: [], video_urls: [] })
-        .select("id")
-        .single());
-    }
-    if (error) throw error;
-    if (!data) throw new Error("存檔失敗：沒有回傳 id");
-    setViewingId(data.id);
-    return data.id as string;
-  }
-
   async function lookupAddress() {
     if (!address.trim()) return;
 
     setLookingUp(true);
     setIdentified(false);
+    setLookupError(false);
     setSyncMessage("");
 
     try {
@@ -558,61 +1171,46 @@ export function ClientPage() {
         const texts = new Set(dynamic.map((q) => q.text.toLowerCase()));
         return [...dynamic, ...nextQuestions.filter((q) => !texts.has(q.text.toLowerCase()))];
       });
-      setPropertyDraft({
-        source: payload.source,
-        propertyId: payload.propertyId ?? payload.details?.propertyId,
-        ...payload.details,
-      });
       setIdentified(true);
       const openData = (payload.details?.openData || null) as Record<string, unknown> | null;
       const zoning = openData?.zoningCode ? String(openData.zoningCode) : "";
       const propertyId = String(
         payload.propertyId ?? payload.details?.propertyId ?? "",
       );
+      const nextPropertyDraft = {
+        source: payload.source,
+        propertyId: payload.propertyId ?? payload.details?.propertyId,
+        ...payload.details,
+      };
+      setPropertyDraft(nextPropertyDraft);
+      await flushDraftToIdb({
+        address: payload.displayAddress || address.trim(),
+        tags: nextTags,
+        marketCode: nextMarket,
+        identified: true,
+        questions: [
+          ...questions.filter((q) => q.isDynamic),
+          ...nextQuestions.filter(
+            (q) =>
+              !questions
+                .filter((item) => item.isDynamic)
+                .some((d) => d.text.toLowerCase() === q.text.toLowerCase()),
+          ),
+        ],
+        propertyDraft: nextPropertyDraft,
+      });
       setSyncMessage(
         `${payload.source ?? "地址查詢"}完成` +
           (zoning ? ` · Zoning ${zoning}` : "") +
           (propertyId ? ` · property ${propertyId.slice(0, 8)}` : "") +
-          " · 資料暫存本機",
+          " · 已寫入本機草稿",
       );
     } catch (error) {
       setIdentified(false);
+      setLookupError(true);
       setSyncMessage(error instanceof Error ? error.message : "查詢失敗");
     } finally {
       setLookingUp(false);
-    }
-  }
-
-  async function flushPendingMedia(id: string) {
-    const pendingPhotos = photosRef.current.filter((photo) => photo.file);
-    const pendingClips = clipsRef.current.filter((clip) => clip.file);
-    if (pendingPhotos.length === 0 && pendingClips.length === 0) return;
-
-    for (const photo of pendingPhotos) {
-      if (!photo.file) continue;
-      const url = await uploadViewingFile(
-        id,
-        "photos",
-        photo.file,
-        `${photo.id}.${extensionFor(photo.file, "jpg")}`,
-      );
-      await appendViewingUrl(id, "photo_urls", url);
-      setPhotos((current) =>
-        current.map((item) => (item.id === photo.id ? { ...item, url, file: undefined } : item)),
-      );
-    }
-    for (const clip of pendingClips) {
-      if (!clip.file) continue;
-      const url = await uploadViewingFile(
-        id,
-        "videos",
-        clip.file,
-        `${clip.id}.${extensionFor(clip.file, "webm")}`,
-      );
-      await appendViewingUrl(id, "video_urls", url);
-      setClips((current) =>
-        current.map((item) => (item.id === clip.id ? { ...item, url, file: undefined } : item)),
-      );
     }
   }
 
@@ -620,12 +1218,7 @@ export function ClientPage() {
     setSyncingCard(true);
     setSyncMessage("正在上傳看房資料...");
     try {
-      const id = await saveViewing(tags, questions, marketCode, propertyDraft);
-      if (!id) throw new Error("上傳失敗");
-      await flushPendingMedia(id);
-      setSyncMessage("已上傳雲端 · 卡片已就緒");
-      setShowLoginGate(false);
-      setShowCard(true);
+      await syncViaQueue({ openCard: true });
     } catch (error) {
       setSyncMessage(error instanceof Error ? error.message : "上傳失敗");
       throw error;
@@ -634,8 +1227,37 @@ export function ClientPage() {
     }
   }
 
+  async function autosaveIfLoggedIn() {
+    if (!user || !configured || !draftReady || !identified) return;
+    if (!viewingId && freeCount >= FREE_VIEWING_LIMIT && !isPro) return;
+    if (!notes.length && !photos.length && !clips.length) return;
+
+    try {
+      const beforeId = viewingId;
+      const outcome = await syncViaQueue();
+      if (!beforeId && outcome && "remoteViewingId" in outcome && outcome.remoteViewingId) {
+        setFreeCount((n) => n + 1);
+      }
+    } catch (error) {
+      setSyncMessage(error instanceof Error ? error.message : "自動同步失敗");
+    }
+  }
+
   async function handleGenerateCard() {
-    if (!canShare) return;
+    const ready = canGenerateShareCard({
+      address,
+      viewingAt,
+      notesCount: notes.length,
+      photosCount: photos.length,
+      clipsCount: clips.length,
+      checkedQuestions: questions.filter((q) => q.checked).length,
+      syncStatus: sessionUiStatus?.status ?? null,
+    });
+    if (!ready) {
+      setWizardStep(3);
+      setSyncMessage("請先完成下方條件清單");
+      return;
+    }
     if (!configured) {
       setShowCard(true);
       return;
@@ -650,12 +1272,51 @@ export function ClientPage() {
       setShowPaywall(true);
       return;
     }
+    const wasNew = !viewingId;
     try {
       await syncAndOpenCard();
-      setFreeCount((n) => (viewingId ? n : n + 1));
+      if (wasNew) setFreeCount((n) => n + 1);
     } catch {
       // message already set
     }
+  }
+
+  function goToStep(target: WizardStep) {
+    const snap = {
+      address,
+      viewingAt,
+      notesCount: notes.length,
+      photosCount: photos.length,
+      clipsCount: clips.length,
+      checkedQuestions: questions.filter((q) => q.checked).length,
+    };
+    if (target > wizardStep && !canEnterStep(target, snap)) {
+      setSyncMessage("請先填地址與看房日期時間");
+      setWizardStep(1);
+      return;
+    }
+    if (target === 2 && questions.length === 0) {
+      setQuestions(bankQuestions(locale, marketCode).map((q) => ({ ...q, checked: false })));
+    }
+    setWizardStep(target);
+    void flushDraftToIdb({ wizardStep: target });
+  }
+
+  function addTextNote() {
+    const body = textNoteDraft.trim();
+    if (!body) return;
+    setNotes((current) => [
+      ...current,
+      {
+        id: Date.now(),
+        duration: 0,
+        transcript: body,
+        matched: [],
+        kind: "text",
+      },
+    ]);
+    setTextNoteDraft("");
+    setCaptureError(false);
   }
 
   async function startCheckout() {
@@ -737,8 +1398,9 @@ export function ClientPage() {
         }
       }
 
+      const wasNew = !viewingId;
       await syncAndOpenCard();
-      setFreeCount((n) => (viewingId ? n : n + 1));
+      if (wasNew) setFreeCount((n) => n + 1);
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : "登入失敗");
       setSyncingCard(false);
@@ -765,19 +1427,35 @@ export function ClientPage() {
 
   async function persistClip(blob: Blob, label: string) {
     const durationSec = await readVideoDuration(blob);
+    const clientNumericId = Date.now();
+    let mediaId: string | undefined;
+    try {
+      const saved = await saveBlobAsMedia({
+        kind: "video",
+        label,
+        blob,
+        clientNumericId,
+      });
+      mediaId = saved.id;
+    } catch (error) {
+      setSyncMessage(error instanceof Error ? error.message : "影片本機儲存失敗");
+    }
+
     const clip: Clip = {
-      id: Date.now(),
+      id: clientNumericId,
       label,
       time: new Date().toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" }),
       durationSec,
       url: URL.createObjectURL(blob),
       file: blob,
+      mediaId,
     };
     setClips((current) => [...current, clip]);
+    await flushDraftToIdb();
     setSyncMessage(
       durationSec
-        ? `影片已加入（${durationSec}秒）· 生成卡片時會上傳`
-        : "影片已暫存在此裝置，生成卡片時會上傳",
+        ? `影片已存本機（${durationSec}秒）· 登入後會自動同步`
+        : "影片已存本機 IndexedDB，登入後會自動同步",
     );
   }
 
@@ -798,16 +1476,34 @@ export function ClientPage() {
     event.target.value = "";
     if (!files) return;
 
-    const incoming = Array.from(files)
-      .slice(0, 5 - photos.length)
-      .map((file, index) => ({
-        id: Date.now() + index,
+    const incomingFiles = Array.from(files).slice(0, 5 - photos.length);
+    const incoming: Photo[] = [];
+    for (let index = 0; index < incomingFiles.length; index += 1) {
+      const file = incomingFiles[index];
+      const clientNumericId = Date.now() + index;
+      let mediaId: string | undefined;
+      try {
+        const saved = await saveBlobAsMedia({
+          kind: "photo",
+          label: messages.photoTags[photos.length + index] || "現場",
+          blob: file,
+          clientNumericId,
+        });
+        mediaId = saved.id;
+      } catch {
+        // continue with memory-only fallback
+      }
+      incoming.push({
+        id: clientNumericId,
         url: URL.createObjectURL(file),
         tag: messages.photoTags[photos.length + index] || "現場",
         file,
-      }));
+        mediaId,
+      });
+    }
     setPhotos((current) => [...current, ...incoming]);
-    setSyncMessage("照片已暫存 · AI 分析風險中...");
+    await flushDraftToIdb();
+    setSyncMessage("照片已存本機 · AI 分析風險中...");
 
     const fileToDataUrl = (file: File) =>
       new Promise<string>((resolve, reject) => {
@@ -868,37 +1564,100 @@ export function ClientPage() {
         return [...extras, ...base];
       });
       setBankCollapsed(false);
-      setSyncMessage(`照片 AI 已生成 ${generated.length} 題必問 · 暫存本機`);
+      setSyncMessage(`照片 AI 已生成 ${generated.length} 題必問 · 已存本機`);
     } else {
       const firstError = results.find((r) => r.status === "rejected") as
         | PromiseRejectedResult
         | undefined;
       setSyncMessage(
         firstError
-          ? `照片已暫存，AI 分析失敗：${firstError.reason instanceof Error ? firstError.reason.message : "請稍後再試"}`
-          : "照片已暫存在此裝置，生成卡片時會上傳",
+          ? `照片已存本機，AI 分析失敗：${firstError.reason instanceof Error ? firstError.reason.message : "請稍後再試"}`
+          : "照片已存本機 IndexedDB，登入後會自動同步",
       );
     }
   }
 
   function copyCard() {
+    const link = shareUrl || (shareToken ? `${window.location.origin}/s/${shareToken}` : "");
     void navigator.clipboard?.writeText(
-      `${address}\n${messages.card.pros}:${pros.join(" / ")}\n${messages.card.risks}:${risks.join(" / ")}\n${notes[0]?.transcript || ""}`,
+      link ||
+        `${address}\n${messages.card.pros}:${pros.join(" / ")}\n${messages.card.risks}:${risks.join(" / ")}\n${notes[0]?.transcript || ""}`,
     );
-    alert(messages.card.copy);
+    alert(link ? "已複製分享連結" : messages.card.copy);
   }
 
   function shareCard() {
-    if (navigator.share) {
-      void navigator.share({ title: "看房記", text: address });
-    } else {
-      alert("可截圖分享此卡片");
+    const link = shareUrl || (shareToken ? `${window.location.origin}/s/${shareToken}` : "");
+    if (link && navigator.share) {
+      void navigator.share({ title: "看房記", text: address, url: link });
+      return;
     }
+    if (link) {
+      void navigator.clipboard?.writeText(link);
+      alert("已複製分享連結");
+      return;
+    }
+    alert("請先同步雲端後再分享連結");
   }
+
+  // Logged-in autosave (debounced). Guests stay IDB-only until generate card.
+  useEffect(() => {
+    if (!user || !configured || !draftReady || !identified) return;
+    if (autosaveTimer.current) window.clearTimeout(autosaveTimer.current);
+    autosaveTimer.current = window.setTimeout(() => {
+      void autosaveIfLoggedIn();
+    }, 2500);
+    return () => {
+      if (autosaveTimer.current) window.clearTimeout(autosaveTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    user,
+    configured,
+    draftReady,
+    identified,
+    address,
+    tags,
+    questions,
+    notes,
+    pros,
+    risks,
+    photos,
+    clips,
+    propertyDraft,
+    isPro,
+    freeCount,
+  ]);
+
+  const wizardSnap = {
+    address,
+    viewingAt,
+    notesCount: notes.length,
+    photosCount: photos.length,
+    clipsCount: clips.length,
+    checkedQuestions: questions.filter((q) => q.checked).length,
+    identified,
+    cardOpened: showCard,
+    syncStatus: sessionUiStatus?.status ?? null,
+    lookupError,
+    captureError,
+  };
+  const shareChecklist = getShareChecklist(wizardSnap);
+  const canShare = canGenerateShareCard(wizardSnap);
+  const stepStatuses = ([1, 2, 3] as WizardStep[]).map((step) => ({
+    step,
+    label:
+      step === 1
+        ? messages.wizard.step1
+        : step === 2
+          ? messages.wizard.step2
+          : messages.wizard.step3,
+    status: getStepStatus(step, wizardStep, wizardSnap),
+  }));
 
   return (
     <div className="min-h-screen w-full flex justify-center bg-[#FDF6F0] text-[#1A1A1A]">
-      <div className="w-full max-w-[420px] px-4 pt-6 pb-28">
+      <div className="w-full max-w-[420px] px-4 pt-6 pb-36">
         <div className="flex items-start justify-between mb-5">
           <div>
             <h1 className="text-[20px] font-[800] tracking-tight leading-[1.1] flex flex-wrap items-center gap-2">
@@ -952,77 +1711,45 @@ export function ClientPage() {
           {messages.intro}
         </div>
 
-        <div className="bg-white rounded-[22px] border border-black/[0.05] shadow-[0_4px_20px_rgba(0,0,0,0.04)] p-4 mb-4">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-[12px] font-[700] tracking-widest">ADDRESS</span>
-            <span className="text-[10px] text-[#9CA3AF]">{messages.address.hint}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="flex-1 relative">
-              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
-              <input
-                value={address}
-                onChange={(event) => setAddress(event.target.value)}
-                placeholder={messages.address.placeholder}
-                className="w-full h-[44px] pl-9 pr-3 rounded-full bg-[#F8F4EF] border border-black/5 text-[14px] font-medium outline-none focus:ring-2 focus:ring-black/10"
-              />
-            </div>
-            <button
-              onClick={() => void lookupAddress()}
-              disabled={lookingUp}
-              className="w-[44px] h-[44px] rounded-full bg-black text-white flex items-center justify-center shrink-0 active:scale-95 transition disabled:opacity-60"
-            >
-              {lookingUp ? (
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              ) : (
-                <Search className="w-5 h-5" />
-              )}
-            </button>
-          </div>
-          {lookingUp && (
-            <div className="mt-3 flex items-center gap-2 text-[12px] text-[#6B7280] animate-pulse">
-              <Zap className="w-4 h-4" /> {messages.address.lookingUp}
-            </div>
-          )}
-          {identified && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {tags.map((tag) => (
-                <span
-                  key={tag}
-                  className="px-3 py-1.5 rounded-full bg-[#F3F0EB] text-[12px] font-medium border border-black/5"
-                >
-                  {tag}
-                </span>
-              ))}
-              <span className="px-3 py-1.5 rounded-full bg-[#E8F5E9] text-[12px] font-medium text-[#2E7D32] flex items-center gap-1">
-                <Check className="w-3 h-3" /> {messages.address.identified}
-              </span>
-            </div>
-          )}
-          {identified &&
-            Boolean(
-              (propertyDraft.openData as { zoningCode?: string } | undefined)?.zoningCode,
-            ) && (
-              <div className="mt-3 rounded-xl bg-[#EEF2FF] border border-[#C7D2FE] p-3 text-[11px] text-[#3730A3] leading-[1.45]">
-                {messages.address.openDataPrefix}
-                {String((propertyDraft.openData as { city?: string }).city || "")}
-                {" · "}
-                Zoning {(propertyDraft.openData as { zoningCode?: string }).zoningCode}
-                {(propertyDraft.openData as { zoningLabel?: string }).zoningLabel
-                  ? `（${(propertyDraft.openData as { zoningLabel?: string }).zoningLabel}）`
-                  : ""}
-                {(propertyDraft.openData as { pid?: string }).pid
-                  ? ` · PID ${(propertyDraft.openData as { pid?: string }).pid}`
-                  : ""}
-              </div>
-            )}
-          {syncMessage && (
-            <p className="mt-3 text-[11px] text-[#6B7280]">{syncMessage}</p>
-          )}
-        </div>
+        <SyncStatusBanner
+          status={sessionUiStatus}
+          messages={messages.sync}
+          busy={syncingCard}
+          onRetry={() => void retrySyncQueue()}
+        />
 
-        {(identified || questions.some((q) => q.isDynamic && q.source === "photo")) && (
-          <div className="bg-white rounded-[22px] border border-black/[0.05] shadow-[0_4px_20px_rgba(0,0,0,0.04)] p-4 mb-4">
+        <WizardStepper steps={stepStatuses} onSelect={(step) => goToStep(step)} />
+
+        {wizardStep === 1 && (
+          <StepSetup
+            messages={messages}
+            address={address}
+            onAddressChange={setAddress}
+            lookingUp={lookingUp}
+            onLookup={() => void lookupAddress()}
+            identified={identified}
+            tags={tags}
+            propertyDraft={propertyDraft}
+            syncMessage={syncMessage}
+            lookupError={lookupError}
+            viewingAtLocal={toDatetimeLocalValue(viewingAt)}
+            onViewingAtChange={(value) => setViewingAt(fromDatetimeLocalValue(value))}
+            unitLabel={unitLabel}
+            onUnitLabelChange={setUnitLabel}
+            priceLabel={priceLabel}
+            onPriceLabelChange={setPriceLabel}
+            layoutLabel={layoutLabel}
+            onLayoutLabelChange={setLayoutLabel}
+            listingUrl={listingUrl}
+            onListingUrlChange={setListingUrl}
+            setupNotes={setupNotes}
+            onSetupNotesChange={setSetupNotes}
+          />
+        )}
+
+                {wizardStep === 2 && (
+          <>
+        <div className="bg-white rounded-[22px] border border-black/[0.05] shadow-[0_4px_20px_rgba(0,0,0,0.04)] p-4 mb-4">
             <div
               className="flex items-center justify-between cursor-pointer"
               onClick={() => setBankCollapsed((value) => !value)}
@@ -1199,9 +1926,26 @@ export function ClientPage() {
               </>
             )}
           </div>
-        )}
 
-        <div className="bg-white rounded-[24px] border border-black/[0.05] shadow-[0_4px_20px_rgba(0,0,0,0.04)] p-5 mb-4 relative overflow-hidden">
+        <div className="bg-white rounded-[24px] border border-black/[0.05] shadow-[0_4px_20px_rgba(0,0,0,0.04)] p-5 mb-4">
+          <span className="text-[12px] font-[800] tracking-widest">{messages.wizard.textNotesTitle}</span>
+          <textarea
+            value={textNoteDraft}
+            onChange={(event) => setTextNoteDraft(event.target.value)}
+            rows={3}
+            placeholder={messages.wizard.textNotesPlaceholder}
+            className="mt-3 w-full px-4 py-3 rounded-2xl bg-[#F8F4EF] border border-black/5 text-[14px] outline-none focus:ring-2 focus:ring-black/10 resize-none"
+          />
+          <button
+            type="button"
+            onClick={addTextNote}
+            className="mt-3 h-12 w-full rounded-full bg-black text-white text-[14px] font-bold active:scale-[0.98]"
+          >
+            {messages.wizard.textNotesAdd}
+          </button>
+        </div>
+
+<div className="bg-white rounded-[24px] border border-black/[0.05] shadow-[0_4px_20px_rgba(0,0,0,0.04)] p-5 mb-4 relative overflow-hidden">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="text-[12px] font-[800] tracking-widest">{messages.audio.title}</span>
@@ -1281,10 +2025,15 @@ export function ClientPage() {
                 <div key={note.id} className="rounded-xl bg-[#F8FAFF] border border-[#DBEAFE] p-3">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-bold text-[#2563EB] flex items-center gap-1">
-                      <FileText className="w-3 h-3" /> {t(messages.audio.noteLabel, { seconds: note.duration })}
+                      <FileText className="w-3 h-3" />{" "}
+                      {note.kind === "text"
+                        ? messages.wizard.textNotesTitle
+                        : t(messages.audio.noteLabel, { seconds: note.duration })}
                     </span>
                     <span className="text-[10px] text-[#6B7280]">
-                      已轉文字 · 匹配 {note.matched.length} 題
+                      {note.kind === "text"
+                        ? "文字"
+                        : `已轉文字 · 匹配 ${note.matched.length} 題`}
                     </span>
                   </div>
                   <p className="text-[12px] leading-[1.5] mt-1.5 text-[#374151]">「{note.transcript}」</p>
@@ -1307,12 +2056,33 @@ export function ClientPage() {
                 key={photo.id}
                 className="relative aspect-[4/3] rounded-xl overflow-hidden bg-[#F5F3F0] border border-black/5"
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={photo.url} alt={photo.tag} className="w-full h-full object-cover" />
+                <button
+                  type="button"
+                  className="absolute inset-0"
+                  onClick={() =>
+                    setExpandedPhotoId((current) => (current === photo.id ? null : photo.id))
+                  }
+                >
+                  {photo.url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={photo.url}
+                      alt={photo.tag}
+                      loading="lazy"
+                      decoding="async"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-[#EEEAE4] text-[10px] text-[#9CA3AF]">
+                      …
+                    </div>
+                  )}
+                </button>
                 <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded-full bg-black/70 text-white text-[9px]">
                   {photo.tag}
                 </span>
                 <button
+                  type="button"
                   onClick={() => setPhotos((current) => current.filter((item) => item.id !== photo.id))}
                   className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/70 text-white flex items-center justify-center"
                 >
@@ -1331,6 +2101,17 @@ export function ClientPage() {
               </button>
             )}
           </div>
+          {expandedPhotoId != null &&
+            photos.some((photo) => photo.id === expandedPhotoId && photo.url) && (
+              <div className="mt-3 rounded-2xl overflow-hidden border border-black/10 bg-black">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={photos.find((photo) => photo.id === expandedPhotoId)?.url}
+                  alt=""
+                  className="w-full max-h-[320px] object-contain bg-black"
+                />
+              </div>
+            )}
           <input
             ref={photoInput}
             type="file"
@@ -1391,14 +2172,23 @@ export function ClientPage() {
             <div className="mt-4 grid grid-cols-2 gap-2">
               {clips.map((clip) => (
                 <div key={clip.id} className="rounded-xl bg-[#1A1A1A] text-white overflow-hidden">
-                  {clip.url ? (
+                  {clip.url && activeClipId === clip.id ? (
                     <video
                       src={clip.url}
                       controls
                       playsInline
+                      preload="metadata"
                       className="w-full aspect-video bg-black object-cover"
                     />
-                  ) : null}
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setActiveClipId(clip.id)}
+                      className="w-full aspect-video bg-[#111] flex items-center justify-center text-[12px] font-bold"
+                    >
+                      <Video className="w-6 h-6 mr-2" /> 播放
+                    </button>
+                  )}
                   <div className="p-2.5 flex items-center gap-2">
                     <div className="flex-1 min-w-0">
                       <p className="text-[11px] font-bold truncate">{clip.label}</p>
@@ -1416,28 +2206,62 @@ export function ClientPage() {
             {messages.video.tip}
           </p>
         </div>
+          </>
+        )}
 
-        <button
-          onClick={() => void handleGenerateCard()}
-          disabled={!canShare || syncingCard}
-          className={`w-full rounded-[18px] py-4 px-5 flex flex-col items-center justify-center transition-all active:scale-[0.99] ${
-            canShare
-              ? "bg-black text-white shadow-[0_8px_24px_rgba(0,0,0,0.2)]"
-              : "bg-[#E5E2DE] text-[#9CA3AF] cursor-not-allowed"
-          }`}
-        >
-          <span className="text-[14px] font-[800] tracking-wide flex items-center gap-2">
-            {canShare && <Sparkles className="w-4 h-4" />}
-            {syncingCard ? messages.share.uploading : messages.share.button}
-          </span>
-          <span className="text-[11px] mt-1 opacity-70">
-            {canShare
-              ? user
-                ? messages.share.readyLoggedIn
-                : messages.share.readyGuest
-              : messages.share.needMore}
-          </span>
-        </button>
+        {wizardStep === 3 && (
+          <StepShare
+            checklist={shareChecklist}
+            checklistLabels={{
+              address: messages.wizard.checkAddress,
+              viewingAt: messages.wizard.checkViewingAt,
+              fieldContent: messages.wizard.checkFieldContent,
+              syncOk: messages.wizard.checkSyncOk,
+            }}
+            checklistTitle={messages.wizard.checklistTitle}
+            progressLabel={messages.wizard.progress}
+            sessionUiStatus={sessionUiStatus}
+            syncingCard={syncingCard}
+            syncMessage={syncMessage}
+            syncLabels={messages.sync}
+            canGenerate={canShare}
+            generateLabel={syncingCard ? messages.share.uploading : messages.share.button}
+            generateHint={
+              canShare
+                ? user
+                  ? messages.share.readyLoggedIn
+                  : messages.share.readyGuest
+                : messages.share.needMore
+            }
+            onGenerate={() => void handleGenerateCard()}
+          />
+        )}
+
+        <WizardBottomNav
+          backLabel={messages.wizard.back}
+          nextLabel={
+            wizardStep === 3
+              ? syncingCard
+                ? messages.share.uploading
+                : messages.share.button
+              : messages.wizard.next
+          }
+          onBack={wizardStep > 1 ? () => goToStep((wizardStep - 1) as WizardStep) : undefined}
+          onNext={() => {
+            if (wizardStep === 3) {
+              void handleGenerateCard();
+              return;
+            }
+            goToStep((wizardStep + 1) as WizardStep);
+          }}
+          nextDisabled={
+            wizardStep === 3
+              ? !canShare || syncingCard
+              : wizardStep === 1
+                ? !isStep1Complete({ address, viewingAt })
+                : false
+          }
+        />
 
         {showLoginGate && (
           <div className="fixed inset-0 z-50 flex justify-center bg-black/40 backdrop-blur-[2px] p-4 overflow-auto">
@@ -1557,17 +2381,27 @@ export function ClientPage() {
         )}
 
         {showCard && (
-          <div className="fixed inset-0 z-50 flex justify-center bg-black/40 backdrop-blur-[2px] p-4 overflow-auto">
-            <div className="w-full max-w-[420px] my-auto">
+          <div
+            className="fixed inset-0 z-[60] flex justify-center bg-black/40 backdrop-blur-[2px] p-4 overflow-auto"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => setShowCard(false)}
+          >
+            <div
+              className="w-full max-w-[420px] my-auto"
+              onClick={(event) => event.stopPropagation()}
+            >
               <div className="bg-white rounded-[28px] overflow-hidden shadow-[0_20px_60px_rgba(0,0,0,0.2)]">
                 <div className="bg-[#111] text-white p-5 relative">
                   <button
+                    type="button"
+                    aria-label="關閉卡片"
                     onClick={() => setShowCard(false)}
-                    className="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/10 flex items-center justify-center"
+                    className="absolute top-4 right-4 z-20 w-9 h-9 rounded-full bg-white/15 hover:bg-white/25 flex items-center justify-center"
                   >
                     <X className="w-4 h-4" />
                   </button>
-                  <p className="text-[10px] tracking-[0.2em] opacity-60">{messages.brand.cardEyebrow}</p>
+                  <p className="text-[10px] tracking-[0.2em] opacity-60 pr-10">{messages.brand.cardEyebrow}</p>
                   <h3 className="text-[18px] font-bold mt-2 leading-[1.2]">{address}</h3>
                   <div className="mt-3 flex gap-2">
                     {tags.map((tag) => (
@@ -1578,24 +2412,67 @@ export function ClientPage() {
                   </div>
                 </div>
                 <div className="p-5 space-y-5">
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setEditingCard((value) => !value)}
+                      className="h-9 px-3 rounded-full bg-[#F5F3F0] text-[11px] font-bold"
+                    >
+                      {editingCard ? messages.wizard.saveEdits : messages.wizard.editCard}
+                    </button>
+                  </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="rounded-2xl bg-[#F0FDF4] border border-[#BBF7D0] p-3">
                       <p className="text-[11px] font-bold text-[#166534] mb-2">✓ {messages.card.pros}</p>
-                      <ul className="space-y-1.5 text-[12px] text-[#14532D] leading-[1.4]">
-                        {pros.map((item) => (
-                          <li key={item}>• {item}</li>
-                        ))}
-                      </ul>
+                      {editingCard ? (
+                        <textarea
+                          value={pros.join("\n")}
+                          onChange={(event) =>
+                            setPros(
+                              event.target.value
+                                .split("\n")
+                                .map((line) => line.trim())
+                                .filter(Boolean)
+                                .slice(0, 3),
+                            )
+                          }
+                          rows={4}
+                          className="w-full text-[12px] bg-white/80 rounded-xl p-2 outline-none"
+                        />
+                      ) : (
+                        <ul className="space-y-1.5 text-[12px] text-[#14532D] leading-[1.4]">
+                          {pros.map((item) => (
+                            <li key={item}>• {item}</li>
+                          ))}
+                        </ul>
+                      )}
                     </div>
                     <div className="rounded-2xl bg-[#FEF2F2] border border-[#FECACA] p-3">
                       <p className="text-[11px] font-bold text-[#991B1B] mb-2 flex items-center gap-1">
                         <AlertTriangle className="w-3 h-3" /> {messages.card.risks}
                       </p>
-                      <ul className="space-y-1.5 text-[12px] text-[#7F1D1D] leading-[1.4]">
-                        {risks.map((item) => (
-                          <li key={item}>• {item}</li>
-                        ))}
-                      </ul>
+                      {editingCard ? (
+                        <textarea
+                          value={risks.join("\n")}
+                          onChange={(event) =>
+                            setRisks(
+                              event.target.value
+                                .split("\n")
+                                .map((line) => line.trim())
+                                .filter(Boolean)
+                                .slice(0, 3),
+                            )
+                          }
+                          rows={4}
+                          className="w-full text-[12px] bg-white/80 rounded-xl p-2 outline-none"
+                        />
+                      ) : (
+                        <ul className="space-y-1.5 text-[12px] text-[#7F1D1D] leading-[1.4]">
+                          {risks.map((item) => (
+                            <li key={item}>• {item}</li>
+                          ))}
+                        </ul>
+                      )}
                     </div>
                   </div>
                   <div>
@@ -1665,20 +2542,41 @@ export function ClientPage() {
                   )}
                   <div className="flex gap-2">
                     <button
+                      type="button"
                       onClick={copyCard}
                       className="flex-1 h-[44px] rounded-full bg-black text-white text-[13px] font-bold flex items-center justify-center gap-2"
                     >
-                      <Copy className="w-4 h-4" /> 複製文字
+                      <Copy className="w-4 h-4" /> {shareUrl ? "複製連結" : "複製文字"}
                     </button>
                     <button
+                      type="button"
                       onClick={shareCard}
                       className="flex-1 h-[44px] rounded-full bg-[#F5F3F0] border border-black/10 text-[13px] font-bold flex items-center justify-center gap-2"
                     >
-                      <Share2 className="w-4 h-4" /> 分享卡片
+                      <Share2 className="w-4 h-4" /> 分享連結
                     </button>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowCard(false)}
+                    className="w-full h-[42px] rounded-full border border-black/10 text-[13px] font-bold text-[#6B7280]"
+                  >
+                    關閉
+                  </button>
+                  {shareUrl && (
+                    <a
+                      href={shareUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block text-[11px] text-center text-[#2563EB] break-all underline-offset-2 hover:underline"
+                    >
+                      {shareUrl}
+                    </a>
+                  )}
                   <p className="text-[10px] text-center text-[#9CA3AF]">
-                    {viewingId ? "已同步雲端 · 家人一看就懂" : "本機預覽 · 登入上傳後可雲端保存"}
+                    {viewingId
+                      ? "已同步雲端 · 媒體為 private signed URL"
+                      : "本機預覽 · 登入上傳後可產生分享連結"}
                   </p>
                 </div>
               </div>

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { useI18n } from "@/components/I18nProvider";
-import { createClient } from "@/utils/supabase/client";
+import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 
 export function ClientAuthBar() {
   const { messages } = useI18n();
@@ -12,7 +12,12 @@ export function ClientAuthBar() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const supabase = createClient();
+    const supabase = getSupabase();
+    if (!supabase) {
+      setReady(true);
+      return;
+    }
+
     void supabase.auth.getUser().then(({ data }) => {
       setUser(data.user);
       setReady(true);
@@ -32,6 +37,14 @@ export function ClientAuthBar() {
     return <span className="h-8 w-16 rounded-full bg-[#EFEAE4] animate-pulse" />;
   }
 
+  if (!isSupabaseConfigured()) {
+    return (
+      <span className="h-8 px-3 rounded-full bg-[#FEF2F2] border border-[#FECACA] text-[11px] font-bold text-[#991B1B] inline-flex items-center">
+        缺 Supabase env
+      </span>
+    );
+  }
+
   if (!user) {
     return (
       <Link
@@ -49,8 +62,8 @@ export function ClientAuthBar() {
       <button
         type="button"
         onClick={() => {
-          const supabase = createClient();
-          void supabase.auth.signOut().then(() => {
+          const supabase = getSupabase();
+          void supabase?.auth.signOut().then(() => {
             window.location.href = "/login";
           });
         }}

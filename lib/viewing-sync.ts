@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { MEDIA_BUCKET } from "./supabase";
 import { newShareToken, toStoragePath } from "./media-paths";
+import { ensureShareAccessOnProperty } from "@/lib/share-access/server";
 
 export type ViewingSyncPayload = {
   address: string;
@@ -24,6 +25,7 @@ export type SaveViewingResult = {
 };
 
 function buildRow(payload: ViewingSyncPayload, userId: string, shareToken: string) {
+  const property = ensureShareAccessOnProperty(payload.property ?? {}, shareToken);
   return {
     address: payload.address.trim(),
     tags: payload.tags,
@@ -32,7 +34,7 @@ function buildRow(payload: ViewingSyncPayload, userId: string, shareToken: strin
     notes: payload.notes,
     pros: payload.pros,
     risks: payload.risks,
-    property: payload.property ?? {},
+    property,
     user_id: userId,
     is_pro: payload.isPro,
     property_id: payload.propertyId ?? null,
@@ -49,6 +51,7 @@ async function tryWrite(
   viewingId?: string,
 ) {
   const stripKeys = [
+    "revision",
     "property_id",
     "property",
     "notes",
@@ -73,7 +76,7 @@ async function tryWrite(
       const { data, error } = await supabase
         .from("viewings")
         .insert(insertRow)
-        .select("id, share_token")
+        .select("id")
         .single();
       if (!error && data) return { data, error: null as null };
       if (!error) return { data: null, error: new Error("存檔失敗：沒有回傳 id") };
@@ -88,7 +91,7 @@ async function tryWrite(
       .from("viewings")
       .update(attempt)
       .eq("id", viewingId!)
-      .select("id, share_token")
+      .select("id")
       .maybeSingle();
     if (!error) return { data, error: null as null };
     const msg = error.message || "";
@@ -113,11 +116,21 @@ export async function saveViewingRecord(
 
   if (existingId) {
     // LWW: skip if server has a newer client_updated_at
-    const { data: current } = await supabase
+    let { data: current, error: currentError } = await supabase
       .from("viewings")
-      .select("client_updated_at, share_token")
+      .select("client_updated_at, revision")
       .eq("id", existingId)
       .maybeSingle();
+    if (currentError?.message.includes("revision")) {
+      const fallback = await supabase
+        .from("viewings")
+        .select("client_updated_at")
+        .eq("id", existingId)
+        .maybeSingle();
+      current = fallback.data as typeof current;
+      currentError = fallback.error;
+    }
+    if (currentError) throw currentError;
 
     const serverTs = current?.client_updated_at
       ? Date.parse(String(current.client_updated_at))
@@ -126,16 +139,27 @@ export async function saveViewingRecord(
     if (serverTs && incomingTs && incomingTs < serverTs) {
       return {
         id: existingId,
-        shareToken: String(current?.share_token || shareToken),
+        shareToken,
         skippedAsStale: true,
       };
     }
 
-    const { data, error } = await tryWrite(supabase, "update", row, existingId);
+    const currentRevision =
+      typeof current?.revision === "number" ? current.revision : null;
+    const updateRow =
+      currentRevision == null
+        ? row
+        : { ...row, revision: currentRevision + 1 };
+    const { error } = await tryWrite(
+      supabase,
+      "update",
+      updateRow,
+      existingId,
+    );
     if (error) throw error;
     return {
       id: existingId,
-      shareToken: String(data?.share_token || current?.share_token || shareToken),
+      shareToken,
       skippedAsStale: false,
     };
   }
@@ -145,7 +169,7 @@ export async function saveViewingRecord(
   if (!data?.id) throw new Error("存檔失敗：沒有回傳 id");
   return {
     id: String(data.id),
-    shareToken: String(data.share_token || shareToken),
+    shareToken,
     skippedAsStale: false,
   };
 }

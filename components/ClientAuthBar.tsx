@@ -9,14 +9,11 @@ import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 export function ClientAuthBar() {
   const { messages } = useI18n();
   const [user, setUser] = useState<User | null>(null);
-  const [ready, setReady] = useState(false);
+  const [ready, setReady] = useState(() => !isSupabaseConfigured());
 
   useEffect(() => {
     const supabase = getSupabase();
-    if (!supabase) {
-      setReady(true);
-      return;
-    }
+    if (!supabase) return;
 
     void supabase.auth.getUser().then(({ data }) => {
       setUser(data.user);

@@ -119,6 +119,10 @@ export function emptyDraft(partial?: Partial<ViewingDraftRecord>): ViewingDraftR
     layoutLabel: "",
     listingUrl: "",
     setupNotes: "",
+    pendingAudioProcess: null,
+    liveAudioMarkers: [],
+    aiSummary: null,
+    fieldChecklist: [],
     ...partial,
   };
 }
@@ -184,7 +188,7 @@ export async function deleteMedia(id: string): Promise<void> {
 
 export async function totalMediaBytes(draftId = ACTIVE_DRAFT_ID): Promise<number> {
   const rows = await listMedia(draftId);
-  return rows.reduce((sum, row) => sum + (row.size || 0), 0);
+  return rows.reduce((sum, row) => sum + (row.size || 0) + (row.thumbBlob?.size || 0), 0);
 }
 
 /**
@@ -235,20 +239,51 @@ export async function saveBlobAsMedia(input: {
   blob: Blob;
   clientNumericId: number;
   draftId?: string;
+  tagId?: string;
+  note?: string;
+  thumbBlob?: Blob | null;
+  thumbMimeType?: string | null;
 }): Promise<MediaRecord> {
   const record: MediaRecord = {
     id: newMediaId(),
     draftId: input.draftId ?? ACTIVE_DRAFT_ID,
     kind: input.kind,
     label: input.label,
+    tagId: input.tagId,
+    note: input.note ?? "",
     mimeType: input.blob.type || "application/octet-stream",
     size: input.blob.size,
     createdAt: new Date().toISOString(),
     blob: input.blob,
+    thumbBlob: input.thumbBlob ?? null,
+    thumbMimeType: input.thumbMimeType ?? null,
     remotePath: null,
     uploadStatus: "local",
     clientNumericId: input.clientNumericId,
   };
   await putMedia(record);
   return record;
+}
+
+export async function updateMediaFields(
+  id: string,
+  patch: Partial<
+    Pick<
+      MediaRecord,
+      | "label"
+      | "tagId"
+      | "note"
+      | "thumbBlob"
+      | "thumbMimeType"
+      | "uploadStatus"
+      | "remotePath"
+      | "markers"
+    >
+  >,
+): Promise<MediaRecord | null> {
+  const existing = await getMedia(id);
+  if (!existing) return null;
+  const next: MediaRecord = { ...existing, ...patch };
+  await putMedia(next);
+  return next;
 }

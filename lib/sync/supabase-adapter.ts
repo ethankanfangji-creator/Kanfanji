@@ -46,7 +46,7 @@ export function createSupabaseViewingSyncAdapter(): ViewingSyncAdapter {
       if (!supabase) return null;
       const { data, error } = await supabase
         .from("viewings")
-        .select("id, address, client_updated_at, updated_at, share_token")
+        .select("id, address, client_updated_at, updated_at")
         .eq("id", remoteId)
         .maybeSingle();
       if (error || !data) return null;
@@ -55,7 +55,7 @@ export function createSupabaseViewingSyncAdapter(): ViewingSyncAdapter {
         address: String(data.address ?? ""),
         clientUpdatedAt: data.client_updated_at ? String(data.client_updated_at) : null,
         updatedAt: data.updated_at ? String(data.updated_at) : null,
-        shareToken: data.share_token ? String(data.share_token) : null,
+        shareToken: null,
       };
     },
 

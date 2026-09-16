@@ -15,6 +15,8 @@ export type ViewingAudioNote = {
   transcript: string;
   matched: number[];
   mediaId?: string;
+  kind?: "transcript" | "text";
+  markers?: import("@/lib/audio-markers").AudioMarker[];
 };
 
 export type Viewing = {
@@ -33,6 +35,7 @@ export type Viewing = {
   audio_urls?: string[];
   share_token?: string | null;
   client_updated_at?: string | null;
+  revision?: number;
   property?: Record<string, unknown> | null;
   is_pro?: boolean;
   created_at: string;

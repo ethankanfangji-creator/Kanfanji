@@ -5,7 +5,7 @@ export default defineConfig({
   test: {
     environment: "node",
     setupFiles: ["./lib/draft-db/test-setup.ts"],
-    include: ["**/*.{test,spec}.ts"],
+    include: ["**/*.{test,spec}.{ts,tsx}"],
     clearMocks: true,
   },
   resolve: {

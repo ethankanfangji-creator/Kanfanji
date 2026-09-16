@@ -16,6 +16,8 @@ export type StepSetupMessages = {
     unitLabel: string;
     priceLabel: string;
     layoutLabel: string;
+    areaLabel: string;
+    managementFeeLabel: string;
     listingUrl: string;
     setupNotes: string;
     lookupOptional: string;
@@ -41,6 +43,10 @@ export function StepSetup({
   onPriceLabelChange,
   layoutLabel,
   onLayoutLabelChange,
+  areaLabel,
+  onAreaLabelChange,
+  managementFeeLabel,
+  onManagementFeeLabelChange,
   listingUrl,
   onListingUrlChange,
   setupNotes,
@@ -64,6 +70,10 @@ export function StepSetup({
   onPriceLabelChange: (value: string) => void;
   layoutLabel: string;
   onLayoutLabelChange: (value: string) => void;
+  areaLabel: string;
+  onAreaLabelChange: (value: string) => void;
+  managementFeeLabel: string;
+  onManagementFeeLabelChange: (value: string) => void;
   listingUrl: string;
   onListingUrlChange: (value: string) => void;
   setupNotes: string;
@@ -176,6 +186,26 @@ export function StepSetup({
             <input
               value={layoutLabel}
               onChange={(event) => onLayoutLabelChange(event.target.value)}
+              className="mt-1.5 w-full h-[48px] px-3 rounded-2xl bg-[#F8F4EF] border border-black/5 text-[14px] outline-none focus:ring-2 focus:ring-black/10"
+            />
+          </label>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <label className="block">
+            <span className="text-[12px] font-bold text-[#374151]">{messages.setup.areaLabel}</span>
+            <input
+              value={areaLabel}
+              onChange={(event) => onAreaLabelChange(event.target.value)}
+              className="mt-1.5 w-full h-[48px] px-3 rounded-2xl bg-[#F8F4EF] border border-black/5 text-[14px] outline-none focus:ring-2 focus:ring-black/10"
+            />
+          </label>
+          <label className="block">
+            <span className="text-[12px] font-bold text-[#374151]">
+              {messages.setup.managementFeeLabel}
+            </span>
+            <input
+              value={managementFeeLabel}
+              onChange={(event) => onManagementFeeLabelChange(event.target.value)}
               className="mt-1.5 w-full h-[48px] px-3 rounded-2xl bg-[#F8F4EF] border border-black/5 text-[14px] outline-none focus:ring-2 focus:ring-black/10"
             />
           </label>

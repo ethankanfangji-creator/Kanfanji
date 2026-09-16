@@ -160,6 +160,8 @@ export function mirrorSetupIntoPropertyDraft(
     layoutLabel: string;
     listingUrl: string;
     setupNotes: string;
+    areaLabel?: string;
+    managementFeeLabel?: string;
   },
 ): Record<string, unknown> {
   return {
@@ -170,5 +172,7 @@ export function mirrorSetupIntoPropertyDraft(
     layoutLabel: setup.layoutLabel || null,
     listingUrl: setup.listingUrl || null,
     setupNotes: setup.setupNotes || null,
+    areaLabel: setup.areaLabel || null,
+    managementFeeLabel: setup.managementFeeLabel || null,
   };
 }

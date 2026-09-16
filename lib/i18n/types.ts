@@ -48,6 +48,8 @@ export type Messages = {
     unitLabel: string;
     priceLabel: string;
     layoutLabel: string;
+    areaLabel: string;
+    managementFeeLabel: string;
     listingUrl: string;
     setupNotes: string;
     lookupOptional: string;
@@ -80,12 +82,35 @@ export type Messages = {
     import: string;
     importHint: string;
     noteLabel: string;
+    stop: string;
+    cancel: string;
+    markerTitle: string;
+    markerHint: string;
+    markerListTitle: string;
+    markerEmpty: string;
+    markerEdit: string;
+    markerDelete: string;
+    markerNotePlaceholder: string;
+    markerSave: string;
+    markerPlay: string;
+    markerCooldown: string;
+    markerTags: Record<
+      "price" | "noise" | "leak" | "like" | "worry" | "follow_up" | "other",
+      string
+    >;
   };
   photos: {
     title: string;
     add: string;
     addSub: string;
     tip: string;
+    annotateTitle: string;
+    tagLabel: string;
+    noteLabel: string;
+    notePlaceholder: string;
+    saveAnnotation: string;
+    editAnnotation: string;
+    thumbHint: string;
   };
   video: {
     title: string;
@@ -95,12 +120,64 @@ export type Messages = {
     startSub: string;
     tip: string;
   };
+  permissions: {
+    titleMic: string;
+    titleCamera: string;
+    titlePhoto: string;
+    bodyMic: string;
+    bodyCamera: string;
+    bodyPhoto: string;
+    localNote: string;
+    continue: string;
+    cancel: string;
+    importInstead: string;
+    settingsHint: string;
+    busyElsewhere: string;
+    savedOnStop: string;
+    interruptedSaved: string;
+    status: {
+      granted: string;
+      prompt: string;
+      denied: string;
+      blocked: string;
+      unsupported: string;
+      "in-use": string;
+      "permission-revoked": string;
+    };
+  };
   share: {
     button: string;
     uploading: string;
     readyLoggedIn: string;
     readyGuest: string;
     needMore: string;
+  };
+  shareAccess: {
+    title: string;
+    statusLabel: string;
+    statusActive: string;
+    statusLocal: string;
+    statusNone: string;
+    statusRevoked: string;
+    statusExpired: string;
+    lastUpdated: string;
+    tokenOk: string;
+    expiry: string;
+    expirySave: string;
+    password: string;
+    passwordSave: string;
+    passwordClear: string;
+    passwordPlaceholder: string;
+    revoke: string;
+    rotate: string;
+    readOnly: string;
+    copyHint: string;
+    expiresAtLabel: string;
+    passwordOn: string;
+    passwordOff: string;
+    confirmRevoke: string;
+    busy: string;
+    errorGeneric: string;
   };
   loginGate: {
     title: string;
@@ -127,7 +204,9 @@ export type Messages = {
   card: {
     close: string;
     copy: string;
+    copyLink: string;
     share: string;
+    shareLink: string;
     pros: string;
     risks: string;
     qa: string;
@@ -137,6 +216,69 @@ export type Messages = {
     pending: string;
     byDialogue: string;
     byTag: string;
+    eyebrow: string;
+    address: string;
+    viewingAt: string;
+    basics: string;
+    unit: string;
+    price: string;
+    layout: string;
+    area: string;
+    managementFee: string;
+    listingUrl: string;
+    setupNotes: string;
+    rating: string;
+    ratingEmpty: string;
+    photos: string;
+    photoNote: string;
+    facts: string;
+    followUps: string;
+    actionItems: string;
+    emptySection: string;
+    selectHint: string;
+    disclaimer: string;
+    generatedAt: string;
+    localPreview: string;
+    syncedHint: string;
+    needSync: string;
+    privacyTitle: string;
+    privacyBody: string;
+    privacyAddress: string;
+    privacyPhotos: string;
+    privacyPersonal: string;
+    privacyConfirm: string;
+    privacyCancel: string;
+  };
+  pdfExport: {
+    button: string;
+    preparingImages: string;
+    generating: string;
+    success: string;
+    retry: string;
+    error: string;
+    imageError: string;
+    openFallback: string;
+    fileShareTitle: string;
+    page: string;
+  };
+  aiSummary: {
+    title: string;
+    facts: string;
+    pros: string;
+    risks: string;
+    followUps: string;
+    actionItems: string;
+    riskDisclaimer: string;
+    source: string;
+    edit: string;
+    delete: string;
+    empty: string;
+    confidence: {
+      high: string;
+      medium: string;
+      low: string;
+      needs_verification: string;
+    };
   };
   loginPage: {
     signInTitle: string;
@@ -158,6 +300,46 @@ export type Messages = {
     questions: string;
     media: string;
   };
+  compare: {
+    title: string;
+    subtitle: string;
+    selectMode: string;
+    cancelSelect: string;
+    startCompare: string;
+    selectHint: string;
+    selectRange: string;
+    loading: string;
+    notFound: string;
+    backToList: string;
+    backHome: string;
+    lastUpdated: string;
+    readOnlySource: string;
+    readOnlyShare: string;
+    empty: string;
+    price: string;
+    layout: string;
+    location: string;
+    area: string;
+    managementFee: string;
+    rating: string;
+    pros: string;
+    risks: string;
+    followUps: string;
+    notes: string;
+    includeInShare: string;
+    sortPrice: string;
+    sortRating: string;
+    sortRisks: string;
+    edit: string;
+    doneEdit: string;
+    share: string;
+    shareCopied: string;
+    shareHint: string;
+    shareMissingTitle: string;
+    shareMissingBody: string;
+    close: string;
+    error: string;
+  };
   language: {
     label: string;
   };
@@ -165,7 +347,42 @@ export type Messages = {
     ca: string[];
     th: string[];
   };
+  /** Localized labels for stable photo tag ids. */
+  photoTagLabels: Record<
+    | "living"
+    | "kitchen"
+    | "master_bedroom"
+    | "bathroom"
+    | "electrical_panel"
+    | "window"
+    | "balcony"
+    | "parking"
+    | "common_area"
+    | "exterior"
+    | "other",
+    string
+  >;
+  /** @deprecated Prefer photoTagLabels; kept for any legacy UI. */
   photoTags: string[];
+  fieldChecklist: {
+    title: string;
+    add: string;
+    addPlaceholder: string;
+    notePlaceholder: string;
+    labels: Record<
+      | "water_leak"
+      | "wall_crack"
+      | "window_fog"
+      | "light_air"
+      | "noise"
+      | "electrical_panel"
+      | "water_heater"
+      | "plumbing"
+      | "amenities"
+      | "parking",
+      string
+    >;
+  };
   clipLabels: string[];
   defaults: {
     pros: string[];

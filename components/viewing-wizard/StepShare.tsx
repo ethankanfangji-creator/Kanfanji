@@ -1,9 +1,17 @@
 "use client";
 
 import { Sparkles } from "lucide-react";
+import {
+  ShareAccessPanel,
+  type ShareAccessPanelLabels,
+} from "@/components/share-card/ShareAccessPanel";
 import { ShareReadinessList } from "./ShareReadiness";
 import type { SessionUiStatus } from "@/lib/sync";
-import type { ShareChecklistItem, ShareChecklistItemId } from "@/lib/viewing-wizard/readiness";
+import type { ShareLinkRecord } from "@/lib/share-access/types";
+import type {
+  ShareChecklistItem,
+  ShareChecklistItemId,
+} from "@/lib/viewing-wizard/readiness";
 
 export function StepShare({
   checklist,
@@ -18,6 +26,14 @@ export function StepShare({
   generateLabel,
   generateHint,
   onGenerate,
+  shareAccessLabels,
+  shareUrl,
+  hasShareToken,
+  shareLastUpdatedAt,
+  viewingId,
+  shareLink,
+  onCopyShareLink,
+  onShareLinkChanged,
 }: {
   checklist: ShareChecklistItem[];
   checklistLabels: Record<ShareChecklistItemId, string>;
@@ -38,6 +54,17 @@ export function StepShare({
   generateLabel: string;
   generateHint: string;
   onGenerate: () => void;
+  shareAccessLabels: ShareAccessPanelLabels;
+  shareUrl: string;
+  hasShareToken: boolean;
+  shareLastUpdatedAt: string | null;
+  viewingId: string | null;
+  shareLink: ShareLinkRecord | null;
+  onCopyShareLink?: () => void;
+  onShareLinkChanged: (next: {
+    link: ShareLinkRecord | null;
+    urlPath?: string;
+  }) => void;
 }) {
   const statusText = (() => {
     if (syncingCard) return syncLabels.syncing;
@@ -88,6 +115,18 @@ export function StepShare({
           <span className="font-medium text-[#374151]">{statusText}</span>
         </div>
       </div>
+
+      <ShareAccessPanel
+        labels={shareAccessLabels}
+        shareUrl={shareUrl}
+        hasToken={hasShareToken}
+        lastUpdatedAt={shareLastUpdatedAt}
+        synced={sessionUiStatus?.status === "synced"}
+        viewingId={viewingId}
+        link={shareLink}
+        onCopyLink={onCopyShareLink}
+        onLinkChanged={onShareLinkChanged}
+      />
 
       <button
         type="button"

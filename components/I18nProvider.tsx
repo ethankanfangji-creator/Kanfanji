@@ -42,8 +42,15 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const stored = readStoredLocale();
     const detected = detectLocale(navigator.language || navigator.languages?.[0]);
-    setLocaleState(stored ?? detected);
-    setReady(true);
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      setLocaleState(stored ?? detected);
+      setReady(true);
+    });
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {

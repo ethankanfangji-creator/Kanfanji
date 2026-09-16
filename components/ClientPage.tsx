@@ -20,14 +20,76 @@ import {
 import { ClientAuthBar } from "@/components/ClientAuthBar";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { SyncStatusBanner } from "@/components/SyncStatusBanner";
+import { MediaPermissionBanner } from "@/components/media/MediaPermissionBanner";
+import { PermissionPreflight } from "@/components/media/PermissionPreflight";
+import { AudioNotePlayer } from "@/components/media/AudioNotePlayer";
+import { RecordingMarkerBar } from "@/components/media/RecordingMarkerBar";
+import { FieldChecklistPanel } from "@/components/viewing-wizard/FieldChecklistPanel";
+import { PhotoAnnotator } from "@/components/viewing-wizard/PhotoAnnotator";
 import { StepSetup } from "@/components/viewing-wizard/StepSetup";
 import { StepShare } from "@/components/viewing-wizard/StepShare";
 import { WizardBottomNav, WizardStepper } from "@/components/viewing-wizard/WizardStepper";
+import { DecisionSummaryCard } from "@/components/share-card/DecisionSummaryCard";
+import { SharePrivacyCheck } from "@/components/share-card/SharePrivacyCheck";
+import { PdfExportButton } from "@/components/pdf/PdfExportButton";
 import { useI18n } from "@/components/I18nProvider";
+import {
+  buildCardFromViewing,
+  isDecisionSummarySnapshot,
+  setOverallRating,
+  togglePhotoSelection,
+  toggleTextSelection,
+  toPublicDecisionSummary,
+  updateTextItem,
+  type DecisionSummarySnapshot,
+} from "@/lib/share-card";
+import type { ShareLinkRecord } from "@/lib/share-access/types";
 import { bankQuestions } from "@/lib/i18n";
-import { emptyDraft, getActiveDraft, listMedia, putActiveDraft, putMedia, saveBlobAsMedia } from "@/lib/idb/draft-store";
+import {
+  attachMediaToMarkers,
+  canAddMarkerNow,
+  createAudioMarker,
+  removeAudioMarker,
+  serializeMarkersForAi,
+  updateAudioMarker,
+  type AudioMarker,
+  type AudioMarkerTagId,
+} from "@/lib/audio-markers";
+import {
+  claimsToLegacyStrings,
+  softDeleteClaim,
+  updateClaimText,
+  validateAndNormalizeSummary,
+  type ViewingAiSummary,
+} from "@/lib/ai-summary";
+import { AiSummaryPanel } from "@/components/media/AiSummaryPanel";
+import {
+  createCustomChecklistItem,
+  createImageThumbnail,
+  ensureFieldChecklist,
+  normalizePhotoTagId,
+  PHOTO_TAG_IDS,
+  type FieldChecklistItem,
+  type PhotoTagId,
+} from "@/lib/field-capture";
+import {
+  deleteMedia,
+  emptyDraft,
+  getActiveDraft,
+  getMedia,
+  listMedia,
+  putActiveDraft,
+  putMedia,
+  saveBlobAsMedia,
+  updateMediaFields,
+} from "@/lib/idb/draft-store";
 import { createEntityId } from "@/lib/draft-db";
 import { createSignedMediaUrl, extensionFor } from "@/lib/media";
+import {
+  createBrowserMediaPermissionAdapter,
+  type CaptureKind,
+  type MediaPermissionStatus,
+} from "@/lib/media-permissions";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 import { getSyncEngine, syncStatusToUi, type SessionUiStatus } from "@/lib/sync";
 import {
@@ -61,6 +123,7 @@ type AudioNote = {
   matched: number[];
   mediaId?: string;
   kind?: "transcript" | "text";
+  markers?: AudioMarker[];
 };
 
 type Clip = {
@@ -76,8 +139,13 @@ type Clip = {
 
 type Photo = {
   id: number;
+  /** Full-resolution object URL (lazy; used when expanded). */
   url?: string;
+  /** Thumbnail object URL for grid (preferred in list). */
+  thumbUrl?: string;
   tag: string;
+  tagId: PhotoTagId;
+  note: string;
   file?: File;
   mediaId?: string;
   remotePath?: string;
@@ -93,6 +161,8 @@ export function ClientPage() {
   const [unitLabel, setUnitLabel] = useState("");
   const [priceLabel, setPriceLabel] = useState("");
   const [layoutLabel, setLayoutLabel] = useState("");
+  const [areaLabel, setAreaLabel] = useState("");
+  const [managementFeeLabel, setManagementFeeLabel] = useState("");
   const [listingUrl, setListingUrl] = useState("");
   const [setupNotes, setSetupNotes] = useState("");
   const [textNoteDraft, setTextNoteDraft] = useState("");
@@ -101,6 +171,25 @@ export function ClientPage() {
   const [activeClipId, setActiveClipId] = useState<number | null>(null);
   const [expandedPhotoId, setExpandedPhotoId] = useState<number | null>(null);
   const [editingCard, setEditingCard] = useState(false);
+  const [fieldChecklist, setFieldChecklist] = useState<FieldChecklistItem[]>([]);
+  const [liveMarkers, setLiveMarkers] = useState<AudioMarker[]>([]);
+  const [aiSummary, setAiSummary] = useState<ViewingAiSummary | null>(null);
+  const [audioPlaybackUrls, setAudioPlaybackUrls] = useState<Record<number, string>>({});
+  const [annotatingPhotoId, setAnnotatingPhotoId] = useState<number | null>(null);
+  const [annotateTagId, setAnnotateTagId] = useState<PhotoTagId>("other");
+  const [annotateNote, setAnnotateNote] = useState("");
+  const [preflightKind, setPreflightKind] = useState<CaptureKind | null>(null);
+  const [preflightStatus, setPreflightStatus] = useState<MediaPermissionStatus | null>(null);
+  const [preflightBusy, setPreflightBusy] = useState(false);
+  const [permissionBanner, setPermissionBanner] = useState<{
+    status: MediaPermissionStatus;
+    message: string;
+  } | null>(null);
+  const [resumePendingAudio, setResumePendingAudio] = useState<{
+    mediaId: string;
+    durationSec: number;
+    markers?: AudioMarker[];
+  } | null>(null);
   const [lookingUp, setLookingUp] = useState(false);
   const [identified, setIdentified] = useState(false);
   const [tags, setTags] = useState<string[]>([]);
@@ -117,6 +206,12 @@ export function ClientPage() {
   const audioChunksRef = useRef<BlobPart[]>([]);
   const audioStreamRef = useRef<MediaStream | null>(null);
   const audioStartedAtRef = useRef(0);
+  const audioDiscardRef = useRef(false);
+  const audioMimeRef = useRef("audio/webm");
+  const markerCooldownRef = useRef(0);
+  const liveMarkersRef = useRef<AudioMarker[]>([]);
+  const captureLockRef = useRef<CaptureKind | null>(null);
+  const permissionAdapterRef = useRef(createBrowserMediaPermissionAdapter());
   const [clips, setClips] = useState<Clip[]>([]);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const photosRef = useRef<Photo[]>([]);
@@ -125,6 +220,9 @@ export function ClientPage() {
   const videoInput = useRef<HTMLInputElement>(null);
   const audioImportInput = useRef<HTMLInputElement>(null);
   const [showCard, setShowCard] = useState(false);
+  const [cardDraft, setCardDraft] = useState<DecisionSummarySnapshot | null>(null);
+  const [showPrivacyCheck, setShowPrivacyCheck] = useState(false);
+  const [privacyAction, setPrivacyAction] = useState<"copy" | "share" | null>(null);
   const [showLoginGate, setShowLoginGate] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
@@ -132,6 +230,7 @@ export function ClientPage() {
   const [viewingId, setViewingId] = useState<string | null>(null);
   const [shareToken, setShareToken] = useState<string | null>(null);
   const [shareUrl, setShareUrl] = useState("");
+  const [shareLink, setShareLink] = useState<ShareLinkRecord | null>(null);
   const [draftReady, setDraftReady] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
   const [sessionUiStatus, setSessionUiStatus] = useState<SessionUiStatus | null>(null);
@@ -159,8 +258,11 @@ export function ClientPage() {
       mimeType: string;
       createdAt: string;
       blob: Blob;
+      thumbBlob?: Blob | null;
       remotePath: string | null;
       uploadStatus: string;
+      tagId?: string;
+      note?: string;
     }>
   >([]);
   const draftSnapshotRef = useRef({
@@ -181,8 +283,13 @@ export function ClientPage() {
     unitLabel: "",
     priceLabel: "",
     layoutLabel: "",
+    areaLabel: "",
+    managementFeeLabel: "",
     listingUrl: "",
     setupNotes: "",
+    fieldChecklist: [] as FieldChecklistItem[],
+    liveAudioMarkers: [] as AudioMarker[],
+    aiSummary: null as ViewingAiSummary | null,
   });
 
   const configured = isSupabaseConfigured();
@@ -200,6 +307,35 @@ export function ClientPage() {
     });
     return () => subscription.unsubscribe();
   }, []);
+
+  // Load owner share-link metadata once a cloud viewing exists.
+  useEffect(() => {
+    if (!user || !viewingId || !configured) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/share/links?viewingId=${encodeURIComponent(viewingId)}`);
+        if (!res.ok || cancelled) return;
+        const payload = (await res.json()) as { link?: ShareLinkRecord | null };
+        if (cancelled) return;
+        if (payload.link) {
+          setShareLink(payload.link);
+          if (payload.link.token) {
+            setShareToken(payload.link.token);
+            setShareUrl(`${window.location.origin}/s/${payload.link.token}`);
+          } else if (payload.link.status === "revoked") {
+            setShareToken(null);
+            setShareUrl("");
+          }
+        }
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, viewingId, configured]);
 
   // Resume recoverable sync queue after login / page reopen (drain only; no silent create).
   useEffect(() => {
@@ -261,9 +397,15 @@ export function ClientPage() {
   useEffect(() => {
     const supabase = getSupabase();
     if (!supabase || !user) {
-      setFreeCount(0);
-      setIsPro(false);
-      return;
+      let active = true;
+      queueMicrotask(() => {
+        if (!active) return;
+        setFreeCount(0);
+        setIsPro(false);
+      });
+      return () => {
+        active = false;
+      };
     }
 
     let cancelled = false;
@@ -292,11 +434,18 @@ export function ClientPage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
+    let active = true;
     if (params.get("checkout") === "success") {
-      setIsPro(true);
-      setShowPaywall(false);
-      setSyncMessage("Pro 訂閱處理中，刷新後生效");
+      queueMicrotask(() => {
+        if (!active) return;
+        setIsPro(true);
+        setShowPaywall(false);
+        setSyncMessage("Pro 訂閱處理中，刷新後生效");
+      });
     }
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -310,6 +459,10 @@ export function ClientPage() {
   useEffect(() => {
     notesRef.current = notes;
   }, [notes]);
+
+  useEffect(() => {
+    liveMarkersRef.current = liveMarkers;
+  }, [liveMarkers]);
 
   // Keep latest draft fields for flush without stale closures.
   useEffect(() => {
@@ -331,8 +484,13 @@ export function ClientPage() {
       unitLabel,
       priceLabel,
       layoutLabel,
+      areaLabel,
+      managementFeeLabel,
       listingUrl,
       setupNotes,
+      fieldChecklist,
+      liveAudioMarkers: liveMarkers,
+      aiSummary,
     };
   }, [
     address,
@@ -351,8 +509,13 @@ export function ClientPage() {
     unitLabel,
     priceLabel,
     layoutLabel,
+    areaLabel,
+    managementFeeLabel,
     listingUrl,
     setupNotes,
+    fieldChecklist,
+    liveMarkers,
+    aiSummary,
   ]);
 
   async function ensureLocalSessionId(): Promise<string> {
@@ -409,6 +572,11 @@ export function ClientPage() {
       layoutLabel: string;
       listingUrl: string;
       setupNotes: string;
+      areaLabel: string;
+      managementFeeLabel: string;
+      fieldChecklist: FieldChecklistItem[];
+      liveAudioMarkers: AudioMarker[];
+      aiSummary: ViewingAiSummary | null;
     }>,
   ) {
     if (!draftHydratedRef.current) return;
@@ -423,14 +591,20 @@ export function ClientPage() {
       clientUpdatedAtRef.current = now;
       const localSessionId =
         snap.localSessionId || draftSessionIdRef.current || existing.localSessionId || null;
-      const propertyDraft = mirrorSetupIntoPropertyDraft(snap.propertyDraft, {
-        viewingAt: snap.viewingAt,
-        unitLabel: snap.unitLabel,
-        priceLabel: snap.priceLabel,
-        layoutLabel: snap.layoutLabel,
-        listingUrl: snap.listingUrl,
-        setupNotes: snap.setupNotes,
-      });
+      const propertyDraft = {
+        ...mirrorSetupIntoPropertyDraft(snap.propertyDraft, {
+          viewingAt: snap.viewingAt,
+          unitLabel: snap.unitLabel,
+          priceLabel: snap.priceLabel,
+          layoutLabel: snap.layoutLabel,
+          listingUrl: snap.listingUrl,
+          setupNotes: snap.setupNotes,
+          areaLabel: snap.areaLabel,
+          managementFeeLabel: snap.managementFeeLabel,
+        }),
+        fieldChecklist: snap.fieldChecklist,
+        aiSummary: snap.aiSummary,
+      };
       await putActiveDraft({
         ...existing,
         localSessionId,
@@ -455,6 +629,9 @@ export function ClientPage() {
         layoutLabel: snap.layoutLabel,
         listingUrl: snap.listingUrl,
         setupNotes: snap.setupNotes,
+        fieldChecklist: snap.fieldChecklist,
+        liveAudioMarkers: snap.liveAudioMarkers,
+        aiSummary: snap.aiSummary,
       });
       if (!sessionUiStatus || sessionUiStatus.status === "local_only" || !user) {
         setSessionUiStatus(syncStatusToUi(snap.viewingId && user ? "pending" : "local_only"));
@@ -564,13 +741,13 @@ export function ClientPage() {
       setSyncMessage("已上傳雲端 · 分享連結已就緒");
       if (options?.openCard) {
         setShowLoginGate(false);
-        setShowCard(true);
+        openDecisionCard();
       }
     } else if (ui?.status === "pending") {
       setSyncMessage("案件已建立，媒體上傳佇列處理中…");
       if (options?.openCard && session?.remoteViewingId) {
         setShowLoginGate(false);
-        setShowCard(true);
+        openDecisionCard();
       }
     }
 
@@ -623,25 +800,33 @@ export function ClientPage() {
             mimeType: row.mimeType,
             createdAt: row.createdAt,
             blob: row.blob,
+            thumbBlob: row.thumbBlob,
             remotePath: row.remotePath,
             uploadStatus: row.uploadStatus,
+            tagId: row.tagId,
+            note: row.note,
           }));
         pendingMediaRef.current = pending;
 
         const nextPhotos: Photo[] = pending
           .filter((row) => row.kind === "photo")
-          .map((row) => ({
-            id: row.clientNumericId,
-            tag: row.label,
-            mediaId: row.id,
-            remotePath: row.remotePath ?? undefined,
-            file:
-              row.uploadStatus === "uploaded"
-                ? undefined
-                : row.blob instanceof File
-                  ? row.blob
-                  : new File([row.blob], `${row.clientNumericId}.jpg`, { type: row.mimeType }),
-          }));
+          .map((row) => {
+            const tagId = normalizePhotoTagId(row.tagId);
+            return {
+              id: row.clientNumericId,
+              tag: row.label || messages.photoTagLabels[tagId],
+              tagId,
+              note: row.note || "",
+              mediaId: row.id,
+              remotePath: row.remotePath ?? undefined,
+              file:
+                row.uploadStatus === "uploaded"
+                  ? undefined
+                  : row.blob instanceof File
+                    ? row.blob
+                    : new File([row.blob], `${row.clientNumericId}.jpg`, { type: row.mimeType }),
+            };
+          });
         const nextClips: Clip[] = pending
           .filter((row) => row.kind === "video")
           .map((row) => ({
@@ -669,6 +854,7 @@ export function ClientPage() {
               draft.notes.map((note) => ({
                 ...note,
                 kind: note.kind === "text" ? "text" : note.kind === "transcript" ? "transcript" : undefined,
+                markers: Array.isArray(note.markers) ? note.markers : [],
               })),
             );
           }
@@ -707,6 +893,16 @@ export function ClientPage() {
                 ? draft.propertyDraft.layoutLabel
                 : ""),
           );
+          setAreaLabel(
+            typeof draft.propertyDraft?.areaLabel === "string"
+              ? draft.propertyDraft.areaLabel
+              : "",
+          );
+          setManagementFeeLabel(
+            typeof draft.propertyDraft?.managementFeeLabel === "string"
+              ? draft.propertyDraft.managementFeeLabel
+              : "",
+          );
           setListingUrl(
             draft.listingUrl ||
               (typeof draft.propertyDraft?.listingUrl === "string"
@@ -719,6 +915,20 @@ export function ClientPage() {
                 ? draft.propertyDraft.setupNotes
                 : ""),
           );
+          setFieldChecklist(
+            ensureFieldChecklist(draft.fieldChecklist, messages.fieldChecklist.labels),
+          );
+          if (draft.liveAudioMarkers?.length) {
+            setLiveMarkers(draft.liveAudioMarkers);
+          }
+          if (draft.aiSummary) {
+            setAiSummary(draft.aiSummary);
+          }
+          if (isDecisionSummarySnapshot(draft.propertyDraft?.decisionSummaryDraft)) {
+            setCardDraft(draft.propertyDraft.decisionSummaryDraft);
+          } else if (isDecisionSummarySnapshot(draft.propertyDraft?.decisionSummary)) {
+            setCardDraft(draft.propertyDraft.decisionSummary);
+          }
           setSessionUiStatus(
             syncStatusToUi(
               draft.syncStatus === "local" || draft.syncStatus === "pending_upload"
@@ -744,6 +954,15 @@ export function ClientPage() {
         }
         if (nextPhotos.length) setPhotos(nextPhotos);
         if (nextClips.length) setClips(nextClips);
+
+        const pendingAudio = draft?.pendingAudioProcess;
+        if (pendingAudio?.mediaId) {
+          setResumePendingAudio({
+            mediaId: pendingAudio.mediaId,
+            durationSec: pendingAudio.durationSec || 1,
+            markers: pendingAudio.markers,
+          });
+        }
       } catch (error) {
         if (!cancelled) {
           setSyncMessage(error instanceof Error ? error.message : "本機草稿讀取失敗");
@@ -767,7 +986,7 @@ export function ClientPage() {
     };
   }, []);
 
-  // Lazy-create object URLs / signed URLs when user reaches capture step.
+  // Lazy-create object URLs when user reaches capture step (thumbs first for photos).
   useEffect(() => {
     if (wizardStep < 2 || mediaUrlsReadyRef.current) return;
     if (pendingMediaRef.current.length === 0) {
@@ -777,27 +996,39 @@ export function ClientPage() {
     let cancelled = false;
     void (async () => {
       const pending = pendingMediaRef.current;
-      const photoUrls = new Map<number, string>();
+      const photoThumbs = new Map<number, string>();
+      const photoFull = new Map<number, string>();
       const clipUrls = new Map<number, string>();
       for (const row of pending) {
-        const localUrl = URL.createObjectURL(row.blob);
-        let url = localUrl;
-        if (row.remotePath) {
-          url = (await createSignedMediaUrl(row.remotePath)) || localUrl;
+        if (cancelled) return;
+        if (row.kind === "photo") {
+          if (row.thumbBlob) {
+            photoThumbs.set(row.clientNumericId, URL.createObjectURL(row.thumbBlob));
+          }
+          // Defer full URL until expand — still create if no thumb so grid works.
+          if (!row.thumbBlob) {
+            const localUrl = URL.createObjectURL(row.blob);
+            const url = row.remotePath
+              ? (await createSignedMediaUrl(row.remotePath)) || localUrl
+              : localUrl;
+            photoFull.set(row.clientNumericId, url);
+          }
+        } else {
+          const localUrl = URL.createObjectURL(row.blob);
+          const url = row.remotePath
+            ? (await createSignedMediaUrl(row.remotePath)) || localUrl
+            : localUrl;
+          clipUrls.set(row.clientNumericId, url);
         }
-        if (cancelled) {
-          URL.revokeObjectURL(localUrl);
-          return;
-        }
-        if (row.kind === "photo") photoUrls.set(row.clientNumericId, url);
-        else clipUrls.set(row.clientNumericId, url);
       }
       if (cancelled) return;
       mediaUrlsReadyRef.current = true;
       setPhotos((current) =>
-        current.map((photo) =>
-          photo.url ? photo : { ...photo, url: photoUrls.get(photo.id) ?? photo.url },
-        ),
+        current.map((photo) => ({
+          ...photo,
+          thumbUrl: photo.thumbUrl || photoThumbs.get(photo.id) || photo.thumbUrl,
+          url: photo.url || photoFull.get(photo.id) || photo.url,
+        })),
       );
       setClips((current) =>
         current.map((clip) =>
@@ -837,9 +1068,37 @@ export function ClientPage() {
     unitLabel,
     priceLabel,
     layoutLabel,
+    areaLabel,
+    managementFeeLabel,
     listingUrl,
     setupNotes,
+    fieldChecklist,
+    liveMarkers,
+    aiSummary,
   ]);
+
+  // After hydrate, resume Whisper for audio that was saved but not processed.
+  useEffect(() => {
+    if (!draftReady || !resumePendingAudio) return;
+    let cancelled = false;
+    void (async () => {
+      const row = await getMedia(resumePendingAudio.mediaId);
+      if (cancelled) return;
+      setResumePendingAudio(null);
+      if (!row?.blob) return;
+      setSyncMessage("發現未完成的錄音，正在繼續分析…");
+      await processRecording(
+        row.blob,
+        resumePendingAudio.durationSec,
+        resumePendingAudio.mediaId,
+        resumePendingAudio.markers,
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftReady, resumePendingAudio]);
 
   useEffect(() => {
     if (audioState === "recording") {
@@ -851,6 +1110,25 @@ export function ClientPage() {
       if (audioTimer.current) clearInterval(audioTimer.current);
     };
   }, [audioState]);
+
+  // Save in-progress audio on background / lock / navigation away.
+  useEffect(() => {
+    function persistIfRecording() {
+      if (audioRecorderRef.current && audioRecorderRef.current.state === "recording") {
+        finishAudioRecorder({ discard: false, interrupted: true });
+      }
+    }
+    function onVisibility() {
+      if (document.visibilityState === "hidden") persistIfRecording();
+    }
+    window.addEventListener("pagehide", persistIfRecording);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", persistIfRecording);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -864,22 +1142,29 @@ export function ClientPage() {
       ...q,
       checked: false,
     }));
-    setQuestions((current) => {
-      const keep = current.filter((q) => q.isDynamic || q.isFollowUp || q.answer);
-      if (keep.length === 0) return nextBank;
-      const texts = new Set(keep.map((q) => q.text.toLowerCase()));
-      return [...keep, ...nextBank.filter((q) => !texts.has(q.text.toLowerCase()))];
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      setQuestions((current) => {
+        const keep = current.filter((q) => q.isDynamic || q.isFollowUp || q.answer);
+        if (keep.length === 0) return nextBank;
+        const texts = new Set(keep.map((q) => q.text.toLowerCase()));
+        return [...keep, ...nextBank.filter((q) => !texts.has(q.text.toLowerCase()))];
+      });
+      setPros((current) =>
+        current.length === 0 || current.join("|") === messages.defaults.pros.join("|")
+          ? messages.defaults.pros
+          : current,
+      );
+      setRisks((current) =>
+        current.length === 0 || current.join("|") === messages.defaults.risks.join("|")
+          ? messages.defaults.risks
+          : current,
+      );
     });
-    setPros((current) =>
-      current.length === 0 || current.join("|") === messages.defaults.pros.join("|")
-        ? messages.defaults.pros
-        : current,
-    );
-    setRisks((current) =>
-      current.length === 0 || current.join("|") === messages.defaults.risks.join("|")
-        ? messages.defaults.risks
-        : current,
-    );
+    return () => {
+      active = false;
+    };
     // Only react to locale; market/messages follow locale switch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locale]);
@@ -892,13 +1177,40 @@ export function ClientPage() {
     }));
   }
 
-  async function processRecording(blob: Blob, duration: number) {
+  async function processRecording(blob: Blob, duration: number, existingMediaId?: string, markersInput?: AudioMarker[]) {
     setAudioState("processing");
     setSyncMessage("Whisper 轉文字中...");
 
     const bank = activeQuestionBank();
     if (questions.length === 0) {
       setQuestions(bank);
+    }
+
+    let mediaId = existingMediaId;
+    if (!mediaId) {
+      try {
+        const saved = await saveBlobAsMedia({
+          kind: "audio",
+          label: `recording-${Date.now()}`,
+          blob,
+          clientNumericId: Date.now(),
+        });
+        mediaId = saved.id;
+        const draft = await getActiveDraft();
+        if (draft) {
+          await putActiveDraft({
+            ...draft,
+            pendingAudioProcess: {
+              mediaId: saved.id,
+              clientNumericId: saved.clientNumericId,
+              durationSec: duration,
+              createdAt: new Date().toISOString(),
+            },
+          });
+        }
+      } catch {
+        // Prefer continuing Whisper even if IDB write fails.
+      }
     }
 
     try {
@@ -926,6 +1238,13 @@ export function ClientPage() {
           city: propertyDraft.city,
         }),
       );
+      const markersForAi = attachMediaToMarkers(
+        markersInput ?? liveMarkersRef.current,
+        mediaId || "",
+        draftSessionIdRef.current,
+      );
+      form.append("markers", JSON.stringify(serializeMarkersForAi(markersForAi)));
+      if (mediaId) form.append("mediaId", mediaId);
 
       const response = await fetch("/api/process-recording", {
         method: "POST",
@@ -933,6 +1252,9 @@ export function ClientPage() {
       });
       const payload = (await response.json()) as {
         error?: string;
+        code?: string;
+        issues?: Array<{ path: string; message: string }>;
+        warnings?: Array<{ path: string; message: string }>;
         transcript?: string;
         answers?: Array<{ id: number; status: "answered" | "pending"; answer: string }>;
         new_questions?: Array<{
@@ -944,38 +1266,59 @@ export function ClientPage() {
         }>;
         pros?: string[];
         risks?: string[];
+        summary?: ViewingAiSummary;
       };
 
       if (!response.ok) {
-        throw new Error(payload.error || "錄音處理失敗");
+        const detail =
+          payload.issues?.slice(0, 2).map((i) => i.message).join("；") ||
+          payload.error ||
+          "錄音處理失敗";
+        throw new Error(detail);
       }
 
-      const transcript = payload.transcript || "";
+      const noteId = Date.now();
+      const normalized = validateAndNormalizeSummary(
+        {
+          transcript: payload.transcript,
+          pros: payload.summary?.pros ?? payload.pros,
+          risks: payload.summary?.risks ?? payload.risks,
+          facts: payload.summary?.facts,
+          followUps: payload.summary?.followUps,
+          actionItems: payload.summary?.actionItems,
+          summary: payload.summary,
+          answers: payload.answers,
+          new_questions: payload.new_questions,
+        },
+        { mediaId: mediaId ?? null, noteId },
+      );
+
+      if (!normalized.ok) {
+        throw new Error(normalized.error);
+      }
+
+      const summary = {
+        ...normalized.value,
+        noteId,
+        mediaId: mediaId ?? null,
+      };
+      setAiSummary(summary);
+
+      const transcript = summary.transcript || payload.transcript || "";
       const matched =
         payload.answers
           ?.filter((item) => item.status === "answered")
           .map((item) => item.id) ?? [];
       const generated = payload.new_questions ?? [];
 
-      let mediaId: string | undefined;
-      try {
-        const saved = await saveBlobAsMedia({
-          kind: "audio",
-          label: `recording-${Date.now()}`,
-          blob,
-          clientNumericId: Date.now(),
-        });
-        mediaId = saved.id;
-      } catch {
-        // Audio blob persist is best-effort; transcript still kept.
-      }
-
       const nextNote: AudioNote = {
-        id: Date.now(),
+        id: noteId,
         duration,
         transcript,
         matched,
         mediaId,
+        kind: "transcript",
+        markers: markersForAi,
       };
       const nextNotes = [...notesRef.current, nextNote];
       notesRef.current = nextNotes;
@@ -1008,6 +1351,8 @@ export function ClientPage() {
             answer: item.answer || (item.status === "answered" ? "" : "待確認"),
             isFollowUp: true,
             basedOn: item.based_on || item.reason || "",
+            isDynamic: true,
+            source: "audio",
           });
           nextId += 1;
         }
@@ -1016,24 +1361,34 @@ export function ClientPage() {
         return nextQuestions;
       });
 
-      const nextPros = payload.pros?.length ? payload.pros.slice(0, 3) : pros;
-      const nextRisks = payload.risks?.length ? payload.risks.slice(0, 3) : risks;
-      if (payload.pros?.length) setPros(nextPros);
-      if (payload.risks?.length) setRisks(nextRisks);
+      const nextPros = claimsToLegacyStrings(summary.pros, 5);
+      const nextRisks = claimsToLegacyStrings(summary.risks, 5);
+      if (nextPros.length) setPros(nextPros);
+      if (nextRisks.length) setRisks(nextRisks);
+
+      const draft = await getActiveDraft();
+      if (draft?.pendingAudioProcess) {
+        await putActiveDraft({ ...draft, pendingAudioProcess: null, aiSummary: summary });
+      }
 
       await flushDraftToIdb({
         notes: nextNotes,
         questions: nextQuestions.length ? nextQuestions : questions,
-        pros: nextPros,
-        risks: nextRisks,
+        pros: nextPros.length ? nextPros : pros,
+        risks: nextRisks.length ? nextRisks : risks,
+        aiSummary: summary,
       });
 
-      const followUpCount = generated.length;
+      const followUpCount = generated.length || summary.followUps.length;
       const pendingCount =
         (payload.answers?.filter((item) => item.status === "pending").length ?? 0) +
         generated.filter((item) => item.status !== "answered").length;
+      const warn =
+        (payload.warnings?.length ?? 0) > 0 || normalized.warnings.length > 0
+          ? " · 部分欄位已自動校正"
+          : "";
       setSyncMessage(
-        `AI 已整理：答到 ${matched.length} 題，新增 ${followUpCount} 個追問，${pendingCount} 題待確認 · 已存本機`,
+        `AI 已整理：答到 ${matched.length} 題，新增 ${followUpCount} 個追問，${pendingCount} 題待確認 · 已存本機${warn}`,
       );
       setCaptureError(false);
     } catch (error) {
@@ -1042,56 +1397,304 @@ export function ClientPage() {
     } finally {
       setAudioState("idle");
       setAudioSeconds(0);
+      captureLockRef.current = null;
+      setLiveMarkers([]);
+      void flushDraftToIdb({ liveAudioMarkers: [] });
     }
   }
 
-  async function toggleAudio() {
-    if (audioState === "processing") return;
-
-    if (audioState === "idle") {
+  function finishAudioRecorder(options: { discard: boolean; interrupted?: boolean }) {
+    audioDiscardRef.current = options.discard;
+    const recorder = audioRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        audioStreamRef.current = stream;
-        audioChunksRef.current = [];
-        const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-          ? "audio/webm;codecs=opus"
-          : MediaRecorder.isTypeSupported("audio/webm")
-            ? "audio/webm"
-            : "audio/mp4";
-        const recorder = new MediaRecorder(stream, { mimeType: mime });
-        recorder.ondataavailable = (event) => {
-          if (event.data.size) audioChunksRef.current.push(event.data);
-        };
-        recorder.onstop = () => {
-          stream.getTracks().forEach((track) => track.stop());
-          audioStreamRef.current = null;
-          audioRecorderRef.current = null;
-          const blob = new Blob(audioChunksRef.current, {
-            type: recorder.mimeType || mime,
-          });
-          const duration = Math.max(
-            1,
-            Math.round((Date.now() - audioStartedAtRef.current) / 1000),
-          );
-          void processRecording(blob, duration);
-        };
-        audioRecorderRef.current = recorder;
-        audioStartedAtRef.current = Date.now();
-        recorder.start();
-        setAudioSeconds(0);
-        setAudioState("recording");
-        setSyncMessage("正在錄音...");
+        recorder.requestData?.();
       } catch {
-        setSyncMessage("無法開啟麥克風，請檢查權限");
+        // optional
+      }
+      recorder.stop();
+      if (options.interrupted) {
+        setSyncMessage(messages.permissions.interruptedSaved);
       }
       return;
     }
+    permissionAdapterRef.current.release(audioStreamRef.current);
+    audioStreamRef.current = null;
+    audioRecorderRef.current = null;
+    setAudioState("idle");
+    captureLockRef.current = null;
+  }
 
-    if (audioRecorderRef.current && audioRecorderRef.current.state !== "inactive") {
-      audioRecorderRef.current.stop();
-    } else {
-      setAudioState("idle");
+  async function persistAndProcessAudioBlob(blob: Blob, duration: number, interrupted?: boolean) {
+    const clientNumericId = Date.now();
+    let mediaId: string | undefined;
+    const markers = attachMediaToMarkers(
+      liveMarkersRef.current,
+      "",
+      draftSessionIdRef.current,
+    );
+    try {
+      const saved = await saveBlobAsMedia({
+        kind: "audio",
+        label: `recording-${clientNumericId}`,
+        blob,
+        clientNumericId,
+      });
+      mediaId = saved.id;
+      const withMedia = attachMediaToMarkers(markers, saved.id, draftSessionIdRef.current);
+      await updateMediaFields(saved.id, { markers: withMedia });
+      const draft = await getActiveDraft();
+      if (draft) {
+        await putActiveDraft({
+          ...draft,
+          pendingAudioProcess: {
+            mediaId: saved.id,
+            clientNumericId,
+            durationSec: duration,
+            createdAt: new Date().toISOString(),
+            markers: withMedia,
+          },
+          liveAudioMarkers: withMedia,
+        });
+      }
+      setLiveMarkers(withMedia);
+      setSyncMessage(
+        interrupted ? messages.permissions.interruptedSaved : messages.permissions.savedOnStop,
+      );
+    } catch (error) {
+      setSyncMessage(error instanceof Error ? error.message : "錄音本機儲存失敗");
     }
+    await processRecording(blob, duration, mediaId, markers);
+  }
+
+
+  function addLiveMarker(tagId: AudioMarkerTagId) {
+    if (audioState !== "recording") return;
+    const now = Date.now();
+    if (!canAddMarkerNow(markerCooldownRef.current, now)) {
+      setSyncMessage(messages.audio.markerCooldown);
+      return;
+    }
+    markerCooldownRef.current = now;
+    const marker = createAudioMarker({
+      timeSec: Math.max(0, (now - audioStartedAtRef.current) / 1000),
+      tagId,
+      viewingSessionId: draftSessionIdRef.current,
+    });
+    setLiveMarkers((current) => {
+      const next = [...current, marker];
+      liveMarkersRef.current = next;
+      void flushDraftToIdb({ liveAudioMarkers: next });
+      return next;
+    });
+  }
+
+  function updateNoteMarkers(noteId: number, nextMarkers: AudioMarker[]) {
+    const existing = notesRef.current.find((item) => item.id === noteId);
+    setNotes((current) => {
+      const next = current.map((note) =>
+        note.id === noteId ? { ...note, markers: nextMarkers } : note,
+      );
+      notesRef.current = next;
+      return next;
+    });
+    if (existing?.mediaId) {
+      void updateMediaFields(existing.mediaId, { markers: nextMarkers });
+    }
+    void flushDraftToIdb();
+  }
+
+  async function ensureAudioPlaybackUrl(note: AudioNote) {
+    if (note.kind === "text" || !note.mediaId) return;
+    if (audioPlaybackUrls[note.id]) return;
+    const row = await getMedia(note.mediaId);
+    if (!row?.blob) return;
+    const url = URL.createObjectURL(row.blob);
+    setAudioPlaybackUrls((current) => ({ ...current, [note.id]: url }));
+  }
+
+  async function beginAudioRecording() {
+    const adapter = permissionAdapterRef.current;
+    if (!adapter.isMediaDevicesSupported() || !adapter.isMediaRecorderSupported()) {
+      setPermissionBanner({
+        status: "unsupported",
+        message: messages.permissions.status.unsupported,
+      });
+      setPreflightStatus("unsupported");
+      return;
+    }
+    if (captureLockRef.current && captureLockRef.current !== "audio") {
+      setSyncMessage(messages.permissions.busyElsewhere);
+      return;
+    }
+
+    setPreflightBusy(true);
+    const prior = await adapter.query("microphone");
+    setPreflightStatus(prior);
+    const result = await adapter.request("microphone", { audio: true });
+    setPreflightBusy(false);
+
+    if (!result.ok) {
+      setPreflightStatus(result.status);
+      setPermissionBanner({
+        status: result.status,
+        message: messages.permissions.status[result.status],
+      });
+      return;
+    }
+
+    try {
+      captureLockRef.current = "audio";
+      audioDiscardRef.current = false;
+      setLiveMarkers([]);
+      liveMarkersRef.current = [];
+      markerCooldownRef.current = 0;
+      void flushDraftToIdb({ liveAudioMarkers: [] });
+      const stream = result.stream;
+      audioStreamRef.current = stream;
+      audioChunksRef.current = [];
+      const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : MediaRecorder.isTypeSupported("audio/webm")
+          ? "audio/webm"
+          : MediaRecorder.isTypeSupported("audio/mp4")
+            ? "audio/mp4"
+            : "";
+      audioMimeRef.current = mime || "audio/webm";
+      const recorder = mime
+        ? new MediaRecorder(stream, { mimeType: mime })
+        : new MediaRecorder(stream);
+      recorder.ondataavailable = (event) => {
+        if (event.data.size) audioChunksRef.current.push(event.data);
+      };
+      recorder.onerror = () => {
+        setPermissionBanner({
+          status: "permission-revoked",
+          message: messages.permissions.status["permission-revoked"],
+        });
+        finishAudioRecorder({ discard: false, interrupted: true });
+      };
+      recorder.onstop = () => {
+        const discard = audioDiscardRef.current;
+        adapter.release(stream);
+        audioStreamRef.current = null;
+        audioRecorderRef.current = null;
+        const blob = new Blob(audioChunksRef.current, {
+          type: recorder.mimeType || audioMimeRef.current,
+        });
+        audioChunksRef.current = [];
+        if (discard || blob.size === 0) {
+          setAudioState("idle");
+          setAudioSeconds(0);
+          captureLockRef.current = null;
+          setLiveMarkers([]);
+          void flushDraftToIdb({ liveAudioMarkers: [] });
+          setSyncMessage(discard ? messages.audio.cancel : messages.permissions.status.denied);
+          return;
+        }
+        const duration = Math.max(
+          1,
+          Math.round((Date.now() - audioStartedAtRef.current) / 1000),
+        );
+        void persistAndProcessAudioBlob(blob, duration);
+      };
+      for (const track of stream.getTracks()) {
+        track.addEventListener("ended", () => {
+          if (audioRecorderRef.current && audioRecorderRef.current.state === "recording") {
+            setPermissionBanner({
+              status: "permission-revoked",
+              message: messages.permissions.status["permission-revoked"],
+            });
+            finishAudioRecorder({ discard: false, interrupted: true });
+          }
+        });
+      }
+      audioRecorderRef.current = recorder;
+      audioStartedAtRef.current = Date.now();
+      recorder.start(1000);
+      setAudioSeconds(0);
+      setAudioState("recording");
+      setPreflightKind(null);
+      setPermissionBanner(null);
+      setSyncMessage(messages.audio.recording);
+    } catch (error) {
+      adapter.release(result.stream);
+      captureLockRef.current = null;
+      setPermissionBanner({
+        status: "unsupported",
+        message: error instanceof Error ? error.message : messages.permissions.status.unsupported,
+      });
+    }
+  }
+
+  async function openCapturePreflight(kind: CaptureKind) {
+    if (audioState === "recording" || audioState === "processing") {
+      setSyncMessage(messages.permissions.busyElsewhere);
+      return;
+    }
+    if (captureLockRef.current) {
+      setSyncMessage(messages.permissions.busyElsewhere);
+      return;
+    }
+    const adapter = permissionAdapterRef.current;
+    setPreflightKind(kind);
+    setPreflightBusy(true);
+    if (kind === "audio") {
+      if (!adapter.isMediaDevicesSupported() || !adapter.isMediaRecorderSupported()) {
+        setPreflightStatus("unsupported");
+      } else {
+        setPreflightStatus(await adapter.query("microphone"));
+      }
+    } else if (kind === "video") {
+      if (!adapter.isMediaDevicesSupported()) {
+        setPreflightStatus("unsupported");
+      } else {
+        setPreflightStatus(await adapter.query("camera"));
+      }
+    } else {
+      setPreflightStatus(adapter.isMediaDevicesSupported() ? "prompt" : "unsupported");
+    }
+    setPreflightBusy(false);
+  }
+
+  async function onPreflightContinue() {
+    if (!preflightKind) return;
+    if (preflightKind === "audio") {
+      await beginAudioRecording();
+      return;
+    }
+    const kind = preflightKind;
+    setPreflightKind(null);
+    setPermissionBanner(null);
+    if (kind === "video") {
+      captureLockRef.current = "video";
+      videoInput.current?.click();
+      // Release lock shortly if user cancels the picker without a file.
+      window.setTimeout(() => {
+        if (captureLockRef.current === "video") captureLockRef.current = null;
+      }, 1500);
+      return;
+    }
+    captureLockRef.current = "photo";
+    photoInput.current?.click();
+    window.setTimeout(() => {
+      if (captureLockRef.current === "photo") captureLockRef.current = null;
+    }, 1500);
+  }
+
+  function onPreflightImport() {
+    const kind = preflightKind;
+    setPreflightKind(null);
+    if (kind === "audio") {
+      audioImportInput.current?.click();
+      return;
+    }
+    if (kind === "video") {
+      // Same file input without forcing capture path again — user can pick gallery file.
+      videoInput.current?.click();
+      return;
+    }
+    photoInput.current?.click();
   }
 
   function readAudioDuration(file: Blob): Promise<number> {
@@ -1116,8 +1719,8 @@ export function ClientPage() {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-    if (audioState === "recording" || audioState === "processing") {
-      setSyncMessage("請先結束目前錄音再匯入");
+    if (audioState === "recording" || audioState === "processing" || captureLockRef.current) {
+      setSyncMessage(messages.permissions.busyElsewhere);
       return;
     }
 
@@ -1218,9 +1821,53 @@ export function ClientPage() {
     setSyncingCard(true);
     setSyncMessage("正在上傳看房資料...");
     try {
-      await syncViaQueue({ openCard: true });
+      // Build share snapshot before sync so cloud property jsonb carries decisionSummary.
+      // On failure, source pros/risks/aiSummary and in-memory cardDraft remain intact.
+      const next = rebuildCardDraft(cardDraft);
+      setCardDraft(next);
+      const publicSnap = toPublicDecisionSummary(next);
+      const nextPropertyDraft = {
+        ...propertyDraft,
+        decisionSummary: publicSnap,
+        decisionSummaryDraft: next,
+        overallRating: next.overallRating,
+      };
+      setPropertyDraft(nextPropertyDraft);
+      draftSnapshotRef.current = {
+        ...draftSnapshotRef.current,
+        propertyDraft: nextPropertyDraft,
+      };
+      const synced = await syncViaQueue({ openCard: true });
+      const remoteId =
+        (synced && "remoteViewingId" in synced && synced.remoteViewingId) ||
+        viewingId ||
+        draftSnapshotRef.current.viewingId;
+      if (remoteId && user) {
+        try {
+          const res = await fetch("/api/share/links", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ viewingId: remoteId }),
+          });
+          const payload = (await res.json()) as {
+            link?: ShareLinkRecord;
+            urlPath?: string;
+          };
+          if (res.ok && payload.link) {
+            setShareLink(payload.link);
+            if (payload.link.token) {
+              setShareToken(payload.link.token);
+              setShareUrl(`${window.location.origin}/s/${payload.link.token}`);
+            }
+          }
+        } catch {
+          // share access ensure is best-effort after sync
+        }
+      }
     } catch (error) {
       setSyncMessage(error instanceof Error ? error.message : "上傳失敗");
+      // Still allow local preview — original field data is untouched.
+      openDecisionCard();
       throw error;
     } finally {
       setSyncingCard(false);
@@ -1259,7 +1906,7 @@ export function ClientPage() {
       return;
     }
     if (!configured) {
-      setShowCard(true);
+      openDecisionCard();
       return;
     }
     if (!user) {
@@ -1297,6 +1944,13 @@ export function ClientPage() {
     }
     if (target === 2 && questions.length === 0) {
       setQuestions(bankQuestions(locale, marketCode).map((q) => ({ ...q, checked: false })));
+    }
+    if (target === 2 && fieldChecklist.length === 0) {
+      const seeded = ensureFieldChecklist([], messages.fieldChecklist.labels);
+      setFieldChecklist(seeded);
+      void flushDraftToIdb({ wizardStep: target, fieldChecklist: seeded });
+      setWizardStep(target);
+      return;
     }
     setWizardStep(target);
     void flushDraftToIdb({ wizardStep: target });
@@ -1461,12 +2115,13 @@ export function ClientPage() {
 
   function openNativeCamera() {
     if (clips.length >= 4) return;
-    videoInput.current?.click();
+    void openCapturePreflight("video");
   }
 
   async function onVideoFiles(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
+    captureLockRef.current = null;
     if (!file) return;
     await persistClip(file, messages.clipLabels[clips.length % messages.clipLabels.length]);
   }
@@ -1474,10 +2129,14 @@ export function ClientPage() {
   async function onPhotos(event: React.ChangeEvent<HTMLInputElement>) {
     const files = event.target.files;
     event.target.value = "";
+    captureLockRef.current = null;
     if (!files) return;
 
     const incomingFiles = Array.from(files).slice(0, 5 - photos.length);
     const incoming: Photo[] = [];
+    const defaultTagId: PhotoTagId = "other";
+    const defaultTag = messages.photoTagLabels[defaultTagId];
+
     for (let index = 0; index < incomingFiles.length; index += 1) {
       const file = incomingFiles[index];
       const clientNumericId = Date.now() + index;
@@ -1485,7 +2144,9 @@ export function ClientPage() {
       try {
         const saved = await saveBlobAsMedia({
           kind: "photo",
-          label: messages.photoTags[photos.length + index] || "現場",
+          label: defaultTag,
+          tagId: defaultTagId,
+          note: "",
           blob: file,
           clientNumericId,
         });
@@ -1495,15 +2156,55 @@ export function ClientPage() {
       }
       incoming.push({
         id: clientNumericId,
-        url: URL.createObjectURL(file),
-        tag: messages.photoTags[photos.length + index] || "現場",
+        tag: defaultTag,
+        tagId: defaultTagId,
+        note: "",
         file,
         mediaId,
       });
     }
     setPhotos((current) => [...current, ...incoming]);
     await flushDraftToIdb();
-    setSyncMessage("照片已存本機 · AI 分析風險中...");
+    setSyncMessage("照片原圖已存本機 · 正在產生縮圖");
+
+    const schedule =
+      typeof requestIdleCallback === "function"
+        ? (cb: () => void) => requestIdleCallback(() => cb(), { timeout: 1200 })
+        : (cb: () => void) => window.setTimeout(cb, 0);
+    for (const photo of incoming) {
+      schedule(() => {
+        void (async () => {
+          if (!photo.file) return;
+          const thumb = await createImageThumbnail(photo.file);
+          if (!thumb) {
+            const url = URL.createObjectURL(photo.file);
+            setPhotos((current) =>
+              current.map((item) =>
+                item.id === photo.id ? { ...item, thumbUrl: url, url } : item,
+              ),
+            );
+            return;
+          }
+          const thumbUrl = URL.createObjectURL(thumb.blob);
+          setPhotos((current) =>
+            current.map((item) => (item.id === photo.id ? { ...item, thumbUrl } : item)),
+          );
+          if (photo.mediaId) {
+            await updateMediaFields(photo.mediaId, {
+              thumbBlob: thumb.blob,
+              thumbMimeType: thumb.mimeType,
+            });
+          }
+        })();
+      });
+    }
+
+    const first = incoming[0];
+    if (first) {
+      setAnnotatingPhotoId(first.id);
+      setAnnotateTagId(first.tagId);
+      setAnnotateNote(first.note);
+    }
 
     const fileToDataUrl = (file: File) =>
       new Promise<string>((resolve, reject) => {
@@ -1513,91 +2214,268 @@ export function ClientPage() {
         reader.readAsDataURL(file);
       });
 
-    const results = await Promise.allSettled(
-      incoming.map(async (photo) => {
-        if (!photo.file) return null;
-        const base64 = await fileToDataUrl(photo.file);
-        const response = await fetch("/api/vision", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ base64, tag: photo.tag, locale }),
+    void (async () => {
+      setSyncMessage("照片已存本機 · AI 分析風險中...");
+      const results = await Promise.allSettled(
+        incoming.map(async (photo) => {
+          if (!photo.file) return null;
+          const base64 = await fileToDataUrl(photo.file);
+          const live = photosRef.current.find((p) => p.id === photo.id);
+          const tag = live?.tag || photo.tag;
+          const response = await fetch("/api/vision", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ base64, tag, locale }),
+          });
+          const payload = (await response.json()) as { question?: string; error?: string };
+          if (!response.ok || !payload.question) {
+            throw new Error(payload.error || "Vision 失敗");
+          }
+          return { text: payload.question.trim(), tag };
+        }),
+      );
+
+      const generated = results
+        .filter(
+          (r): r is PromiseFulfilledResult<{ text: string; tag: string } | null> =>
+            r.status === "fulfilled",
+        )
+        .map((r) => r.value)
+        .filter((v): v is { text: string; tag: string } => Boolean(v?.text));
+
+      if (generated.length > 0) {
+        setQuestions((current) => {
+          const base =
+            current.length > 0
+              ? current
+              : bankQuestions(locale, marketCode).map((q) => ({
+                  ...q,
+                  checked: false,
+                }));
+          const existing = new Set(base.map((q) => q.text.trim().toLowerCase()));
+          let nextId = base.reduce((max, q) => Math.max(max, q.id), 0) + 1;
+          const extras: Question[] = [];
+          for (const item of generated) {
+            const text = item.text.trim();
+            if (!text || existing.has(text.toLowerCase())) continue;
+            existing.add(text.toLowerCase());
+            extras.push({
+              id: nextId,
+              text,
+              checked: false,
+              isDynamic: true,
+              source: "photo",
+              basedOn: item.tag,
+            });
+            nextId += 1;
+          }
+          return [...extras, ...base];
         });
-        const payload = (await response.json()) as { question?: string; error?: string };
-        if (!response.ok || !payload.question) {
-          throw new Error(payload.error || "Vision 失敗");
-        }
-        return { text: payload.question.trim(), tag: photo.tag };
+        setBankCollapsed(false);
+        setSyncMessage(`照片 AI 已生成 ${generated.length} 題必問 · 已存本機`);
+      } else {
+        const firstError = results.find((r) => r.status === "rejected") as
+          | PromiseRejectedResult
+          | undefined;
+        setSyncMessage(
+          firstError
+            ? `照片已存本機，AI 分析失敗：${firstError.reason instanceof Error ? firstError.reason.message : "請稍後再試"}`
+            : "照片已存本機 IndexedDB，登入後會自動同步",
+        );
+      }
+    })();
+  }
+
+  async function ensurePhotoFullUrl(photo: Photo): Promise<string | undefined> {
+    if (photo.url) return photo.url;
+    if (photo.file) {
+      const url = URL.createObjectURL(photo.file);
+      setPhotos((current) =>
+        current.map((item) => (item.id === photo.id ? { ...item, url } : item)),
+      );
+      return url;
+    }
+    if (!photo.mediaId) return photo.thumbUrl;
+    const row = await getMedia(photo.mediaId);
+    if (!row?.blob) return photo.thumbUrl;
+    const url = URL.createObjectURL(row.blob);
+    setPhotos((current) =>
+      current.map((item) => (item.id === photo.id ? { ...item, url } : item)),
+    );
+    return url;
+  }
+
+  function openPhotoAnnotator(photo: Photo) {
+    setAnnotatingPhotoId(photo.id);
+    setAnnotateTagId(photo.tagId);
+    setAnnotateNote(photo.note);
+  }
+
+  async function savePhotoAnnotation() {
+    if (annotatingPhotoId == null) return;
+    const tag = messages.photoTagLabels[annotateTagId];
+    const note = annotateNote.trim();
+    let mediaId: string | undefined;
+    setPhotos((current) =>
+      current.map((photo) => {
+        if (photo.id !== annotatingPhotoId) return photo;
+        mediaId = photo.mediaId;
+        return { ...photo, tagId: annotateTagId, tag, note };
       }),
     );
-
-    const generated = results
-      .filter((r): r is PromiseFulfilledResult<{ text: string; tag: string } | null> => r.status === "fulfilled")
-      .map((r) => r.value)
-      .filter((v): v is { text: string; tag: string } => Boolean(v?.text));
-
-    if (generated.length > 0) {
-      setQuestions((current) => {
-        const base =
-          current.length > 0
-            ? current
-            : bankQuestions(locale, marketCode).map((q) => ({
-                ...q,
-                checked: false,
-              }));
-        const existing = new Set(base.map((q) => q.text.trim().toLowerCase()));
-        let nextId = base.reduce((max, q) => Math.max(max, q.id), 0) + 1;
-        const extras: Question[] = [];
-        for (const item of generated) {
-          const text = item.text.trim();
-          if (!text || existing.has(text.toLowerCase())) continue;
-          existing.add(text.toLowerCase());
-          extras.push({
-            id: nextId,
-            text,
-            checked: false,
-            isDynamic: true,
-            source: "photo",
-            basedOn: item.tag,
-          });
-          nextId += 1;
-        }
-        return [...extras, ...base];
-      });
-      setBankCollapsed(false);
-      setSyncMessage(`照片 AI 已生成 ${generated.length} 題必問 · 已存本機`);
-    } else {
-      const firstError = results.find((r) => r.status === "rejected") as
-        | PromiseRejectedResult
-        | undefined;
-      setSyncMessage(
-        firstError
-          ? `照片已存本機，AI 分析失敗：${firstError.reason instanceof Error ? firstError.reason.message : "請稍後再試"}`
-          : "照片已存本機 IndexedDB，登入後會自動同步",
-      );
+    if (mediaId) {
+      await updateMediaFields(mediaId, { label: tag, tagId: annotateTagId, note });
     }
+    await flushDraftToIdb();
+    setAnnotatingPhotoId(null);
   }
 
-  function copyCard() {
-    const link = shareUrl || (shareToken ? `${window.location.origin}/s/${shareToken}` : "");
-    void navigator.clipboard?.writeText(
-      link ||
-        `${address}\n${messages.card.pros}:${pros.join(" / ")}\n${messages.card.risks}:${risks.join(" / ")}\n${notes[0]?.transcript || ""}`,
-    );
-    alert(link ? "已複製分享連結" : messages.card.copy);
+  async function removePhoto(photoId: number) {
+    const target = photos.find((photo) => photo.id === photoId);
+    setPhotos((current) => current.filter((item) => item.id !== photoId));
+    if (expandedPhotoId === photoId) setExpandedPhotoId(null);
+    if (annotatingPhotoId === photoId) setAnnotatingPhotoId(null);
+    if (target?.mediaId) {
+      try {
+        await deleteMedia(target.mediaId);
+      } catch {
+        // ignore
+      }
+    }
+    await flushDraftToIdb();
   }
 
-  function shareCard() {
+  function rebuildCardDraft(previous?: DecisionSummarySnapshot | null): DecisionSummarySnapshot {
+    return buildCardFromViewing({
+      address,
+      viewingAt,
+      unitLabel,
+      priceLabel,
+      layoutLabel,
+      areaLabel,
+      managementFeeLabel,
+      listingUrl,
+      setupNotes,
+      overallRating:
+        typeof propertyDraft.overallRating === "number"
+          ? propertyDraft.overallRating
+          : previous?.overallRating ?? null,
+      pros,
+      risks,
+      aiSummary,
+      pendingQuestions: questions,
+      photos: photos.map((photo) => ({
+        id: photo.id,
+        url: photo.url,
+        thumbUrl: photo.thumbUrl,
+        remotePath: photo.remotePath ?? null,
+        tag: photo.tag,
+        note: photo.note,
+      })),
+      disclaimer: messages.card.disclaimer,
+      previous: previous ?? cardDraft,
+    });
+  }
+
+  /** Commit share snapshot into propertyDraft without mutating source pros/risks/aiSummary. */
+  function commitCardToPropertyDraft(snapshot: DecisionSummarySnapshot) {
+    const publicSnap = toPublicDecisionSummary(snapshot);
+    setPropertyDraft((prev) => ({
+      ...prev,
+      decisionSummary: publicSnap,
+      decisionSummaryDraft: snapshot,
+      overallRating: snapshot.overallRating,
+    }));
+    return publicSnap;
+  }
+
+  function openDecisionCard() {
+    const next = rebuildCardDraft(cardDraft);
+    setCardDraft(next);
+    commitCardToPropertyDraft(next);
+    setEditingCard(false);
+    setShowCard(true);
+  }
+
+  function requestShareAction(action: "copy" | "share") {
+    if (!cardDraft) openDecisionCard();
+    setPrivacyAction(action);
+    setShowPrivacyCheck(true);
+  }
+
+  async function performShareAction(action: "copy" | "share") {
+    const snapshot = cardDraft ?? rebuildCardDraft();
+    setCardDraft(snapshot);
+    commitCardToPropertyDraft(snapshot);
+    // Persist draft first so a failed cloud sync cannot wipe the card edit buffer.
+    try {
+      await flushDraftToIdb({
+        propertyDraft: {
+          ...propertyDraft,
+          decisionSummary: toPublicDecisionSummary(snapshot),
+          decisionSummaryDraft: snapshot,
+          overallRating: snapshot.overallRating,
+        },
+      });
+    } catch {
+      // Keep in-memory cardDraft even if IDB flush fails.
+    }
+
+    if (user && configured) {
+      try {
+        await syncViaQueue();
+      } catch (error) {
+        setSyncMessage(
+          error instanceof Error
+            ? error.message
+            : "同步失敗，本機決策摘要仍保留，可重試",
+        );
+      }
+    }
+
     const link = shareUrl || (shareToken ? `${window.location.origin}/s/${shareToken}` : "");
+    if (action === "copy") {
+      void navigator.clipboard?.writeText(
+        link ||
+          [
+            snapshot.address,
+            snapshot.viewingAt,
+            selectedLines(snapshot.pros),
+            selectedLines(snapshot.risks),
+            snapshot.disclaimer,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+      );
+      alert(link ? messages.card.copyLink : messages.card.copy);
+      return;
+    }
+
     if (link && navigator.share) {
-      void navigator.share({ title: "看房記", text: address, url: link });
+      void navigator.share({ title: messages.brand.name, text: snapshot.address, url: link });
       return;
     }
     if (link) {
       void navigator.clipboard?.writeText(link);
-      alert("已複製分享連結");
+      alert(messages.card.copyLink);
       return;
     }
-    alert("請先同步雲端後再分享連結");
+    alert(messages.card.needSync);
+  }
+
+  function selectedLines(items: DecisionSummarySnapshot["pros"]) {
+    return items
+      .filter((item) => item.selected && item.text.trim())
+      .map((item) => item.text)
+      .join(" / ");
+  }
+
+  function copyCard() {
+    requestShareAction("copy");
+  }
+
+  function shareCard() {
+    requestShareAction("share");
   }
 
   // Logged-in autosave (debounced). Guests stay IDB-only until generate card.
@@ -1658,6 +2536,43 @@ export function ClientPage() {
   return (
     <div className="min-h-screen w-full flex justify-center bg-[#FDF6F0] text-[#1A1A1A]">
       <div className="w-full max-w-[420px] px-4 pt-6 pb-36">
+        {preflightKind ? (
+          <PermissionPreflight
+            kind={preflightKind}
+            copy={messages.permissions}
+            status={preflightStatus}
+            busy={preflightBusy}
+            onContinue={() => void onPreflightContinue()}
+            onCancel={() => {
+              setPreflightKind(null);
+              setPreflightBusy(false);
+            }}
+            onImport={onPreflightImport}
+          />
+        ) : null}
+        <PhotoAnnotator
+          open={annotatingPhotoId != null}
+          title={messages.photos.annotateTitle}
+          tagLabel={messages.photos.tagLabel}
+          noteLabel={messages.photos.noteLabel}
+          notePlaceholder={messages.photos.notePlaceholder}
+          saveLabel={messages.photos.saveAnnotation}
+          cancelLabel={messages.permissions.cancel}
+          tagOptions={PHOTO_TAG_IDS.map((id) => ({
+            id,
+            label: messages.photoTagLabels[id],
+          }))}
+          tagId={annotateTagId}
+          note={annotateNote}
+          previewUrl={
+            photos.find((photo) => photo.id === annotatingPhotoId)?.thumbUrl ||
+            photos.find((photo) => photo.id === annotatingPhotoId)?.url
+          }
+          onTagChange={setAnnotateTagId}
+          onNoteChange={setAnnotateNote}
+          onSave={() => void savePhotoAnnotation()}
+          onCancel={() => setAnnotatingPhotoId(null)}
+        />
         <div className="flex items-start justify-between mb-5">
           <div>
             <h1 className="text-[20px] font-[800] tracking-tight leading-[1.1] flex flex-wrap items-center gap-2">
@@ -1740,6 +2655,10 @@ export function ClientPage() {
             onPriceLabelChange={setPriceLabel}
             layoutLabel={layoutLabel}
             onLayoutLabelChange={setLayoutLabel}
+            areaLabel={areaLabel}
+            onAreaLabelChange={setAreaLabel}
+            managementFeeLabel={managementFeeLabel}
+            onManagementFeeLabelChange={setManagementFeeLabel}
             listingUrl={listingUrl}
             onListingUrlChange={setListingUrl}
             setupNotes={setupNotes}
@@ -1971,33 +2890,51 @@ export function ClientPage() {
           </div>
           <div className="mt-5 flex flex-col items-center">
             <div className="flex items-center gap-3">
-              <button
-                onClick={() => void toggleAudio()}
-                disabled={audioState === "processing"}
-                className={`w-[88px] h-[88px] rounded-full flex items-center justify-center shadow-[0_8px_24px_rgba(59,130,246,0.35)] active:scale-95 transition-all disabled:opacity-70 ${
-                  audioState === "recording"
-                    ? "bg-[#EF4444] shadow-[0_8px_24px_rgba(239,68,68,0.35)]"
-                    : audioState === "processing"
-                      ? "bg-[#6366F1]"
-                      : "bg-[#3B82F6]"
-                }`}
-              >
-                <Mic
-                  className={`w-8 h-8 text-white ${
-                    audioState === "recording" || audioState === "processing" ? "animate-pulse" : ""
-                  }`}
-                />
-              </button>
-              <button
-                type="button"
-                onClick={() => audioImportInput.current?.click()}
-                disabled={audioState === "recording" || audioState === "processing"}
-                className="w-[64px] h-[64px] rounded-full bg-[#F8FAFF] border border-[#DBEAFE] text-[#2563EB] flex flex-col items-center justify-center gap-0.5 active:scale-95 transition disabled:opacity-50"
-                title={messages.audio.importHint}
-              >
-                <Upload className="w-5 h-5" />
-                <span className="text-[9px] font-bold tracking-wide">{messages.audio.import}</span>
-              </button>
+              {audioState === "recording" ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => finishAudioRecorder({ discard: false })}
+                    className="h-12 min-w-[120px] px-4 rounded-full bg-[#EF4444] text-white text-[13px] font-bold active:scale-95 touch-manipulation"
+                  >
+                    {messages.audio.stop}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => finishAudioRecorder({ discard: true })}
+                    className="h-12 min-w-[96px] px-4 rounded-full bg-white border border-black/10 text-[13px] font-bold active:scale-95 touch-manipulation"
+                  >
+                    {messages.audio.cancel}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => void openCapturePreflight("audio")}
+                    disabled={audioState === "processing"}
+                    className={`w-[88px] h-[88px] rounded-full flex items-center justify-center shadow-[0_8px_24px_rgba(59,130,246,0.35)] active:scale-95 transition-all disabled:opacity-70 ${
+                      audioState === "processing" ? "bg-[#6366F1]" : "bg-[#3B82F6]"
+                    }`}
+                  >
+                    <Mic
+                      className={`w-8 h-8 text-white ${
+                        audioState === "processing" ? "animate-pulse" : ""
+                      }`}
+                    />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => audioImportInput.current?.click()}
+                    disabled={audioState === "processing"}
+                    className="w-[64px] h-[64px] rounded-full bg-[#F8FAFF] border border-[#DBEAFE] text-[#2563EB] flex flex-col items-center justify-center gap-0.5 active:scale-95 transition disabled:opacity-50"
+                    title={messages.audio.importHint}
+                  >
+                    <Upload className="w-5 h-5" />
+                    <span className="text-[9px] font-bold tracking-wide">{messages.audio.import}</span>
+                  </button>
+                </>
+              )}
             </div>
             <input
               ref={audioImportInput}
@@ -2009,7 +2946,7 @@ export function ClientPage() {
             <div className="mt-3 text-center">
               <p className="text-[15px] font-bold">
                 {audioState === "recording"
-                  ? messages.audio.recording
+                  ? `${messages.audio.recording} ${String(Math.floor(audioSeconds / 60)).padStart(2, "0")}:${String(audioSeconds % 60).padStart(2, "0")}`
                   : audioState === "processing"
                     ? messages.audio.processing
                     : messages.audio.idle}
@@ -2018,6 +2955,59 @@ export function ClientPage() {
                 {messages.audio.pipeline}
               </p>
             </div>
+            {permissionBanner ? (
+              <MediaPermissionBanner
+                status={permissionBanner.status}
+                message={permissionBanner.message}
+                settingsHint={messages.permissions.settingsHint}
+                importLabel={messages.permissions.importInstead}
+                onImport={() => {
+                  setPermissionBanner(null);
+                  audioImportInput.current?.click();
+                }}
+                onDismiss={() => setPermissionBanner(null)}
+              />
+            ) : null}
+            {audioState === "recording" ? (
+              <RecordingMarkerBar
+                title={messages.audio.markerTitle}
+                hint={messages.audio.markerHint}
+                labels={messages.audio.markerTags}
+                onAdd={addLiveMarker}
+              />
+            ) : null}
+            {liveMarkers.length > 0 && audioState === "recording" ? (
+              <ul className="mt-3 w-full space-y-1.5" aria-label={messages.audio.markerListTitle}>
+                {liveMarkers.map((marker) => (
+                  <li
+                    key={marker.id}
+                    className="flex items-center justify-between gap-2 rounded-xl bg-[#EFF6FF] border border-[#BFDBFE] px-3 py-2 text-[12px]"
+                  >
+                    <span className="font-mono font-bold text-[#1D4ED8]">
+                      {String(Math.floor(marker.timeSec / 60)).padStart(2, "0")}:
+                      {String(Math.floor(marker.timeSec) % 60).padStart(2, "0")}
+                    </span>
+                    <span className="flex-1 font-semibold text-[#1E3A8A]">
+                      {messages.audio.markerTags[marker.tagId]}
+                    </span>
+                    <button
+                      type="button"
+                      className="min-h-11 px-3 rounded-full text-[#991B1B] font-bold"
+                      onClick={() => {
+                        setLiveMarkers((current) => {
+                          const next = removeAudioMarker(current, marker.id);
+                          liveMarkersRef.current = next;
+                          void flushDraftToIdb({ liveAudioMarkers: next });
+                          return next;
+                        });
+                      }}
+                    >
+                      {messages.audio.markerDelete}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </div>
           {notes.length > 0 && (
             <div className="mt-5 space-y-2">
@@ -2037,11 +3027,120 @@ export function ClientPage() {
                     </span>
                   </div>
                   <p className="text-[12px] leading-[1.5] mt-1.5 text-[#374151]">「{note.transcript}」</p>
+                  {note.kind !== "text" ? (
+                    <div className="mt-2">
+                      {!audioPlaybackUrls[note.id] && note.mediaId ? (
+                        <button
+                          type="button"
+                          className="h-11 w-full rounded-full bg-white border border-[#DBEAFE] text-[12px] font-bold text-[#2563EB]"
+                          onClick={() => void ensureAudioPlaybackUrl(note)}
+                        >
+                          {messages.audio.markerPlay}
+                        </button>
+                      ) : null}
+                      <AudioNotePlayer
+                        src={audioPlaybackUrls[note.id]}
+                        durationSec={note.duration}
+                        markers={note.markers ?? []}
+                        labels={messages.audio.markerTags}
+                        playLabel={messages.audio.markerPlay}
+                        markersTitle={messages.audio.markerListTitle}
+                        editLabel={messages.audio.markerEdit}
+                        deleteLabel={messages.audio.markerDelete}
+                        notePlaceholder={messages.audio.markerNotePlaceholder}
+                        saveLabel={messages.audio.markerSave}
+                        cancelLabel={messages.permissions.cancel}
+                        emptyMarkers={messages.audio.markerEmpty}
+                        onUpdateMarker={(id, patch) => {
+                          const next = updateAudioMarker(note.markers ?? [], id, patch);
+                          updateNoteMarkers(note.id, next);
+                        }}
+                        onDeleteMarker={(id) => {
+                          updateNoteMarkers(note.id, removeAudioMarker(note.markers ?? [], id));
+                        }}
+                      />
+                    </div>
+                  ) : null}
                 </div>
               ))}
             </div>
           )}
+          {aiSummary ? (
+            <AiSummaryPanel
+              summary={aiSummary}
+              labels={messages.aiSummary}
+              onEdit={(section, id, text) => {
+                setAiSummary((current) => {
+                  if (!current) return current;
+                  const next = updateClaimText(current, section, id, text);
+                  const nextPros = claimsToLegacyStrings(next.pros, 5);
+                  const nextRisks = claimsToLegacyStrings(next.risks, 5);
+                  if (nextPros.length) setPros(nextPros);
+                  if (nextRisks.length) setRisks(nextRisks);
+                  void flushDraftToIdb({
+                    aiSummary: next,
+                    ...(nextPros.length ? { pros: nextPros } : {}),
+                    ...(nextRisks.length ? { risks: nextRisks } : {}),
+                  });
+                  return next;
+                });
+              }}
+              onDelete={(section, id) => {
+                setAiSummary((current) => {
+                  if (!current) return current;
+                  const next = softDeleteClaim(current, section, id);
+                  const nextPros = claimsToLegacyStrings(next.pros, 5);
+                  const nextRisks = claimsToLegacyStrings(next.risks, 5);
+                  setPros(nextPros.length ? nextPros : messages.defaults.pros);
+                  setRisks(nextRisks.length ? nextRisks : messages.defaults.risks);
+                  void flushDraftToIdb({
+                    aiSummary: next,
+                    pros: nextPros,
+                    risks: nextRisks,
+                  });
+                  return next;
+                });
+              }}
+            />
+          ) : null}
         </div>
+
+        <FieldChecklistPanel
+          title={messages.fieldChecklist.title}
+          addLabel={messages.fieldChecklist.add}
+          addPlaceholder={messages.fieldChecklist.addPlaceholder}
+          notePlaceholder={messages.fieldChecklist.notePlaceholder}
+          items={fieldChecklist}
+          onToggle={(id) => {
+            setFieldChecklist((current) => {
+              const next = current.map((item) =>
+                item.id === id ? { ...item, checked: !item.checked } : item,
+              );
+              void flushDraftToIdb({ fieldChecklist: next });
+              return next;
+            });
+          }}
+          onNoteChange={(id, note) => {
+            setFieldChecklist((current) => {
+              const next = current.map((item) => (item.id === id ? { ...item, note } : item));
+              void flushDraftToIdb({ fieldChecklist: next });
+              return next;
+            });
+          }}
+          onAddCustom={(text) => {
+            setFieldChecklist((current) => {
+              const next = [
+                ...current,
+                createCustomChecklistItem(
+                  text,
+                  current.reduce((max, item) => Math.max(max, item.sortOrder), 0) + 1,
+                ),
+              ];
+              void flushDraftToIdb({ fieldChecklist: next });
+              return next;
+            });
+          }}
+        />
 
         <div className="bg-white rounded-[24px] border border-black/[0.05] shadow-[0_4px_20px_rgba(0,0,0,0.04)] p-5 mb-4">
           <div className="flex items-center justify-between">
@@ -2050,6 +3149,7 @@ export function ClientPage() {
               {photos.length}/5
             </span>
           </div>
+          <p className="mt-2 text-[11px] text-[#6B7280]">{messages.photos.thumbHint}</p>
           <div className="mt-3 grid grid-cols-3 gap-2">
             {photos.map((photo) => (
               <div
@@ -2059,15 +3159,19 @@ export function ClientPage() {
                 <button
                   type="button"
                   className="absolute inset-0"
-                  onClick={() =>
-                    setExpandedPhotoId((current) => (current === photo.id ? null : photo.id))
-                  }
+                  aria-label={`${photo.tag}${photo.note ? ` · ${photo.note}` : ""}`}
+                  onClick={() => {
+                    void (async () => {
+                      await ensurePhotoFullUrl(photo);
+                      setExpandedPhotoId((current) => (current === photo.id ? null : photo.id));
+                    })();
+                  }}
                 >
-                  {photo.url ? (
+                  {photo.thumbUrl || photo.url ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={photo.url}
-                      alt={photo.tag}
+                      src={photo.thumbUrl || photo.url}
+                      alt=""
                       loading="lazy"
                       decoding="async"
                       className="w-full h-full object-cover"
@@ -2078,21 +3182,31 @@ export function ClientPage() {
                     </div>
                   )}
                 </button>
-                <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded-full bg-black/70 text-white text-[9px]">
+                <span className="absolute bottom-1 left-1 max-w-[90%] truncate px-1.5 py-0.5 rounded-full bg-black/70 text-white text-[9px]">
                   {photo.tag}
                 </span>
                 <button
                   type="button"
-                  onClick={() => setPhotos((current) => current.filter((item) => item.id !== photo.id))}
-                  className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/70 text-white flex items-center justify-center"
+                  aria-label={messages.photos.editAnnotation}
+                  onClick={() => openPhotoAnnotator(photo)}
+                  className="absolute top-1 left-1 h-7 max-w-[70%] truncate px-2 rounded-full bg-black/70 text-white text-[9px] font-bold"
                 >
-                  <X className="w-3 h-3" />
+                  {messages.photos.editAnnotation}
+                </button>
+                <button
+                  type="button"
+                  aria-label="Remove photo"
+                  onClick={() => void removePhoto(photo.id)}
+                  className="absolute top-1 right-1 w-7 h-7 rounded-full bg-black/70 text-white flex items-center justify-center"
+                >
+                  <X className="w-3 h-3" aria-hidden />
                 </button>
               </div>
             ))}
             {photos.length < 5 && (
               <button
-                onClick={() => photoInput.current?.click()}
+                type="button"
+                onClick={() => void openCapturePreflight("photo")}
                 className="aspect-[4/3] rounded-xl border-2 border-dashed border-black/10 bg-[#FAF7F3] flex flex-col items-center justify-center gap-1 hover:bg-[#F5F3F0] transition"
               >
                 <Camera className="w-6 h-6 text-[#9CA3AF]" />
@@ -2102,14 +3216,32 @@ export function ClientPage() {
             )}
           </div>
           {expandedPhotoId != null &&
-            photos.some((photo) => photo.id === expandedPhotoId && photo.url) && (
+            photos.some((photo) => photo.id === expandedPhotoId) && (
               <div className="mt-3 rounded-2xl overflow-hidden border border-black/10 bg-black">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={photos.find((photo) => photo.id === expandedPhotoId)?.url}
+                  src={
+                    photos.find((photo) => photo.id === expandedPhotoId)?.url ||
+                    photos.find((photo) => photo.id === expandedPhotoId)?.thumbUrl
+                  }
                   alt=""
                   className="w-full max-h-[320px] object-contain bg-black"
                 />
+                {photos.find((photo) => photo.id === expandedPhotoId)?.note ? (
+                  <p className="px-3 py-2 text-[12px] text-white/90 bg-black">
+                    {photos.find((photo) => photo.id === expandedPhotoId)?.note}
+                  </p>
+                ) : null}
+                <button
+                  type="button"
+                  className="w-full h-11 bg-white/10 text-white text-[12px] font-bold"
+                  onClick={() => {
+                    const photo = photos.find((item) => item.id === expandedPhotoId);
+                    if (photo) openPhotoAnnotator(photo);
+                  }}
+                >
+                  {messages.photos.editAnnotation}
+                </button>
               </div>
             )}
           <input
@@ -2234,6 +3366,45 @@ export function ClientPage() {
                 : messages.share.needMore
             }
             onGenerate={() => void handleGenerateCard()}
+            shareAccessLabels={messages.shareAccess}
+            shareUrl={shareUrl}
+            hasShareToken={Boolean(shareToken)}
+            shareLastUpdatedAt={
+              typeof propertyDraft.decisionSummary === "object" &&
+              propertyDraft.decisionSummary &&
+              "generatedAt" in (propertyDraft.decisionSummary as object) &&
+              typeof (propertyDraft.decisionSummary as { generatedAt?: unknown }).generatedAt ===
+                "string"
+                ? (propertyDraft.decisionSummary as { generatedAt: string }).generatedAt
+                : clientUpdatedAtRef.current
+            }
+            viewingId={viewingId}
+            shareLink={shareLink}
+            onCopyShareLink={() => {
+              if (!shareUrl) return;
+              void navigator.clipboard?.writeText(shareUrl);
+              alert(messages.card.copyLink);
+            }}
+            onShareLinkChanged={({ link, urlPath }) => {
+              setShareLink(link);
+              if (urlPath === "") {
+                setShareToken(null);
+                setShareUrl("");
+                return;
+              }
+              if (link?.token) {
+                setShareToken(link.token);
+                setShareUrl(`${window.location.origin}/s/${link.token}`);
+              } else if (urlPath) {
+                setShareUrl(
+                  urlPath.startsWith("http")
+                    ? urlPath
+                    : `${window.location.origin}${urlPath}`,
+                );
+                const token = urlPath.split("/").pop() || null;
+                if (token) setShareToken(token);
+              }
+            }}
           />
         )}
 
@@ -2380,209 +3551,183 @@ export function ClientPage() {
           </div>
         )}
 
-        {showCard && (
+        {showCard && cardDraft && (
           <div
-            className="fixed inset-0 z-[60] flex justify-center bg-black/40 backdrop-blur-[2px] p-4 overflow-auto"
+            className="fixed inset-0 z-[60] flex justify-center bg-black/40 backdrop-blur-[2px] p-3 sm:p-4 overflow-auto"
             role="dialog"
             aria-modal="true"
             onClick={() => setShowCard(false)}
           >
             <div
-              className="w-full max-w-[420px] my-auto"
+              className="w-full max-w-[720px] my-auto"
               onClick={(event) => event.stopPropagation()}
             >
-              <div className="bg-white rounded-[28px] overflow-hidden shadow-[0_20px_60px_rgba(0,0,0,0.2)]">
-                <div className="bg-[#111] text-white p-5 relative">
-                  <button
-                    type="button"
-                    aria-label="關閉卡片"
-                    onClick={() => setShowCard(false)}
-                    className="absolute top-4 right-4 z-20 w-9 h-9 rounded-full bg-white/15 hover:bg-white/25 flex items-center justify-center"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                  <p className="text-[10px] tracking-[0.2em] opacity-60 pr-10">{messages.brand.cardEyebrow}</p>
-                  <h3 className="text-[18px] font-bold mt-2 leading-[1.2]">{address}</h3>
-                  <div className="mt-3 flex gap-2">
-                    {tags.map((tag) => (
-                      <span key={tag} className="px-2.5 py-1 rounded-full bg-white/10 text-[11px]">
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <div className="p-5 space-y-5">
-                  <div className="flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => setEditingCard((value) => !value)}
-                      className="h-9 px-3 rounded-full bg-[#F5F3F0] text-[11px] font-bold"
-                    >
-                      {editingCard ? messages.wizard.saveEdits : messages.wizard.editCard}
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="rounded-2xl bg-[#F0FDF4] border border-[#BBF7D0] p-3">
-                      <p className="text-[11px] font-bold text-[#166534] mb-2">✓ {messages.card.pros}</p>
-                      {editingCard ? (
-                        <textarea
-                          value={pros.join("\n")}
-                          onChange={(event) =>
-                            setPros(
-                              event.target.value
-                                .split("\n")
-                                .map((line) => line.trim())
-                                .filter(Boolean)
-                                .slice(0, 3),
-                            )
-                          }
-                          rows={4}
-                          className="w-full text-[12px] bg-white/80 rounded-xl p-2 outline-none"
-                        />
-                      ) : (
-                        <ul className="space-y-1.5 text-[12px] text-[#14532D] leading-[1.4]">
-                          {pros.map((item) => (
-                            <li key={item}>• {item}</li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                    <div className="rounded-2xl bg-[#FEF2F2] border border-[#FECACA] p-3">
-                      <p className="text-[11px] font-bold text-[#991B1B] mb-2 flex items-center gap-1">
-                        <AlertTriangle className="w-3 h-3" /> {messages.card.risks}
-                      </p>
-                      {editingCard ? (
-                        <textarea
-                          value={risks.join("\n")}
-                          onChange={(event) =>
-                            setRisks(
-                              event.target.value
-                                .split("\n")
-                                .map((line) => line.trim())
-                                .filter(Boolean)
-                                .slice(0, 3),
-                            )
-                          }
-                          rows={4}
-                          className="w-full text-[12px] bg-white/80 rounded-xl p-2 outline-none"
-                        />
-                      ) : (
-                        <ul className="space-y-1.5 text-[12px] text-[#7F1D1D] leading-[1.4]">
-                          {risks.map((item) => (
-                            <li key={item}>• {item}</li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  </div>
-                  <div>
-                    <p className="text-[12px] font-bold tracking-widest mb-2">{messages.card.qa}</p>
-                    <div className="space-y-2">
-                      {questions.length === 0 ? (
-                        <p className="text-[12px] text-[#9CA3AF]">{messages.card.qaEmpty}</p>
-                      ) : (
-                        questions.map((q) => (
-                          <div key={q.id} className="rounded-xl bg-[#FAF7F3] border border-black/5 p-3">
-                            <p className="text-[12px] font-bold flex items-center gap-1.5 flex-wrap">
-                              {q.isDynamic && q.source === "photo" && (
-                                <span className="px-1.5 py-0.5 rounded-full bg-[#059669] text-white text-[9px]">
-                                  {messages.bank.photoBadge}
-                                </span>
-                              )}
-                              {q.isFollowUp && (
-                                <span className="px-1.5 py-0.5 rounded-full bg-[#7C3AED] text-white text-[9px]">
-                                  {messages.bank.followBadge}
-                                </span>
-                              )}
-                              Q: {q.text}
-                            </p>
-                            {q.basedOn && (
-                              <p
-                                className={`text-[10px] mt-1 ${
-                                  q.source === "photo" ? "text-[#047857]/80" : "text-[#7C3AED]/80"
-                                }`}
-                              >
-                                {q.source === "photo"
-                                  ? `${messages.card.byTag}${q.basedOn}`
-                                  : `${messages.card.byDialogue}${q.basedOn}`}
-                              </p>
-                            )}
-                            <p className="text-[11px] text-[#6B7280] mt-1">
-                              A: {q.answer || (q.checked ? messages.card.answered : messages.card.pending)}
-                            </p>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                  {(clips.length > 0 || photos.length > 0) && (
-                    <div>
-                      <p className="text-[12px] font-bold tracking-widest mb-2">{messages.card.evidence}</p>
-                      <div className="flex gap-2 overflow-auto pb-1">
-                        {photos.map((photo) => (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            key={photo.id}
-                            src={photo.url}
-                            alt={photo.tag}
-                            className="w-[88px] h-[66px] rounded-xl object-cover border border-black/5 shrink-0"
-                          />
-                        ))}
-                        {clips.map((clip) => (
-                          <div
-                            key={clip.id}
-                            className="w-[88px] h-[66px] rounded-xl bg-black text-white flex flex-col items-center justify-center shrink-0"
-                          >
-                            <Video className="w-4 h-4 mb-1" />
-                            <span className="text-[9px]">{clip.label}</span>
-                          </div>
-                        ))}
+              <div className="relative">
+                <button
+                  type="button"
+                  aria-label={messages.card.close}
+                  onClick={() => setShowCard(false)}
+                  className="absolute top-3 right-3 z-20 w-9 h-9 rounded-full bg-black/70 text-white hover:bg-black/80 flex items-center justify-center"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+                <DecisionSummaryCard
+                  snapshot={cardDraft}
+                  mode="preview"
+                  editing={editingCard}
+                  onToggleEditing={() => setEditingCard((value) => !value)}
+                  onToggleText={(section, id) =>
+                    setCardDraft((current) =>
+                      current ? toggleTextSelection(current, section, id) : current,
+                    )
+                  }
+                  onTogglePhoto={(id) =>
+                    setCardDraft((current) =>
+                      current ? togglePhotoSelection(current, id) : current,
+                    )
+                  }
+                  onUpdateText={(section, id, text) =>
+                    setCardDraft((current) =>
+                      current ? updateTextItem(current, section, id, text) : current,
+                    )
+                  }
+                  onSetRating={(rating) =>
+                    setCardDraft((current) =>
+                      current ? setOverallRating(current, rating) : current,
+                    )
+                  }
+                  labels={{
+                    eyebrow: messages.card.eyebrow,
+                    address: messages.card.address,
+                    viewingAt: messages.card.viewingAt,
+                    basics: messages.card.basics,
+                    unit: messages.card.unit,
+                    price: messages.card.price,
+                    layout: messages.card.layout,
+                    area: messages.card.area,
+                    managementFee: messages.card.managementFee,
+                    listingUrl: messages.card.listingUrl,
+                    setupNotes: messages.card.setupNotes,
+                    rating: messages.card.rating,
+                    ratingEmpty: messages.card.ratingEmpty,
+                    pros: messages.card.pros,
+                    risks: messages.card.risks,
+                    photos: messages.card.photos,
+                    photoNote: messages.card.photoNote,
+                    facts: messages.card.facts,
+                    followUps: messages.card.followUps,
+                    actionItems: messages.card.actionItems,
+                    emptySection: messages.card.emptySection,
+                    selectHint: messages.card.selectHint,
+                    disclaimer: messages.card.disclaimer,
+                    generatedAt: messages.card.generatedAt,
+                    shareSelected: messages.card.share,
+                    edit: messages.wizard.editCard,
+                    doneEdit: messages.wizard.saveEdits,
+                  }}
+                  footer={
+                    <div className="space-y-3 pt-1">
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={copyCard}
+                          className="flex-1 h-[44px] rounded-full bg-black text-white text-[13px] font-bold flex items-center justify-center gap-2"
+                        >
+                          <Copy className="w-4 h-4" />{" "}
+                          {shareUrl ? messages.card.copyLink : messages.card.copy}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={shareCard}
+                          className="flex-1 h-[44px] rounded-full bg-[#F5F3F0] border border-black/10 text-[13px] font-bold flex items-center justify-center gap-2"
+                        >
+                          <Share2 className="w-4 h-4" /> {messages.card.shareLink}
+                        </button>
                       </div>
+                      <PdfExportButton
+                        snapshot={cardDraft}
+                        photoSources={photos.map((photo) => ({
+                          id: String(photo.id),
+                          url: photo.url || photo.thumbUrl,
+                          mediaId: photo.mediaId,
+                        }))}
+                        locale={locale}
+                        documentLabels={{
+                          title: messages.card.eyebrow,
+                          viewingAt: messages.card.viewingAt,
+                          basics: messages.card.basics,
+                          unit: messages.card.unit,
+                          price: messages.card.price,
+                          layout: messages.card.layout,
+                          area: messages.card.area,
+                          managementFee: messages.card.managementFee,
+                          listingUrl: messages.card.listingUrl,
+                          setupNotes: messages.card.setupNotes,
+                          rating: messages.card.rating,
+                          ratingEmpty: messages.card.ratingEmpty,
+                          pros: messages.card.pros,
+                          risks: messages.card.risks,
+                          photos: messages.card.photos,
+                          photoNote: messages.card.photoNote,
+                          facts: messages.card.facts,
+                          followUps: messages.card.followUps,
+                          actionItems: messages.card.actionItems,
+                          emptySection: messages.card.emptySection,
+                          generatedAt: messages.card.generatedAt,
+                          page: messages.pdfExport.page,
+                        }}
+                        uiLabels={messages.pdfExport}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowCard(false)}
+                        className="w-full h-[42px] rounded-full border border-black/10 text-[13px] font-bold text-[#6B7280]"
+                      >
+                        {messages.card.close}
+                      </button>
+                      {shareUrl ? (
+                        <a
+                          href={shareUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="block text-[11px] text-center text-[#2563EB] break-all underline-offset-2 hover:underline"
+                        >
+                          {shareUrl}
+                        </a>
+                      ) : null}
+                      <p className="text-[10px] text-center text-[#9CA3AF]">
+                        {viewingId ? messages.card.syncedHint : messages.card.localPreview}
+                      </p>
                     </div>
-                  )}
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={copyCard}
-                      className="flex-1 h-[44px] rounded-full bg-black text-white text-[13px] font-bold flex items-center justify-center gap-2"
-                    >
-                      <Copy className="w-4 h-4" /> {shareUrl ? "複製連結" : "複製文字"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={shareCard}
-                      className="flex-1 h-[44px] rounded-full bg-[#F5F3F0] border border-black/10 text-[13px] font-bold flex items-center justify-center gap-2"
-                    >
-                      <Share2 className="w-4 h-4" /> 分享連結
-                    </button>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowCard(false)}
-                    className="w-full h-[42px] rounded-full border border-black/10 text-[13px] font-bold text-[#6B7280]"
-                  >
-                    關閉
-                  </button>
-                  {shareUrl && (
-                    <a
-                      href={shareUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="block text-[11px] text-center text-[#2563EB] break-all underline-offset-2 hover:underline"
-                    >
-                      {shareUrl}
-                    </a>
-                  )}
-                  <p className="text-[10px] text-center text-[#9CA3AF]">
-                    {viewingId
-                      ? "已同步雲端 · 媒體為 private signed URL"
-                      : "本機預覽 · 登入上傳後可產生分享連結"}
-                  </p>
-                </div>
+                  }
+                />
               </div>
             </div>
           </div>
         )}
+
+        <SharePrivacyCheck
+          open={showPrivacyCheck}
+          labels={{
+            title: messages.card.privacyTitle,
+            body: messages.card.privacyBody,
+            address: messages.card.privacyAddress,
+            photos: messages.card.privacyPhotos,
+            personal: messages.card.privacyPersonal,
+            confirm: messages.card.privacyConfirm,
+            cancel: messages.card.privacyCancel,
+          }}
+          onCancel={() => {
+            setShowPrivacyCheck(false);
+            setPrivacyAction(null);
+          }}
+          onConfirm={() => {
+            const action = privacyAction;
+            setShowPrivacyCheck(false);
+            setPrivacyAction(null);
+            if (action) void performShareAction(action);
+          }}
+        />
         <div className="h-4" />
       </div>
     </div>

@@ -1,5 +1,11 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
+import {
+  claimsToLegacyStrings,
+  extractJsonObject,
+  validateAndNormalizeSummary,
+  type ProcessRecordingLegacyPayload,
+} from "@/lib/ai-summary";
 
 export const runtime = "nodejs";
 
@@ -7,34 +13,6 @@ type QuestionInput = {
   id: number;
   text: string;
 };
-
-type AnalysisResult = {
-  answers: Array<{
-    id: number;
-    status: "answered" | "pending";
-    answer: string;
-  }>;
-  new_questions: Array<{
-    text: string;
-    status: "answered" | "pending";
-    answer: string;
-    reason?: string;
-    based_on?: string;
-  }>;
-  pros: string[];
-  risks: string[];
-};
-
-function extractJson(text: string): AnalysisResult {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const raw = (fenced?.[1] ?? text).trim();
-  const start = raw.indexOf("{");
-  const end = raw.lastIndexOf("}");
-  if (start === -1 || end === -1) {
-    throw new Error("模型沒有回傳 JSON");
-  }
-  return JSON.parse(raw.slice(start, end + 1)) as AnalysisResult;
-}
 
 export async function POST(request: Request) {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -54,6 +32,13 @@ export async function POST(request: Request) {
     const locale = String(form.get("locale") ?? "zh-Hant");
     const openDataRaw = form.get("openData");
     const propertyContextRaw = form.get("propertyContext");
+    const markersRaw = form.get("markers");
+    const mediaId = String(form.get("mediaId") ?? "") || null;
+    const noteIdRaw = form.get("noteId");
+    const noteId =
+      typeof noteIdRaw === "string" && noteIdRaw.trim()
+        ? Number(noteIdRaw)
+        : null;
 
     if (!(audio instanceof File)) {
       return NextResponse.json({ error: "缺少錄音檔" }, { status: 400 });
@@ -62,14 +47,53 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "缺少題庫" }, { status: 400 });
     }
 
-    const questions = JSON.parse(questionsRaw) as QuestionInput[];
+    let questions: QuestionInput[] = [];
+    try {
+      questions = JSON.parse(questionsRaw) as QuestionInput[];
+      if (!Array.isArray(questions)) throw new Error("questions not array");
+    } catch {
+      return NextResponse.json(
+        { error: "題庫 JSON 格式錯誤，請重新整理後再試" },
+        { status: 400 },
+      );
+    }
+
+    let markersContext = "";
+    try {
+      if (typeof markersRaw === "string" && markersRaw.trim()) {
+        const markers = JSON.parse(markersRaw) as Array<{
+          t?: number;
+          tag?: string;
+          note?: string;
+        }>;
+        if (Array.isArray(markers) && markers.length > 0) {
+          markersContext = markers
+            .slice(0, 40)
+            .map((m) => {
+              const t = typeof m.t === "number" ? m.t.toFixed(1) : "?";
+              const tag = typeof m.tag === "string" ? m.tag : "other";
+              const note =
+                typeof m.note === "string" && m.note.trim()
+                  ? ` (${m.note.trim()})`
+                  : "";
+              return `- ${t}s · ${tag}${note}`;
+            })
+            .join("\n");
+        }
+      }
+    } catch {
+      markersContext = "";
+    }
+
     let openDataContext = "";
     try {
       if (typeof openDataRaw === "string" && openDataRaw && openDataRaw !== "null") {
         const od = JSON.parse(openDataRaw) as Record<string, unknown>;
         const bits = [
           od.city ? `城市：${od.city}` : "",
-          od.zoningCode ? `Zoning：${od.zoningCode}${od.zoningLabel ? `（${od.zoningLabel}）` : ""}` : "",
+          od.zoningCode
+            ? `Zoning：${od.zoningCode}${od.zoningLabel ? `（${od.zoningLabel}）` : ""}`
+            : "",
           od.pid ? `PID：${od.pid}` : "",
           od.planNumber ? `Plan：${od.planNumber}` : "",
           od.lotNumber ? `Lot：${od.lotNumber}` : "",
@@ -81,6 +105,7 @@ export async function POST(request: Request) {
     } catch {
       openDataContext = "";
     }
+
     let propertyContext = "";
     try {
       if (typeof propertyContextRaw === "string" && propertyContextRaw) {
@@ -103,7 +128,6 @@ export async function POST(request: Request) {
 
     const openai = new OpenAI({ apiKey });
 
-    const audioFile = audio;
     const whisperLang = locale.startsWith("th")
       ? "th"
       : locale.startsWith("en")
@@ -118,19 +142,20 @@ export async function POST(request: Request) {
           : "Traditional Chinese (繁體中文)";
 
     const transcription = await openai.audio.transcriptions.create({
-      file: audioFile,
+      file: audio,
       model: "whisper-1",
       language: whisperLang,
     });
 
     const transcript = transcription.text?.trim() || "";
     if (!transcript) {
-      return NextResponse.json({ error: "Whisper 沒有辨識到內容" }, { status: 422 });
+      return NextResponse.json(
+        { error: "Whisper 沒有辨識到內容，請再錄一段或改匯入音檔" },
+        { status: 422 },
+      );
     }
 
-    const questionList = questions
-      .map((q) => `- id:${q.id} ${q.text}`)
-      .join("\n");
+    const questionList = questions.map((q) => `- id:${q.id} ${q.text}`).join("\n");
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -139,21 +164,28 @@ export async function POST(request: Request) {
       messages: [
         {
           role: "system",
-          content: `You are a Metro Vancouver open-house advisor. Only fill answers from the recording; never invent facts. Municipal Open Data is background only — do not inject zoning/PID questions without dialogue triggers. Reply JSON string values in ${replyLanguage}.`,
+          content: `You are a Metro Vancouver open-house note structurer.
+Never invent facts. Guesses must use confidence "needs_verification", never as facts.
+Municipal Open Data is background only — do not inject zoning/PID questions without dialogue triggers.
+Reply JSON string values in ${replyLanguage}.`,
         },
         {
           role: "user",
-          content: `From this open-house dialogue and question bank:
-1) Fill answers for existing questions; unanswered → pending
-2) Create follow-ups from dialogue; if Open Data exists, weave zoning/PID/title/permit angles ONLY when dialogue touches related topics
-3) Summarize 3 pros and 3 risks
-Return JSON. All human-readable strings must be in ${replyLanguage}.
+          content: `Structure this open-house recording into verifiable claims.
+
+Also:
+1) Fill answers for existing question bank ids (unanswered → pending)
+2) Create followUps from dialogue (and Open Data only when dialogue touches related topics)
+3) Separate facts vs pros vs risks vs actionItems
+4) Attach sources with transcript timestamps when possible; use marker times as hints
 
 Address: ${address || "unknown"}
 Market: ${market}
 UI locale: ${locale}
 Property context: ${propertyContext || "none"}
 Municipal Open Data (background only): ${openDataContext || "none"}
+mediaId: ${mediaId || "unknown"}
+noteId: ${noteId ?? "unknown"}
 
 Question bank:
 ${questionList || "(empty)"}
@@ -161,50 +193,79 @@ ${questionList || "(empty)"}
 Dialogue transcript:
 ${transcript}
 
+User live markers (hints only):
+${markersContext || "(none)"}
+
 Strict JSON shape:
 {
-  "answers": [
-    { "id": 1, "status": "answered" | "pending", "answer": "..." }
-  ],
-  "new_questions": [
-    {
-      "text": "follow-up to ask agent/owner",
-      "status": "answered" | "pending",
-      "answer": "...",
-      "reason": "why ask now",
-      "based_on": "dialogue trigger; mention zoning/PID if used"
-    }
-  ],
-  "pros": ["...", "...", "..."],
-  "risks": ["...", "...", "..."]
+  "answers": [{ "id": 1, "status": "answered" | "pending", "answer": "..." }],
+  "facts": [{ "id": "f1", "text": "...", "confidence": "high"|"medium"|"low"|"needs_verification", "sources": [{ "kind": "transcript"|"marker"|"note"|"media", "timestampSec": 12.5, "quote": "..." }] }],
+  "pros": [ /* same claim shape */ ],
+  "risks": [ /* same claim shape; speculative risks MUST be needs_verification */ ],
+  "followUps": [ /* questions to ask agent/owner/inspector */ ],
+  "actionItems": [ /* next steps for the buyer */ ],
+  "new_questions": [ /* optional legacy; prefer followUps */ ]
 }
 
 Rules:
-1. new_questions must be dialogue-triggered, not a generic municipal checklist
-2. With Open Data: renovation/ADU/use → zoning fit; title/access → PID/easement/covenant; condo fees/levies → strata angle
-3. If dialogue never touches those themes, do not force Open Data questions
-4. Produce 2-5 follow-ups; no duplicates of existing bank
-5. Most follow-ups pending unless fully answered
-6. answers must cover every bank id; empty bank → answers=[]
-7. pros / risks exactly 3 short family-facing lines each`,
+1. facts = only statements clearly said by people on the recording
+2. Do not write guesses as facts — use needs_verification
+3. risks are preliminary AI judgments, not a professional inspection
+4. followUps 2-5 items; dialogue-triggered; no generic checklist dump
+5. answers must cover every bank id; empty bank → answers=[]
+6. Prefer 2-5 items per list; empty arrays allowed
+7. sources should cite timestampSec / quote when possible`,
         },
       ],
     });
 
     const content = completion.choices[0]?.message?.content ?? "";
-    const analysis = extractJson(content);
-
-    if (!Array.isArray(analysis.answers) || !Array.isArray(analysis.pros) || !Array.isArray(analysis.risks)) {
-      throw new Error("JSON 格式不完整");
+    let raw: unknown;
+    try {
+      raw = extractJsonObject(content);
+    } catch {
+      return NextResponse.json(
+        {
+          error: "AI 回傳格式錯誤（不是有效 JSON），請稍後再試",
+          code: "ai_json_parse_error",
+        },
+        { status: 422 },
+      );
     }
 
-    const newQuestions = Array.isArray(analysis.new_questions)
-      ? analysis.new_questions
+    const payload = {
+      ...(raw as ProcessRecordingLegacyPayload),
+      transcript,
+    };
+
+    const validated = validateAndNormalizeSummary(payload, {
+      mediaId,
+      noteId: Number.isFinite(noteId) ? noteId : null,
+    });
+
+    if (!validated.ok) {
+      return NextResponse.json(
+        {
+          error: validated.error,
+          code: "ai_schema_invalid",
+          issues: validated.issues,
+        },
+        { status: 422 },
+      );
+    }
+
+    const summary = validated.value;
+    const legacyAnswers = Array.isArray((payload as ProcessRecordingLegacyPayload).answers)
+      ? (payload as ProcessRecordingLegacyPayload).answers!
+      : [];
+
+    const newQuestions = Array.isArray((payload as ProcessRecordingLegacyPayload).new_questions)
+      ? (payload as ProcessRecordingLegacyPayload).new_questions!
           .filter((q) => typeof q?.text === "string" && q.text.trim().length > 0)
           .slice(0, 5)
           .map((q) => ({
             text: q.text.trim(),
-            status: q.status === "answered" ? "answered" : "pending",
+            status: q.status === "answered" ? ("answered" as const) : ("pending" as const),
             answer:
               q.status === "answered" && q.answer?.trim()
                 ? q.answer.trim()
@@ -212,17 +273,26 @@ Rules:
             reason: q.reason?.trim() || "",
             based_on: q.based_on?.trim() || "",
           }))
-      : [];
+      : summary.followUps.slice(0, 5).map((item) => ({
+          text: item.text,
+          status: "pending" as const,
+          answer: "待確認",
+          reason: "",
+          based_on: item.sources[0]?.quote || "",
+        }));
 
     return NextResponse.json({
-      transcript,
-      answers: analysis.answers,
+      transcript: summary.transcript || transcript,
+      answers: legacyAnswers,
       new_questions: newQuestions,
-      pros: analysis.pros.slice(0, 3),
-      risks: analysis.risks.slice(0, 3),
+      /** Legacy string arrays for existing card/sync paths. */
+      pros: claimsToLegacyStrings(summary.pros, 5),
+      risks: claimsToLegacyStrings(summary.risks, 5),
+      summary,
+      warnings: validated.warnings,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "處理錄音失敗";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message, code: "ai_processing_failed" }, { status: 500 });
   }
 }

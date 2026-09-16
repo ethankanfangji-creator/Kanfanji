@@ -37,7 +37,9 @@ export default function LoginPage() {
           password,
         });
         if (error) throw error;
-        window.location.href = "/";
+        const next = new URLSearchParams(window.location.search).get("next");
+        window.location.href =
+          next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
         return;
       }
     } catch (error) {

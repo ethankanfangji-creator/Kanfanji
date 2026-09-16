@@ -41,8 +41,19 @@ export function extensionFor(file: Blob, fallback: string) {
 }
 
 export function newShareToken(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID().replace(/-/g, "");
+  // 32 CSPRNG bytes → 64 hex. Avoid Date.now sequential / guessable tokens.
+  if (typeof crypto !== "undefined" && "getRandomValues" in crypto) {
+    const bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
   }
-  return `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+  // Node / older runtimes
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { randomBytes } = require("node:crypto") as typeof import("node:crypto");
+    return randomBytes(32).toString("hex");
+  } catch {
+    // Last resort — still non-sequential but weaker than CSPRNG
+    return `s${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
+  }
 }

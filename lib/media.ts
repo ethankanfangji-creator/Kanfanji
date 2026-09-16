@@ -29,9 +29,19 @@ export async function uploadViewingFile(
   file: Blob,
   filename: string,
 ): Promise<string> {
-  const { supabase, user } = await requireAuthedClient();
+  const { supabase } = await requireAuthedClient();
 
-  const path = `${user.id}/${viewingId}/${folder}/${filename}`;
+  const { data: viewing, error: viewingError } = await supabase
+    .from("viewings")
+    .select("user_id")
+    .eq("id", viewingId)
+    .maybeSingle();
+  if (viewingError) throw viewingError;
+  if (!viewing?.user_id) throw new Error("找不到案件或沒有媒體權限");
+
+  // Canonical path remains owner_id/viewing_id/... for both owner and editor.
+  const ownerId = String(viewing.user_id);
+  const path = `${ownerId}/${viewingId}/${folder}/${filename}`;
   const { error } = await supabase.storage.from(MEDIA_BUCKET).upload(path, file, {
     upsert: true,
     contentType: file.type || undefined,
@@ -70,40 +80,24 @@ export async function createSignedMediaUrls(
 }
 
 /**
- * Append a storage path to a media URL array with a compare-and-set style read.
- * Last successful writer wins for the array contents (LWW at row level is handled by sync).
+ * Append a storage path to a media URL array with revision-based CAS when the
+ * collaboration migration is available.
  */
 export async function appendViewingPath(
   viewingId: string,
   column: "photo_urls" | "video_urls" | "audio_urls",
   path: string,
 ) {
-  const { supabase } = await requireAuthedClient();
-
-  const { data, error } = await supabase
-    .from("viewings")
-    .select("photo_urls, video_urls, audio_urls")
-    .eq("id", viewingId)
-    .single();
-  if (error) throw error;
-
-  const current = ((data as Record<string, string[] | undefined>)?.[column] ?? []) as string[];
-  if (current.includes(path)) return;
-
-  const { error: updateError } = await supabase
-    .from("viewings")
-    .update({
-      [column]: [...current, path],
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", viewingId);
-  if (updateError) {
-    // Older DBs may lack audio_urls — fall back silently for that column only.
-    if (column === "audio_urls" && updateError.message.includes("audio_urls")) {
-      return;
-    }
-    throw updateError;
-  }
+  const response = await fetch(`/api/viewings/${viewingId}/media`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ column, path }),
+  });
+  if (response.ok) return;
+  const body = (await response.json().catch(() => null)) as {
+    error?: string;
+  } | null;
+  throw new Error(body?.error || "MEDIA_APPEND_FAILED");
 }
 
 /** @deprecated Prefer appendViewingPath; kept for call-site compatibility during migrate. */

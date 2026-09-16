@@ -1,5 +1,9 @@
 /** IndexedDB schema for a single active on-device viewing draft + media blobs. */
 
+import type { AudioMarker } from "@/lib/audio-markers";
+import type { ViewingAiSummary } from "@/lib/ai-summary";
+import type { FieldChecklistItem } from "@/lib/field-capture";
+
 export const IDB_NAME = "kanfangji";
 export const IDB_VERSION = 1;
 
@@ -41,6 +45,8 @@ export type DraftAudioNote = {
   mediaId?: string;
   /** text = typed field note; transcript = voice pipeline. */
   kind?: "transcript" | "text";
+  /** Realtime markers captured during recording (seekable in player / AI). */
+  markers?: AudioMarker[];
 };
 
 export type ViewingDraftRecord = {
@@ -72,20 +78,56 @@ export type ViewingDraftRecord = {
   layoutLabel?: string;
   listingUrl?: string;
   setupNotes?: string;
+  /**
+   * Audio blob saved on stop/interrupt before Whisper finishes.
+   * Cleared after successful processRecording (or user discards).
+   */
+  pendingAudioProcess?: {
+    mediaId: string;
+    clientNumericId: number;
+    durationSec: number;
+    createdAt: string;
+    markers?: AudioMarker[];
+  } | null;
+  /**
+   * Markers for the in-progress recording (survive interrupt / reload).
+   * Cleared after stop+save attaches them to the note/media.
+   */
+  liveAudioMarkers?: AudioMarker[];
+  /** Structured AI summary from process-recording (editable). */
+  aiSummary?: ViewingAiSummary | null;
+  /**
+   * On-site inspection checklist (separate from AI question bank).
+   * Optional for older drafts — UI seeds presets when missing/empty.
+   */
+  fieldChecklist?: FieldChecklistItem[];
 };
 
 export type MediaRecord = {
   id: string;
   draftId: string;
   kind: MediaKind;
-  /** Display tag / clip label */
+  /** Display tag / clip label (photo tag label or tag id) */
   label: string;
+  /** Stable photo tag id when kind === "photo". */
+  tagId?: string;
+  /** One-line caption / annotation for the media item. */
+  note?: string;
   mimeType: string;
   size: number;
   createdAt: string;
+  /** Original bytes — source of truth for upload / Vision. */
   blob: Blob;
+  /**
+   * Optional downscaled JPEG for grid previews only.
+   * Prefer this for list UI; keep full `blob` for expand / upload.
+   */
+  thumbBlob?: Blob | null;
+  thumbMimeType?: string | null;
   remotePath: string | null;
   uploadStatus: MediaUploadStatus;
   /** Client-side numeric id used in UI lists (Date.now based). */
   clientNumericId: number;
+  /** Audio markers (kind=audio) for player seek + AI context. */
+  markers?: AudioMarker[];
 };

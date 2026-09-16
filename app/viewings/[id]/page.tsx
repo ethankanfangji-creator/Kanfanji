@@ -2,8 +2,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AlertTriangle, ArrowLeft, Camera, Check, MapPin, Video } from "lucide-react";
 import { requireUser } from "@/lib/auth";
-import { hydrateViewingMedia } from "@/lib/share";
+import { CollaborationPanel } from "@/components/collaboration/CollaborationPanel";
+import { ViewingCollaborativeEditor } from "@/components/collaboration/ViewingCollaborativeEditor";
+import { getViewingRole } from "@/lib/collaboration/server";
+import { signPathsWithClient } from "@/lib/viewing-sync";
 import type { Viewing, ViewingAudioNote } from "@/lib/types";
+import { createAdminClient } from "@/utils/supabase/admin";
 
 function formatWhen(iso: string) {
   return new Intl.DateTimeFormat("zh-TW", {
@@ -21,28 +25,35 @@ export default async function ViewingDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const { supabase } = await requireUser();
-  let { data, error } = await supabase
+  const { supabase, user } = await requireUser();
+  const role = await getViewingRole(id, user.id);
+  if (!role) notFound();
+  const admin = createAdminClient();
+  const selectColumns: string =
+    role === "viewer"
+      ? "id, user_id, address, tags, market, questions, pros, risks, photo_urls, video_urls, property, revision, created_at, updated_at"
+      : role === "owner"
+        ? "id, user_id, address, tags, market, questions, notes, pros, risks, photo_urls, video_urls, audio_urls, share_token, property, revision, created_at, updated_at"
+        : "id, user_id, address, tags, market, questions, notes, pros, risks, photo_urls, video_urls, audio_urls, property, revision, created_at, updated_at";
+  let { data, error } = await admin
     .from("viewings")
-    .select(
-      "id, address, tags, market, questions, notes, pros, risks, photo_urls, video_urls, audio_urls, share_token, property, created_at, updated_at",
-    )
+    .select(selectColumns)
     .eq("id", id)
     .maybeSingle();
 
   if (error?.message?.includes("notes") || error?.message?.includes("pros") || error?.message?.includes("share_token")) {
-    ({ data, error } = await supabase
+    ({ data, error } = await admin
       .from("viewings")
       .select(
-        "id, address, tags, market, questions, photo_urls, video_urls, property, created_at, updated_at",
+        "id, user_id, address, tags, market, questions, photo_urls, video_urls, property, revision, created_at, updated_at",
       )
       .eq("id", id)
       .maybeSingle());
   } else if (error?.message?.includes("property")) {
-    ({ data, error } = await supabase
+    ({ data, error } = await admin
       .from("viewings")
       .select(
-        "id, address, tags, market, questions, photo_urls, video_urls, created_at, updated_at",
+        "id, user_id, address, tags, market, questions, photo_urls, video_urls, revision, created_at, updated_at",
       )
       .eq("id", id)
       .maybeSingle());
@@ -68,7 +79,19 @@ export default async function ViewingDetailPage({
 
   if (!data) notFound();
 
-  const viewing = await hydrateViewingMedia(data as Viewing);
+  const rawViewing = data as unknown as Viewing;
+  const [photoUrls, videoUrls] = await Promise.all([
+    signPathsWithClient(supabase, rawViewing.photo_urls ?? []),
+    signPathsWithClient(supabase, rawViewing.video_urls ?? []),
+  ]);
+  const viewing: Viewing = {
+    ...rawViewing,
+    photo_urls: photoUrls,
+    video_urls: videoUrls,
+    // Viewer never receives raw transcripts in the rendered RSC payload.
+    notes: role === "viewer" ? [] : rawViewing.notes,
+    audio_urls: [],
+  };
   const questions = viewing.questions ?? [];
   const checked = questions.filter((q) => q.checked);
   const notes = (viewing.notes ?? []) as ViewingAudioNote[];
@@ -78,7 +101,8 @@ export default async function ViewingDetailPage({
   const videos = viewing.video_urls ?? [];
   const property = (viewing.property ?? {}) as Record<string, unknown>;
   const openData = (property.openData ?? null) as Record<string, unknown> | null;
-  const sharePath = viewing.share_token ? `/s/${viewing.share_token}` : "";
+  const sharePath =
+    role === "owner" && viewing.share_token ? `/s/${viewing.share_token}` : "";
   const propertyRows = [
     ["來源", property.source],
     ["城市", property.city],
@@ -141,6 +165,17 @@ export default async function ViewingDetailPage({
             </Link>
           )}
         </div>
+
+        <ViewingCollaborativeEditor
+          viewingId={viewing.id}
+          role={role}
+          initialRevision={viewing.revision ?? 1}
+          initialAddress={viewing.address}
+          initialPros={pros}
+          initialRisks={risks}
+        />
+
+        <CollaborationPanel viewingId={viewing.id} />
 
         {(pros.length > 0 || risks.length > 0) && (
           <div className="grid grid-cols-2 gap-3 mb-4">

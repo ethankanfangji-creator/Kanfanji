@@ -130,6 +130,24 @@ export function canGenerateShareCard(snap: WizardSnapshot): boolean {
   return getShareChecklist(snap).every((item) => !item.required || item.ok);
 }
 
+export type PublishMediaState = {
+  id: string;
+  uploadStatus: "local" | "uploading" | "uploaded" | "failed";
+  remotePath: string | null;
+};
+
+export function getPublishReadiness(
+  selectedMediaIds: string[],
+  media: PublishMediaState[],
+): { ready: boolean; blockingIds: string[] } {
+  const byId = new Map(media.map((item) => [item.id, item]));
+  const blockingIds = selectedMediaIds.filter((id) => {
+    const item = byId.get(id);
+    return !item || item.uploadStatus !== "uploaded" || !item.remotePath;
+  });
+  return { ready: blockingIds.length === 0, blockingIds };
+}
+
 export function canEnterStep(target: WizardStep, snap: WizardSnapshot): boolean {
   if (target === 1) return true;
   // Step 2 and 3 only require setup complete so Step 3 checklist can show gaps.

@@ -45,6 +45,8 @@ const baseViewing: Viewing = {
           tag: "living",
           note: "south",
           selected: true,
+          remotePath: "user-secret/private/photo.jpg",
+          internalOnly: "must not leak",
         },
       ],
       disclaimer: "AI disclaimer",
@@ -68,6 +70,9 @@ describe("share access public dto", () => {
     expect(JSON.stringify(payload)).not.toContain("full transcript");
     expect(JSON.stringify(payload)).not.toContain("user-secret");
     expect(JSON.stringify(payload)).not.toContain("decisionSummaryDraft");
+    expect(JSON.stringify(payload)).not.toContain("remotePath");
+    expect(JSON.stringify(payload)).not.toContain("internalOnly");
+    expect(JSON.stringify(payload)).not.toContain("user-secret/private");
   });
 
   it("caps legacy highlights when no decision summary", () => {

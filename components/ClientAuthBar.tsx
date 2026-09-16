@@ -1,13 +1,17 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { useI18n } from "@/components/I18nProvider";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
+import { resetSyncEngineSingleton } from "@/lib/sync";
+import { setPersistenceAccountScope } from "@/lib/idb/draft-store";
 
 export function ClientAuthBar() {
   const { messages } = useI18n();
+  const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(() => !isSupabaseConfigured());
 
@@ -15,10 +19,13 @@ export function ClientAuthBar() {
     const supabase = getSupabase();
     if (!supabase) return;
 
-    void supabase.auth.getUser().then(({ data }) => {
-      setUser(data.user);
-      setReady(true);
-    });
+    void supabase.auth.getUser()
+      .then(({ data }) => setUser(data.user))
+      .catch(() => {
+        setPersistenceAccountScope(null);
+        setUser(null);
+      })
+      .finally(() => setReady(true));
 
     const {
       data: { subscription },
@@ -61,7 +68,9 @@ export function ClientAuthBar() {
         onClick={() => {
           const supabase = getSupabase();
           void supabase?.auth.signOut().then(() => {
-            window.location.href = "/login";
+            resetSyncEngineSingleton();
+            setPersistenceAccountScope(null);
+            router.replace("/login");
           });
         }}
         className="h-8 px-3 rounded-full bg-white border border-black/10 text-[11px] font-bold"

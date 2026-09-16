@@ -46,7 +46,7 @@ export function createSupabaseViewingSyncAdapter(): ViewingSyncAdapter {
       if (!supabase) return null;
       const { data, error } = await supabase
         .from("viewings")
-        .select("id, address, client_updated_at, updated_at")
+        .select("id, address, client_updated_at, updated_at, revision")
         .eq("id", remoteId)
         .maybeSingle();
       if (error || !data) return null;
@@ -56,6 +56,7 @@ export function createSupabaseViewingSyncAdapter(): ViewingSyncAdapter {
         clientUpdatedAt: data.client_updated_at ? String(data.client_updated_at) : null,
         updatedAt: data.updated_at ? String(data.updated_at) : null,
         shareToken: null,
+        revision: typeof data.revision === "number" ? data.revision : null,
       };
     },
 
@@ -72,9 +73,9 @@ export function createSupabaseViewingSyncAdapter(): ViewingSyncAdapter {
           if (remoteTs > localTs) {
             return {
               id: input.remoteViewingId,
-              shareToken: remote.shareToken || input.shareToken || "",
               conflict: true,
               skippedAsStale: true,
+              revision: remote.revision ?? input.expectedRevision ?? 0,
             };
           }
         }
@@ -95,16 +96,17 @@ export function createSupabaseViewingSyncAdapter(): ViewingSyncAdapter {
           propertyId: input.propertyId,
           isPro: input.isPro,
           clientUpdatedAt: input.clientUpdatedAt,
-          shareToken: input.shareToken,
+          idempotencyKey: input.idempotencyKey,
+          expectedRevision: input.expectedRevision,
         },
         input.remoteViewingId,
       );
 
       return {
         id: result.id,
-        shareToken: result.shareToken,
-        conflict: false,
+        conflict: result.conflict,
         skippedAsStale: result.skippedAsStale,
+        revision: result.revision,
       };
     },
 

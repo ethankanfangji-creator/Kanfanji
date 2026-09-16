@@ -5,6 +5,7 @@ import {
 } from "@/lib/share-card";
 import type { Viewing } from "@/lib/types";
 import type {
+  PublicDecisionSummary,
   PublicShareFailure,
   PublicSharePayload,
   PublicShareResult,
@@ -25,6 +26,56 @@ function stripForbiddenKeys(value: unknown): unknown {
     out[key] = stripForbiddenKeys(nested);
   }
   return out;
+}
+
+function publicTextItems(
+  items: DecisionSummarySnapshot["pros"],
+): PublicDecisionSummary["pros"] {
+  return items
+    .filter((item) => item.selected && item.text.trim())
+    .map((item) => ({
+      id: String(item.id),
+      text: item.text,
+      selected: true as const,
+    }));
+}
+
+/** Build, rather than sanitize, the public snapshot so unknown fields cannot leak. */
+export function toPublicDecisionSummaryDto(
+  snapshot: DecisionSummarySnapshot,
+): PublicDecisionSummary {
+  const selected = toPublicDecisionSummary(snapshot);
+  return {
+    version: 1,
+    address: selected.address,
+    viewingAt: selected.viewingAt,
+    unitLabel: selected.unitLabel,
+    priceLabel: selected.priceLabel,
+    layoutLabel: selected.layoutLabel,
+    ...(selected.areaLabel === undefined ? {} : { areaLabel: selected.areaLabel }),
+    ...(selected.managementFeeLabel === undefined
+      ? {}
+      : { managementFeeLabel: selected.managementFeeLabel }),
+    listingUrl: selected.listingUrl,
+    setupNotes: selected.setupNotes,
+    overallRating: selected.overallRating,
+    pros: publicTextItems(selected.pros),
+    risks: publicTextItems(selected.risks),
+    facts: publicTextItems(selected.facts),
+    followUps: publicTextItems(selected.followUps),
+    actionItems: publicTextItems(selected.actionItems),
+    photos: selected.photos
+      .filter((photo) => photo.selected)
+      .map((photo) => ({
+        id: String(photo.id),
+        url: photo.url,
+        tag: photo.tag,
+        note: photo.note,
+        selected: true as const,
+      })),
+    disclaimer: selected.disclaimer,
+    generatedAt: selected.generatedAt,
+  };
 }
 
 export function assertNoForbiddenPublicKeys(payload: unknown): string[] {
@@ -94,9 +145,7 @@ export function toPublicSharePayload(input: {
       ? toPublicDecisionSummary(input.viewing.property.decisionSummary)
       : null);
 
-  const summary = raw
-    ? (stripForbiddenKeys(toPublicDecisionSummary(raw)) as DecisionSummarySnapshot)
-    : null;
+  const summary = raw ? toPublicDecisionSummaryDto(raw) : null;
 
   const photoUrls =
     input.photoUrls ??

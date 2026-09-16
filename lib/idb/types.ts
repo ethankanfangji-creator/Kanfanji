@@ -5,7 +5,7 @@ import type { ViewingAiSummary } from "@/lib/ai-summary";
 import type { FieldChecklistItem } from "@/lib/field-capture";
 
 export const IDB_NAME = "kanfangji";
-export const IDB_VERSION = 1;
+export const IDB_VERSION = 3;
 
 /** Soft cap for local media blobs (keep uploaded copies for offline preview). */
 export const MEDIA_QUOTA_BYTES = 300 * 1024 * 1024;
@@ -47,6 +47,8 @@ export type DraftAudioNote = {
   kind?: "transcript" | "text";
   /** Realtime markers captured during recording (seekable in player / AI). */
   markers?: AudioMarker[];
+  /** Durable AI job used to make recovered application idempotent. */
+  aiJobId?: string;
 };
 
 export type ViewingDraftRecord = {
@@ -78,6 +80,13 @@ export type ViewingDraftRecord = {
   layoutLabel?: string;
   listingUrl?: string;
   setupNotes?: string;
+  /** Explicit, versioned AI consent scoped to this local viewing session. */
+  aiConsent?: {
+    version: string;
+    sessionId: string;
+    decision: "accepted" | "declined";
+    decidedAt: string;
+  } | null;
   /**
    * Audio blob saved on stop/interrupt before Whisper finishes.
    * Cleared after successful processRecording (or user discards).
@@ -118,6 +127,8 @@ export type MediaRecord = {
   createdAt: string;
   /** Original bytes — source of truth for upload / Vision. */
   blob: Blob;
+  /** True when uploaded bytes were evicted; metadata and remotePath remain usable. */
+  bodyEvicted?: boolean;
   /**
    * Optional downscaled JPEG for grid previews only.
    * Prefer this for list UI; keep full `blob` for expand / upload.

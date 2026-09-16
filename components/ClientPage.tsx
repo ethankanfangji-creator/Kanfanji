@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
@@ -22,6 +23,7 @@ import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { SyncStatusBanner } from "@/components/SyncStatusBanner";
 import { MediaPermissionBanner } from "@/components/media/MediaPermissionBanner";
 import { PermissionPreflight } from "@/components/media/PermissionPreflight";
+import { MediaPickerInputs } from "@/components/media/MediaPickerInputs";
 import { AudioNotePlayer } from "@/components/media/AudioNotePlayer";
 import { RecordingMarkerBar } from "@/components/media/RecordingMarkerBar";
 import { FieldChecklistPanel } from "@/components/viewing-wizard/FieldChecklistPanel";
@@ -32,6 +34,7 @@ import { WizardBottomNav, WizardStepper } from "@/components/viewing-wizard/Wiza
 import { DecisionSummaryCard } from "@/components/share-card/DecisionSummaryCard";
 import { SharePrivacyCheck } from "@/components/share-card/SharePrivacyCheck";
 import { PdfExportButton } from "@/components/pdf/PdfExportButton";
+import { Dialog } from "@/components/ui/Dialog";
 import { useI18n } from "@/components/I18nProvider";
 import {
   buildCardFromViewing,
@@ -62,6 +65,18 @@ import {
   validateAndNormalizeSummary,
   type ViewingAiSummary,
 } from "@/lib/ai-summary";
+import {
+  AI_CONSENT_VERSION,
+  blobToDataUrl,
+  mapWithConcurrency,
+  normalizeImageForAi,
+  runIfAiConsented,
+} from "@/lib/ai-boundary/client";
+import {
+  applyCommittedAiJob,
+  completeAiJobIfLeaseHeld,
+  failAiJobIfLeaseHeld,
+} from "@/lib/ai-boundary/job-commit";
 import { AiSummaryPanel } from "@/components/media/AiSummaryPanel";
 import {
   createCustomChecklistItem,
@@ -74,28 +89,47 @@ import {
 } from "@/lib/field-capture";
 import {
   deleteMedia,
+  claimCanonicalGuestData,
+  claimLegacyUnscopedDraft,
+  discoverLegacyUnscopedDraft,
   emptyDraft,
   getActiveDraft,
   getMedia,
   listMedia,
   putActiveDraft,
   putMedia,
+  requirePersistence,
   saveBlobAsMedia,
+  setPersistenceAccountScope,
   updateMediaFields,
+  type LegacyDraftClaimStatus,
 } from "@/lib/idb/draft-store";
-import { createEntityId } from "@/lib/draft-db";
+import {
+  DraftDb,
+  accountScopeForUser,
+  createEntityId,
+  type AiJob,
+} from "@/lib/draft-db";
 import { createSignedMediaUrl, extensionFor } from "@/lib/media";
+import { validateImportedMedia } from "@/lib/media-import";
 import {
   createBrowserMediaPermissionAdapter,
   type CaptureKind,
   type MediaPermissionStatus,
 } from "@/lib/media-permissions";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
-import { getSyncEngine, syncStatusToUi, type SessionUiStatus } from "@/lib/sync";
+import {
+  claimGuestDrafts,
+  getSyncEngine,
+  resetSyncEngineSingleton,
+  syncStatusToUi,
+  type SessionUiStatus,
+} from "@/lib/sync";
 import {
   canEnterStep,
   canGenerateShareCard,
   fromDatetimeLocalValue,
+  getPublishReadiness,
   getShareChecklist,
   getStepStatus,
   isStep1Complete,
@@ -114,6 +148,7 @@ type Question = {
   basedOn?: string;
   isDynamic?: boolean;
   source?: "photo" | "audio" | "opendata" | string;
+  aiJobId?: string;
 };
 
 type AudioNote = {
@@ -124,6 +159,7 @@ type AudioNote = {
   mediaId?: string;
   kind?: "transcript" | "text";
   markers?: AudioMarker[];
+  aiJobId?: string;
 };
 
 type Clip = {
@@ -151,9 +187,17 @@ type Photo = {
   remotePath?: string;
 };
 
+type AiConsentDecision = {
+  version: string;
+  sessionId: string;
+  decision: "accepted" | "declined";
+  decidedAt: string;
+};
+
 const FREE_VIEWING_LIMIT = 3;
 
 export function ClientPage() {
+  const router = useRouter();
   const { locale, messages, t } = useI18n();
   const [wizardStep, setWizardStep] = useState<WizardStep>(1);
   const [address, setAddress] = useState("");
@@ -174,6 +218,9 @@ export function ClientPage() {
   const [fieldChecklist, setFieldChecklist] = useState<FieldChecklistItem[]>([]);
   const [liveMarkers, setLiveMarkers] = useState<AudioMarker[]>([]);
   const [aiSummary, setAiSummary] = useState<ViewingAiSummary | null>(null);
+  const [aiConsent, setAiConsent] = useState<AiConsentDecision | null>(null);
+  const [showAiConsent, setShowAiConsent] = useState(false);
+  const aiConsentResolverRef = useRef<((accepted: boolean) => void) | null>(null);
   const [audioPlaybackUrls, setAudioPlaybackUrls] = useState<Record<number, string>>({});
   const [annotatingPhotoId, setAnnotatingPhotoId] = useState<number | null>(null);
   const [annotateTagId, setAnnotateTagId] = useState<PhotoTagId>("other");
@@ -216,8 +263,10 @@ export function ClientPage() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const photosRef = useRef<Photo[]>([]);
   const clipsRef = useRef<Clip[]>([]);
-  const photoInput = useRef<HTMLInputElement>(null);
-  const videoInput = useRef<HTMLInputElement>(null);
+  const photoCaptureInput = useRef<HTMLInputElement>(null);
+  const photoGalleryInput = useRef<HTMLInputElement>(null);
+  const videoCaptureInput = useRef<HTMLInputElement>(null);
+  const videoGalleryInput = useRef<HTMLInputElement>(null);
   const audioImportInput = useRef<HTMLInputElement>(null);
   const [showCard, setShowCard] = useState(false);
   const [cardDraft, setCardDraft] = useState<DecisionSummarySnapshot | null>(null);
@@ -240,6 +289,13 @@ export function ClientPage() {
   const [loginMode, setLoginMode] = useState<"signin" | "signup">("signin");
   const [loginError, setLoginError] = useState("");
   const [user, setUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(() => !isSupabaseConfigured());
+  const [legacyDraftClaim, setLegacyDraftClaim] = useState<LegacyDraftClaimStatus>({
+    status: "none",
+  });
+  const [claimingLegacyDraft, setClaimingLegacyDraft] = useState(false);
+  const [draftReloadGeneration, setDraftReloadGeneration] = useState(0);
+  const legacyClaimBlockedRef = useRef(false);
   const [freeCount, setFreeCount] = useState(0);
   const [isPro, setIsPro] = useState(false);
   const clientUpdatedAtRef = useRef(new Date().toISOString());
@@ -290,23 +346,83 @@ export function ClientPage() {
     fieldChecklist: [] as FieldChecklistItem[],
     liveAudioMarkers: [] as AudioMarker[],
     aiSummary: null as ViewingAiSummary | null,
+    aiConsent: null as AiConsentDecision | null,
   });
 
   const configured = isSupabaseConfigured();
   const market = marketCode === "TH" ? "TH" : "CA";
+  const userIdForLegacyClaim = user?.id;
 
   useEffect(() => {
     const supabase = getSupabase();
-    if (!supabase) return;
+    if (!supabase) {
+      setPersistenceAccountScope(null);
+      return;
+    }
 
-    void supabase.auth.getUser().then(({ data }) => setUser(data.user));
+    void supabase.auth.getUser()
+      .then(({ data }) => {
+        setPersistenceAccountScope(data.user?.id ?? null);
+        if (!data.user) setLegacyDraftClaim({ status: "none" });
+        setUser(data.user);
+      })
+      .catch(() => {
+        setPersistenceAccountScope(null);
+        setLegacyDraftClaim({ status: "none" });
+        setUser(null);
+      })
+      .finally(() => setAuthReady(true));
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_OUT") {
+        resetSyncEngineSingleton();
+        router.replace("/login");
+      }
+      setPersistenceAccountScope(session?.user?.id ?? null);
+      if (!session?.user) setLegacyDraftClaim({ status: "none" });
       setUser(session?.user ?? null);
+      setAuthReady(true);
     });
     return () => subscription.unsubscribe();
-  }, []);
+  }, [router]);
+
+  useEffect(() => {
+    if (!authReady || !userIdForLegacyClaim) {
+      legacyClaimBlockedRef.current = false;
+      return;
+    }
+    let cancelled = false;
+    void discoverLegacyUnscopedDraft(userIdForLegacyClaim).then((status) => {
+      if (!cancelled) {
+        legacyClaimBlockedRef.current =
+          status.status === "available" || status.status === "copied";
+        setLegacyDraftClaim(status);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [authReady, userIdForLegacyClaim]);
+
+  async function claimLegacyDraft() {
+    if (
+      !user ||
+      (legacyDraftClaim.status !== "available" && legacyDraftClaim.status !== "copied")
+    ) return;
+    setClaimingLegacyDraft(true);
+    try {
+      const result = await claimLegacyUnscopedDraft(user.id);
+      setLegacyDraftClaim(result);
+      if (result.status === "verified") {
+        legacyClaimBlockedRef.current = false;
+        setLegacyDraftClaim({ status: "none" });
+        setDraftReloadGeneration((value) => value + 1);
+      }
+    } finally {
+      setClaimingLegacyDraft(false);
+    }
+  }
 
   // Load owner share-link metadata once a cloud viewing exists.
   useEffect(() => {
@@ -345,7 +461,7 @@ export function ClientPage() {
       try {
         const draft = await getActiveDraft();
         if (draft?.localSessionId) draftSessionIdRef.current = draft.localSessionId;
-        const engine = await getSyncEngine({ isPro });
+        const engine = await getSyncEngine({ isPro, userId: user.id });
         const result = await engine.processQueue();
         if (cancelled) return;
         if (draftSessionIdRef.current) {
@@ -378,10 +494,12 @@ export function ClientPage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const onOnline = () => {
-      if (!user || !draftReady) return;
+      if (!draftReady) return;
+      void recoverAiJobs();
+      if (!user) return;
       void (async () => {
         try {
-          const engine = await getSyncEngine({ isPro });
+          const engine = await getSyncEngine({ isPro, userId: user.id });
           await engine.processQueue();
           if (draftSessionIdRef.current) await refreshSessionUi(draftSessionIdRef.current);
         } catch (error) {
@@ -393,6 +511,12 @@ export function ClientPage() {
     return () => window.removeEventListener("online", onOnline);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, draftReady, isPro]);
+
+  useEffect(() => {
+    if (!draftReady || aiConsent?.decision !== "accepted") return;
+    void recoverAiJobs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftReady, aiConsent?.decision, aiConsent?.version, user?.id]);
 
   useEffect(() => {
     const supabase = getSupabase();
@@ -491,6 +615,7 @@ export function ClientPage() {
       fieldChecklist,
       liveAudioMarkers: liveMarkers,
       aiSummary,
+      aiConsent,
     };
   }, [
     address,
@@ -516,6 +641,7 @@ export function ClientPage() {
     fieldChecklist,
     liveMarkers,
     aiSummary,
+    aiConsent,
   ]);
 
   async function ensureLocalSessionId(): Promise<string> {
@@ -530,6 +656,200 @@ export function ClientPage() {
     return id;
   }
 
+  async function ensureAiConsent(): Promise<{ accepted: boolean; sessionId: string }> {
+    const sessionId = await ensureLocalSessionId();
+    const current = aiConsent;
+    if (
+      current?.decision === "accepted" &&
+      current.version === AI_CONSENT_VERSION &&
+      current.sessionId === sessionId
+    ) {
+      return { accepted: true, sessionId };
+    }
+    const accepted = await new Promise<boolean>((resolve) => {
+      aiConsentResolverRef.current = resolve;
+      setShowAiConsent(true);
+    });
+    const decision: AiConsentDecision = {
+      version: AI_CONSENT_VERSION,
+      sessionId,
+      decision: accepted ? "accepted" : "declined",
+      decidedAt: new Date().toISOString(),
+    };
+    setAiConsent(decision);
+    await flushDraftToIdb({ localSessionId: sessionId, aiConsent: decision });
+    if (!accepted) setSyncMessage(messages.aiBoundary.declined);
+    return { accepted, sessionId };
+  }
+
+  function decideAiConsent(accepted: boolean) {
+    setShowAiConsent(false);
+    const resolve = aiConsentResolverRef.current;
+    aiConsentResolverRef.current = null;
+    resolve?.(accepted);
+  }
+
+  function applyPhotoAiQuestion(jobId: string, text: string, tag: string) {
+    setQuestions((current) => {
+      if (current.some((question) => question.aiJobId === jobId)) return current;
+      const base =
+        current.length > 0
+          ? current
+          : bankQuestions(locale, marketCode).map((question) => ({
+              ...question,
+              checked: false,
+            }));
+      return [
+        {
+          id: base.reduce((max, question) => Math.max(max, question.id), 0) + 1,
+          text,
+          checked: false,
+          isDynamic: true,
+          source: "photo",
+          basedOn: tag,
+          aiJobId: jobId,
+        },
+        ...base,
+      ];
+    });
+  }
+
+  async function applyRecoveredAudioResult(
+    result: Record<string, unknown>,
+    job: AiJob,
+  ): Promise<void> {
+    const summary = result.summary as ViewingAiSummary | undefined;
+    const transcript = typeof result.transcript === "string" ? result.transcript : "";
+    const noteId = typeof result.noteId === "number" ? result.noteId : Date.now();
+    if (!summary || !transcript) return;
+    const nextNote: AudioNote = {
+      id: noteId,
+      duration: Number(result.durationSec) || 1,
+      transcript,
+      matched: Array.isArray(result.matched) ? (result.matched as number[]) : [],
+      mediaId: typeof result.mediaId === "string" ? result.mediaId : job.mediaId,
+      kind: "transcript",
+      markers: Array.isArray(result.markers) ? (result.markers as AudioMarker[]) : [],
+      aiJobId: job.id,
+    };
+    const nextNotes = notesRef.current.some((note) => note.aiJobId === job.id)
+      ? notesRef.current
+      : [...notesRef.current, nextNote];
+    notesRef.current = nextNotes;
+    setNotes(nextNotes);
+    setAiSummary(summary);
+    const nextPros = claimsToLegacyStrings(summary.pros, 5);
+    const nextRisks = claimsToLegacyStrings(summary.risks, 5);
+    if (nextPros.length) setPros(nextPros);
+    if (nextRisks.length) setRisks(nextRisks);
+    await flushDraftToIdb({
+      notes: nextNotes,
+      pros: nextPros.length ? nextPros : pros,
+      risks: nextRisks.length ? nextRisks : risks,
+      aiSummary: summary,
+    });
+  }
+
+  async function recoverAiJobs() {
+    if (
+      !draftReady ||
+      !navigator.onLine ||
+      aiConsent?.decision !== "accepted" ||
+      aiConsent.version !== AI_CONSENT_VERSION
+    ) {
+      return;
+    }
+    const scope = accountScopeForUser(user?.id ?? null);
+    const db = await DraftDb.open({ accountScope: scope });
+    let job: AiJob | null = null;
+    try {
+      const completed = (await db.aiJobs.list()).filter(
+        (item) => item.syncStatus === "synced" && !item.appliedAt,
+      );
+      for (const item of completed) {
+        await applyCommittedAiJob(db.aiJobs, item, async (result) => {
+          if (item.kind === "photo") {
+            const text = typeof result.text === "string" ? result.text : "";
+            const tag = typeof result.tag === "string" ? result.tag : "";
+            if (text) applyPhotoAiQuestion(item.id, text, tag);
+          } else {
+            await applyRecoveredAudioResult(result, item);
+          }
+        });
+      }
+      job = await db.aiJobs.claimNext(`browser-${crypto.randomUUID()}`);
+    } finally {
+      db.close();
+    }
+    if (!job || job.consentVersion !== AI_CONSENT_VERSION) return;
+    const media = await getMedia(job.mediaId);
+    if (!media?.blob) {
+      const failed = await DraftDb.open({ accountScope: scope });
+      try {
+        await failAiJobIfLeaseHeld(failed.aiJobs, job, "media_missing");
+      } finally {
+        failed.close();
+      }
+      return;
+    }
+    if (job.kind === "audio") {
+      await processRecording(
+        media.blob,
+        Number(job.payload.durationSec) || 1,
+        media.id,
+        Array.isArray(job.payload.markers) ? (job.payload.markers as AudioMarker[]) : undefined,
+        job,
+      );
+      return;
+    }
+    try {
+      const derivative = await normalizeImageForAi(media.blob);
+      const response = await fetch("/api/vision", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          base64: await blobToDataUrl(derivative),
+          tag: typeof job.payload.tag === "string" ? job.payload.tag : "on-site",
+          locale,
+          market: marketCode,
+          mediaId: job.mediaId,
+          consentVersion: AI_CONSENT_VERSION,
+          consentSessionId: job.sessionId,
+          identityKind: user ? "user" : "guest",
+        }),
+      });
+      const payload = (await response.json()) as { question?: string; code?: string };
+      if (!response.ok || !payload.question) throw new Error(payload.code || "ai_failed");
+      const complete = await DraftDb.open({ accountScope: scope });
+      try {
+        const completed = await completeAiJobIfLeaseHeld(complete.aiJobs, job, {
+          text: payload.question,
+          tag: typeof job.payload.tag === "string" ? job.payload.tag : "on-site",
+          mediaId: job.mediaId,
+        });
+        if (!completed) return;
+        await applyCommittedAiJob(complete.aiJobs, completed, (result) => {
+          const text = typeof result.text === "string" ? result.text : "";
+          const tag = typeof result.tag === "string" ? result.tag : "";
+          if (text) applyPhotoAiQuestion(completed.id, text, tag);
+        });
+      } finally {
+        complete.close();
+      }
+    } catch (error) {
+      const failed = await DraftDb.open({ accountScope: scope });
+      try {
+        await failAiJobIfLeaseHeld(
+          failed.aiJobs,
+          job,
+          error instanceof Error ? error.message : "ai_failed",
+        );
+      } finally {
+        failed.close();
+      }
+    }
+  }
+
   async function refreshSessionUi(sessionId?: string | null) {
     const id = sessionId ?? draftSessionIdRef.current;
     if (!id) {
@@ -541,7 +861,7 @@ export function ClientPage() {
       return;
     }
     try {
-      const engine = await getSyncEngine({ isPro });
+      const engine = await getSyncEngine({ isPro, userId: user?.id ?? null });
       const ui = await engine.getSessionUiStatus(id);
       setSessionUiStatus(ui ?? syncStatusToUi(user ? "pending" : "local_only"));
     } catch {
@@ -577,9 +897,10 @@ export function ClientPage() {
       fieldChecklist: FieldChecklistItem[];
       liveAudioMarkers: AudioMarker[];
       aiSummary: ViewingAiSummary | null;
+      aiConsent: AiConsentDecision | null;
     }>,
   ) {
-    if (!draftHydratedRef.current) return;
+    if (!draftHydratedRef.current) return false;
     if (patch) {
       draftSnapshotRef.current = { ...draftSnapshotRef.current, ...patch };
       if (patch.localSessionId) draftSessionIdRef.current = patch.localSessionId;
@@ -605,7 +926,7 @@ export function ClientPage() {
         fieldChecklist: snap.fieldChecklist,
         aiSummary: snap.aiSummary,
       };
-      await putActiveDraft({
+      const persisted = await putActiveDraft({
         ...existing,
         localSessionId,
         address: snap.address,
@@ -632,12 +953,16 @@ export function ClientPage() {
         fieldChecklist: snap.fieldChecklist,
         liveAudioMarkers: snap.liveAudioMarkers,
         aiSummary: snap.aiSummary,
+        aiConsent: snap.aiConsent,
       });
+      requirePersistence(persisted);
       if (!sessionUiStatus || sessionUiStatus.status === "local_only" || !user) {
         setSessionUiStatus(syncStatusToUi(snap.viewingId && user ? "pending" : "local_only"));
       }
+      return true;
     } catch (error) {
       setSyncMessage(error instanceof Error ? error.message : "本機草稿儲存失敗");
+      return false;
     }
   }
 
@@ -645,15 +970,18 @@ export function ClientPage() {
    * Bridge UI/lib/idb draft → DraftDb, enqueue syncQueue, process per-item uploads.
    * Uses existing Supabase helpers via ViewingSyncAdapter (no new HTTP routes).
    */
-  async function syncViaQueue(options?: { openCard?: boolean }) {
-    const engine = await getSyncEngine({ isPro });
+  async function syncViaQueue(
+    options?: { openCard?: boolean },
+    authenticatedUser: User | null = user,
+  ) {
+    const engine = await getSyncEngine({ isPro, userId: authenticatedUser?.id ?? null });
     const sessionId = await ensureLocalSessionId();
     const mediaRows = await listMedia();
     const snap = draftSnapshotRef.current;
 
     await engine.importActiveDraft({
       sessionId,
-      userId: user?.id ?? null,
+      userId: authenticatedUser?.id ?? null,
       remoteViewingId: snap.viewingId,
       shareToken: snap.shareToken,
       address: snap.address.trim(),
@@ -680,14 +1008,14 @@ export function ClientPage() {
       })),
     });
 
-    if (!user) {
+    if (!authenticatedUser) {
       await flushDraftToIdb({ localSessionId: sessionId, syncStatus: "local_only" });
       await refreshSessionUi(sessionId);
       return { sessionId, skippedOffline: true as const, remoteViewingId: null };
     }
 
     setSessionUiStatus(syncStatusToUi("syncing"));
-    await engine.enqueueSession(sessionId, { userId: user.id });
+    await engine.enqueueSession(sessionId, { userId: authenticatedUser.id });
     const result = await engine.processQueue();
     const session = await engine.getSession(sessionId);
     const ui = await engine.getSessionUiStatus(sessionId);
@@ -711,11 +1039,11 @@ export function ClientPage() {
       const local = localMedia.find((item) => item.id === row.id);
       if (!local) continue;
       if (row.storagePath && row.uploadStatus === "uploaded") {
-        await putMedia({
+        requirePersistence(await putMedia({
           ...local,
           remotePath: row.storagePath,
           uploadStatus: "uploaded",
-        });
+        }));
       }
     }
 
@@ -759,7 +1087,7 @@ export function ClientPage() {
     setSyncingCard(true);
     setSessionUiStatus(syncStatusToUi("syncing"));
     try {
-      const engine = await getSyncEngine({ isPro });
+      const engine = await getSyncEngine({ isPro, userId: user.id });
       await engine.retryFailed(draftSessionIdRef.current);
       const session = await engine.getSession(draftSessionIdRef.current);
       const ui = await engine.getSessionUiStatus(draftSessionIdRef.current);
@@ -780,11 +1108,13 @@ export function ClientPage() {
 
   // Hydrate single active draft from IndexedDB (metadata first; media URLs lazy on Step 2).
   useEffect(() => {
+    if (!authReady) return;
     let cancelled = false;
     draftHydratedRef.current = false;
     mediaUrlsReadyRef.current = false;
 
     void (async () => {
+      setDraftReady(false);
       try {
         const draft = await getActiveDraft();
         const mediaRows = await listMedia();
@@ -924,6 +1254,9 @@ export function ClientPage() {
           if (draft.aiSummary) {
             setAiSummary(draft.aiSummary);
           }
+          if (draft.aiConsent) {
+            setAiConsent(draft.aiConsent);
+          }
           if (isDecisionSummarySnapshot(draft.propertyDraft?.decisionSummaryDraft)) {
             setCardDraft(draft.propertyDraft.decisionSummaryDraft);
           } else if (isDecisionSummarySnapshot(draft.propertyDraft?.decisionSummary)) {
@@ -984,7 +1317,13 @@ export function ClientPage() {
       cancelled = true;
       // Do not revoke URLs here — Strict Mode remount would break restored previews.
     };
-  }, []);
+  }, [
+    authReady,
+    user?.id,
+    draftReloadGeneration,
+    messages.fieldChecklist.labels,
+    messages.photoTagLabels,
+  ]);
 
   // Lazy-create object URLs when user reaches capture step (thumbs first for photos).
   useEffect(() => {
@@ -1043,7 +1382,7 @@ export function ClientPage() {
 
   // Persist metadata draft to IndexedDB (media blobs saved at capture time).
   useEffect(() => {
-    if (!draftReady || !draftHydratedRef.current) return;
+    if (!draftReady || !draftHydratedRef.current || legacyClaimBlockedRef.current) return;
     const handle = window.setTimeout(() => {
       void flushDraftToIdb();
     }, 450);
@@ -1177,9 +1516,23 @@ export function ClientPage() {
     }));
   }
 
-  async function processRecording(blob: Blob, duration: number, existingMediaId?: string, markersInput?: AudioMarker[]) {
+  async function processRecording(
+    blob: Blob,
+    duration: number,
+    existingMediaId?: string,
+    markersInput?: AudioMarker[],
+    claimedJob?: AiJob,
+  ) {
+    const consent = await ensureAiConsent();
+    const gate = await runIfAiConsented(consent.accepted, async () => true);
+    if (!gate.started) {
+      setAudioState("idle");
+      setAudioSeconds(0);
+      captureLockRef.current = null;
+      return;
+    }
     setAudioState("processing");
-    setSyncMessage("Whisper 轉文字中...");
+    setSyncMessage(messages.aiBoundary.processing);
 
     const bank = activeQuestionBank();
     if (questions.length === 0) {
@@ -1187,25 +1540,23 @@ export function ClientPage() {
     }
 
     let mediaId = existingMediaId;
+    let durableJob: AiJob | null = claimedJob ?? null;
+    let jobCommitted = false;
+    let leaseLost = false;
     if (!mediaId) {
       try {
-        const saved = await saveBlobAsMedia({
+        const saved = requirePersistence(await saveBlobAsMedia({
           kind: "audio",
           label: `recording-${Date.now()}`,
           blob,
           clientNumericId: Date.now(),
-        });
+        }));
         mediaId = saved.id;
         const draft = await getActiveDraft();
         if (draft) {
           await putActiveDraft({
             ...draft,
-            pendingAudioProcess: {
-              mediaId: saved.id,
-              clientNumericId: saved.clientNumericId,
-              durationSec: duration,
-              createdAt: new Date().toISOString(),
-            },
+            pendingAudioProcess: null,
           });
         }
       } catch {
@@ -1214,6 +1565,27 @@ export function ClientPage() {
     }
 
     try {
+      if (mediaId && !durableJob) {
+        const db = await DraftDb.open({ accountScope: accountScopeForUser(user?.id ?? null) });
+        try {
+          let job = await db.aiJobs.enqueue({
+            sessionId: consent.sessionId,
+            mediaId,
+            kind: "audio",
+            consentVersion: AI_CONSENT_VERSION,
+            userId: user?.id ?? null,
+            payload: { durationSec: duration, markers: markersInput ?? liveMarkersRef.current },
+          });
+          job = await db.aiJobs.update(job.id, {
+            syncStatus: "syncing",
+            leaseOwner: `inline-${crypto.randomUUID()}`,
+            leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+          });
+          durableJob = job;
+        } finally {
+          db.close();
+        }
+      }
       const form = new FormData();
       const audioFile =
         blob instanceof File
@@ -1229,6 +1601,10 @@ export function ClientPage() {
       form.append("address", address.trim());
       form.append("market", marketCode);
       form.append("locale", locale);
+      form.append("durationSec", String(duration));
+      form.append("consentVersion", AI_CONSENT_VERSION);
+      form.append("consentSessionId", consent.sessionId);
+      form.append("identityKind", user ? "user" : "guest");
       form.append("openData", JSON.stringify(propertyDraft.openData ?? null));
       form.append(
         "propertyContext",
@@ -1271,9 +1647,11 @@ export function ClientPage() {
 
       if (!response.ok) {
         const detail =
-          payload.issues?.slice(0, 2).map((i) => i.message).join("；") ||
-          payload.error ||
-          "錄音處理失敗";
+          payload.code === "ai_quota_exceeded"
+            ? messages.aiBoundary.quota
+            : payload.code === "ai_quota_unavailable" || payload.code === "ai_unavailable"
+              ? messages.aiBoundary.unavailable
+              : messages.aiBoundary.failed;
         throw new Error(detail);
       }
 
@@ -1302,14 +1680,36 @@ export function ClientPage() {
         noteId,
         mediaId: mediaId ?? null,
       };
-      setAiSummary(summary);
-
       const transcript = summary.transcript || payload.transcript || "";
       const matched =
         payload.answers
           ?.filter((item) => item.status === "answered")
           .map((item) => item.id) ?? [];
       const generated = payload.new_questions ?? [];
+      if (durableJob) {
+        const db = await DraftDb.open({ accountScope: accountScopeForUser(user?.id ?? null) });
+        try {
+          const completed = await completeAiJobIfLeaseHeld(db.aiJobs, durableJob, {
+            mediaId,
+            noteId,
+            summary,
+            transcript,
+            durationSec: duration,
+            matched,
+            markers: markersForAi,
+            answers: payload.answers ?? [],
+            newQuestions: generated,
+          });
+          if (!completed) {
+            leaseLost = true;
+            return;
+          }
+          jobCommitted = true;
+        } finally {
+          db.close();
+        }
+      }
+      setAiSummary(summary);
 
       const nextNote: AudioNote = {
         id: noteId,
@@ -1319,6 +1719,7 @@ export function ClientPage() {
         mediaId,
         kind: "transcript",
         markers: markersForAi,
+        aiJobId: durableJob?.id,
       };
       const nextNotes = [...notesRef.current, nextNote];
       notesRef.current = nextNotes;
@@ -1371,7 +1772,7 @@ export function ClientPage() {
         await putActiveDraft({ ...draft, pendingAudioProcess: null, aiSummary: summary });
       }
 
-      await flushDraftToIdb({
+      const persisted = await flushDraftToIdb({
         notes: nextNotes,
         questions: nextQuestions.length ? nextQuestions : questions,
         pros: nextPros.length ? nextPros : pros,
@@ -1387,19 +1788,43 @@ export function ClientPage() {
         (payload.warnings?.length ?? 0) > 0 || normalized.warnings.length > 0
           ? " · 部分欄位已自動校正"
           : "";
+      if (!persisted) return;
+      if (durableJob && jobCommitted) {
+        const db = await DraftDb.open({ accountScope: accountScopeForUser(user?.id ?? null) });
+        try {
+          const completed = await db.aiJobs.get(durableJob.id);
+          if (completed) await db.aiJobs.markApplied(completed.id);
+        } finally {
+          db.close();
+        }
+      }
       setSyncMessage(
         `AI 已整理：答到 ${matched.length} 題，新增 ${followUpCount} 個追問，${pendingCount} 題待確認 · 已存本機${warn}`,
       );
       setCaptureError(false);
     } catch (error) {
-      setCaptureError(true);
-      setSyncMessage(error instanceof Error ? error.message : "錄音處理失敗");
+      if (durableJob && !jobCommitted) {
+        const db = await DraftDb.open({ accountScope: accountScopeForUser(user?.id ?? null) });
+        try {
+          await failAiJobIfLeaseHeld(
+            db.aiJobs,
+            durableJob,
+            error instanceof Error ? error.message : messages.aiBoundary.failed,
+          );
+        } finally {
+          db.close();
+        }
+      }
+      if (!leaseLost) {
+        setCaptureError(true);
+        setSyncMessage(error instanceof Error ? error.message : messages.aiBoundary.failed);
+      }
     } finally {
       setAudioState("idle");
       setAudioSeconds(0);
       captureLockRef.current = null;
       setLiveMarkers([]);
-      void flushDraftToIdb({ liveAudioMarkers: [] });
+      if (!leaseLost) void flushDraftToIdb({ liveAudioMarkers: [] });
     }
   }
 
@@ -1434,12 +1859,12 @@ export function ClientPage() {
       draftSessionIdRef.current,
     );
     try {
-      const saved = await saveBlobAsMedia({
+      const saved = requirePersistence(await saveBlobAsMedia({
         kind: "audio",
         label: `recording-${clientNumericId}`,
         blob,
         clientNumericId,
-      });
+      }));
       mediaId = saved.id;
       const withMedia = attachMediaToMarkers(markers, saved.id, draftSessionIdRef.current);
       await updateMediaFields(saved.id, { markers: withMedia });
@@ -1447,13 +1872,7 @@ export function ClientPage() {
       if (draft) {
         await putActiveDraft({
           ...draft,
-          pendingAudioProcess: {
-            mediaId: saved.id,
-            clientNumericId,
-            durationSec: duration,
-            createdAt: new Date().toISOString(),
-            markers: withMedia,
-          },
+          pendingAudioProcess: null,
           liveAudioMarkers: withMedia,
         });
       }
@@ -1666,20 +2085,19 @@ export function ClientPage() {
     const kind = preflightKind;
     setPreflightKind(null);
     setPermissionBanner(null);
+    const releaseAfterPickerCloses = () => {
+      window.setTimeout(() => {
+        if (captureLockRef.current === kind) captureLockRef.current = null;
+      }, 0);
+    };
+    window.addEventListener("focus", releaseAfterPickerCloses, { once: true });
     if (kind === "video") {
       captureLockRef.current = "video";
-      videoInput.current?.click();
-      // Release lock shortly if user cancels the picker without a file.
-      window.setTimeout(() => {
-        if (captureLockRef.current === "video") captureLockRef.current = null;
-      }, 1500);
+      videoCaptureInput.current?.click();
       return;
     }
     captureLockRef.current = "photo";
-    photoInput.current?.click();
-    window.setTimeout(() => {
-      if (captureLockRef.current === "photo") captureLockRef.current = null;
-    }, 1500);
+    photoCaptureInput.current?.click();
   }
 
   function onPreflightImport() {
@@ -1690,11 +2108,22 @@ export function ClientPage() {
       return;
     }
     if (kind === "video") {
-      // Same file input without forcing capture path again — user can pick gallery file.
-      videoInput.current?.click();
+      videoGalleryInput.current?.click();
       return;
     }
-    photoInput.current?.click();
+    photoGalleryInput.current?.click();
+  }
+
+  function releaseCaptureLock() {
+    captureLockRef.current = null;
+  }
+
+  function mediaImportError(code: string): string {
+    if (code === "invalid-photo-type") return messages.mediaImport.invalidPhoto;
+    if (code === "invalid-video-type") return messages.mediaImport.invalidVideo;
+    if (code === "empty-file") return messages.mediaImport.emptyFile;
+    if (code === "photo-too-large") return messages.mediaImport.photoTooLarge;
+    return messages.mediaImport.videoTooLarge;
   }
 
   function readAudioDuration(file: Blob): Promise<number> {
@@ -1786,7 +2215,7 @@ export function ClientPage() {
         ...payload.details,
       };
       setPropertyDraft(nextPropertyDraft);
-      await flushDraftToIdb({
+      const persisted = await flushDraftToIdb({
         address: payload.displayAddress || address.trim(),
         tags: nextTags,
         marketCode: nextMarket,
@@ -1802,6 +2231,7 @@ export function ClientPage() {
         ],
         propertyDraft: nextPropertyDraft,
       });
+      if (!persisted) return;
       setSyncMessage(
         `${payload.source ?? "地址查詢"}完成` +
           (zoning ? ` · Zoning ${zoning}` : "") +
@@ -1817,7 +2247,7 @@ export function ClientPage() {
     }
   }
 
-  async function syncAndOpenCard() {
+  async function syncAndOpenCard(authenticatedUser: User | null = user) {
     setSyncingCard(true);
     setSyncMessage("正在上傳看房資料...");
     try {
@@ -1837,12 +2267,31 @@ export function ClientPage() {
         ...draftSnapshotRef.current,
         propertyDraft: nextPropertyDraft,
       };
-      const synced = await syncViaQueue({ openCard: true });
+      const synced = await syncViaQueue({ openCard: true }, authenticatedUser);
       const remoteId =
         (synced && "remoteViewingId" in synced && synced.remoteViewingId) ||
         viewingId ||
         draftSnapshotRef.current.viewingId;
-      if (remoteId && user) {
+      const selectedMediaIds = next.photos
+        .filter((photo) => photo.selected)
+        .map((photo) => photosRef.current.find((item) => String(item.id) === photo.id)?.mediaId)
+        .filter((id): id is string => Boolean(id));
+      const selectedWithoutDurableMedia =
+        next.photos.filter((photo) => photo.selected).length !== selectedMediaIds.length;
+      const publishMedia = await listMedia();
+      const publishReadiness = getPublishReadiness(selectedMediaIds, publishMedia);
+      const cloudReady =
+        !selectedWithoutDurableMedia &&
+        publishReadiness.ready &&
+        synced &&
+        "ui" in synced &&
+        synced.ui?.status === "synced";
+      if (!cloudReady) {
+        openDecisionCard();
+        setSyncMessage("分享預覽僅保留在本機；選取的媒體全部上傳完成後才能建立公開連結");
+        return;
+      }
+      if (remoteId && authenticatedUser) {
         try {
           const res = await fetch("/api/share/links", {
             method: "POST",
@@ -2029,6 +2478,8 @@ export function ClientPage() {
       setUser(currentUser);
 
       if (currentUser) {
+        await claimGuestDrafts(currentUser.id);
+        await claimCanonicalGuestData(currentUser.id);
         const [{ count }, { data: sub }] = await Promise.all([
           supabase
             .from("viewings")
@@ -2053,7 +2504,7 @@ export function ClientPage() {
       }
 
       const wasNew = !viewingId;
-      await syncAndOpenCard();
+      await syncAndOpenCard(currentUser);
       if (wasNew) setFreeCount((n) => n + 1);
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : "登入失敗");
@@ -2084,15 +2535,16 @@ export function ClientPage() {
     const clientNumericId = Date.now();
     let mediaId: string | undefined;
     try {
-      const saved = await saveBlobAsMedia({
+      const saved = requirePersistence(await saveBlobAsMedia({
         kind: "video",
         label,
         blob,
         clientNumericId,
-      });
+      }));
       mediaId = saved.id;
     } catch (error) {
       setSyncMessage(error instanceof Error ? error.message : "影片本機儲存失敗");
+      return;
     }
 
     const clip: Clip = {
@@ -2123,6 +2575,11 @@ export function ClientPage() {
     event.target.value = "";
     captureLockRef.current = null;
     if (!file) return;
+    const validationError = validateImportedMedia(file, "video");
+    if (validationError) {
+      setSyncMessage(mediaImportError(validationError));
+      return;
+    }
     await persistClip(file, messages.clipLabels[clips.length % messages.clipLabels.length]);
   }
 
@@ -2132,8 +2589,16 @@ export function ClientPage() {
     captureLockRef.current = null;
     if (!files) return;
 
-    const incomingFiles = Array.from(files).slice(0, 5 - photos.length);
+    const incomingFiles = Array.from(files)
+      .filter((file) => {
+        const validationError = validateImportedMedia(file, "photo");
+        if (validationError) setSyncMessage(mediaImportError(validationError));
+        return !validationError;
+      })
+      .slice(0, 5 - photos.length);
+    if (incomingFiles.length === 0) return;
     const incoming: Photo[] = [];
+    let persistenceFailed = false;
     const defaultTagId: PhotoTagId = "other";
     const defaultTag = messages.photoTagLabels[defaultTagId];
 
@@ -2142,17 +2607,18 @@ export function ClientPage() {
       const clientNumericId = Date.now() + index;
       let mediaId: string | undefined;
       try {
-        const saved = await saveBlobAsMedia({
+        const saved = requirePersistence(await saveBlobAsMedia({
           kind: "photo",
           label: defaultTag,
           tagId: defaultTagId,
           note: "",
           blob: file,
           clientNumericId,
-        });
+        }));
         mediaId = saved.id;
       } catch {
         // continue with memory-only fallback
+        persistenceFailed = true;
       }
       incoming.push({
         id: clientNumericId,
@@ -2165,7 +2631,11 @@ export function ClientPage() {
     }
     setPhotos((current) => [...current, ...incoming]);
     await flushDraftToIdb();
-    setSyncMessage("照片原圖已存本機 · 正在產生縮圖");
+    setSyncMessage(
+      persistenceFailed
+        ? "部分照片只保留在目前頁面，裝置儲存失敗"
+        : "照片原圖已存本機 · 正在產生縮圖",
+    );
 
     const schedule =
       typeof requestIdleCallback === "function"
@@ -2206,42 +2676,114 @@ export function ClientPage() {
       setAnnotateNote(first.note);
     }
 
-    const fileToDataUrl = (file: File) =>
-      new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result || ""));
-        reader.onerror = () => reject(new Error("讀取照片失敗"));
-        reader.readAsDataURL(file);
-      });
-
     void (async () => {
-      setSyncMessage("照片已存本機 · AI 分析風險中...");
-      const results = await Promise.allSettled(
-        incoming.map(async (photo) => {
-          if (!photo.file) return null;
-          const base64 = await fileToDataUrl(photo.file);
+      const consent = await ensureAiConsent();
+      if (!consent.accepted) return;
+      setSyncMessage(
+        messages.aiBoundary.processing,
+      );
+      const results = await mapWithConcurrency(incoming, 2, async (photo) => {
+          if (!photo.file || !photo.mediaId) return null;
+          const db = await DraftDb.open({ accountScope: accountScopeForUser(user?.id ?? null) });
+          let job: AiJob;
+          try {
+            job = await db.aiJobs.enqueue({
+              sessionId: consent.sessionId,
+              mediaId: photo.mediaId,
+              kind: "photo",
+              consentVersion: AI_CONSENT_VERSION,
+              userId: user?.id ?? null,
+              payload: { tag: photo.tag, locale, market: marketCode },
+            });
+            job = await db.aiJobs.update(job.id, {
+              syncStatus: "syncing",
+              leaseOwner: `inline-${crypto.randomUUID()}`,
+              leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+            });
+          } finally {
+            db.close();
+          }
+          try {
+          const derivative = await normalizeImageForAi(photo.file);
+          const base64 = await blobToDataUrl(derivative);
           const live = photosRef.current.find((p) => p.id === photo.id);
           const tag = live?.tag || photo.tag;
           const response = await fetch("/api/vision", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ base64, tag, locale }),
+            body: JSON.stringify({
+              base64,
+              tag,
+              locale,
+              market: marketCode,
+              mediaId: photo.mediaId,
+              consentVersion: AI_CONSENT_VERSION,
+              consentSessionId: consent.sessionId,
+              identityKind: user ? "user" : "guest",
+            }),
           });
-          const payload = (await response.json()) as { question?: string; error?: string };
+          const payload = (await response.json()) as {
+            question?: string;
+            error?: string;
+            code?: string;
+          };
           if (!response.ok || !payload.question) {
-            throw new Error(payload.error || "Vision 失敗");
+            throw new Error(
+              payload.code === "ai_quota_exceeded"
+                ? messages.aiBoundary.quota
+                : payload.code === "ai_quota_unavailable" || payload.code === "ai_unavailable"
+                  ? messages.aiBoundary.unavailable
+                  : messages.aiBoundary.failed,
+            );
           }
-          return { text: payload.question.trim(), tag };
-        }),
-      );
+          const result = {
+            text: payload.question.trim(),
+            tag,
+            mediaId: photo.mediaId,
+            aiJobId: job.id,
+          };
+          const completeDb = await DraftDb.open({
+            accountScope: accountScopeForUser(user?.id ?? null),
+          });
+          try {
+            const completed = await completeAiJobIfLeaseHeld(completeDb.aiJobs, job, result);
+            if (!completed) return null;
+          } finally {
+            completeDb.close();
+          }
+          return result;
+          } catch (error) {
+            const failedDb = await DraftDb.open({
+              accountScope: accountScopeForUser(user?.id ?? null),
+            });
+            try {
+              await failAiJobIfLeaseHeld(
+                failedDb.aiJobs,
+                job,
+                error instanceof Error ? error.message : messages.aiBoundary.failed,
+              );
+            } finally {
+              failedDb.close();
+            }
+            throw error;
+          }
+        });
 
       const generated = results
         .filter(
-          (r): r is PromiseFulfilledResult<{ text: string; tag: string } | null> =>
+          (r): r is PromiseFulfilledResult<{
+            text: string;
+            tag: string;
+            mediaId: string;
+            aiJobId: string;
+          } | null> =>
             r.status === "fulfilled",
         )
         .map((r) => r.value)
-        .filter((v): v is { text: string; tag: string } => Boolean(v?.text));
+        .filter(
+          (v): v is { text: string; tag: string; mediaId: string; aiJobId: string } =>
+            Boolean(v?.text),
+        );
 
       if (generated.length > 0) {
         setQuestions((current) => {
@@ -2266,13 +2808,26 @@ export function ClientPage() {
               isDynamic: true,
               source: "photo",
               basedOn: item.tag,
+              aiJobId: item.aiJobId,
             });
             nextId += 1;
           }
           return [...extras, ...base];
         });
+        const appliedDb = await DraftDb.open({
+          accountScope: accountScopeForUser(user?.id ?? null),
+        });
+        try {
+          await Promise.all(generated.map((item) => appliedDb.aiJobs.markApplied(item.aiJobId)));
+        } finally {
+          appliedDb.close();
+        }
         setBankCollapsed(false);
-        setSyncMessage(`照片 AI 已生成 ${generated.length} 題必問 · 已存本機`);
+        setSyncMessage(
+          persistenceFailed
+            ? `照片 AI 已生成 ${generated.length} 題必問 · 部分照片仍只在目前頁面`
+            : `照片 AI 已生成 ${generated.length} 題必問 · 已存本機`,
+        );
       } else {
         const firstError = results.find((r) => r.status === "rejected") as
           | PromiseRejectedResult
@@ -2626,6 +3181,54 @@ export function ClientPage() {
           {messages.intro}
         </div>
 
+        {legacyDraftClaim.status !== "none" && legacyDraftClaim.status !== "verified" && (
+            <div
+              className="mb-4 rounded-[18px] border border-[#F59E0B]/40 bg-[#FFFBEB] p-3 text-[12px] text-[#78350F]"
+              role="status"
+            >
+              <p className="font-bold">找到舊版未歸屬草稿</p>
+              <p className="mt-1">
+                {legacyDraftClaim.draft.address || "未命名看房"}
+                {legacyDraftClaim.mediaCount > 0
+                  ? ` · ${legacyDraftClaim.mediaCount} 個媒體檔案`
+                  : ""}
+              </p>
+              {legacyDraftClaim.status === "available" ||
+              legacyDraftClaim.status === "copied" ? (
+                <>
+                  <button
+                    type="button"
+                    disabled={claimingLegacyDraft}
+                    onClick={() => void claimLegacyDraft()}
+                    className="mt-2 rounded-full bg-[#78350F] px-3 py-1.5 font-bold text-white disabled:opacity-60"
+                  >
+                    {claimingLegacyDraft
+                      ? "正在驗證…"
+                      : legacyDraftClaim.status === "copied"
+                        ? "繼續驗證還原"
+                        : "還原到我的帳戶"}
+                  </button>
+                  {legacyDraftClaim.status === "available" && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        legacyClaimBlockedRef.current = false;
+                        setLegacyDraftClaim({ status: "none" });
+                      }}
+                      className="mt-2 ml-2 rounded-full border border-[#78350F]/30 px-3 py-1.5 font-bold"
+                    >
+                      暫不還原
+                    </button>
+                  )}
+                </>
+              ) : (
+                <p className="mt-2">
+                  目前帳戶已有草稿，因此未自動覆蓋。舊版資料仍保留在此裝置。
+                </p>
+              )}
+            </div>
+          )}
+
         <SyncStatusBanner
           status={sessionUiStatus}
           messages={messages.sync}
@@ -2669,8 +3272,10 @@ export function ClientPage() {
                 {wizardStep === 2 && (
           <>
         <div className="bg-white rounded-[22px] border border-black/[0.05] shadow-[0_4px_20px_rgba(0,0,0,0.04)] p-4 mb-4">
-            <div
-              className="flex items-center justify-between cursor-pointer"
+            <button
+              type="button"
+              aria-expanded={!bankCollapsed}
+              className="flex min-h-11 w-full items-center justify-between text-left"
               onClick={() => setBankCollapsed((value) => !value)}
             >
               <div className="flex items-center gap-2">
@@ -2681,10 +3286,10 @@ export function ClientPage() {
                   {questions.length}題
                 </span>
               </div>
-              <button className="w-6 h-6 rounded-full bg-[#F5F3F0] flex items-center justify-center">
+              <span className="min-w-11 min-h-11 rounded-full bg-[#F5F3F0] flex items-center justify-center">
                 {bankCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
-              </button>
-            </div>
+              </span>
+            </button>
             {!bankCollapsed && (
               <>
                 <div className="mt-3 space-y-2">
@@ -3207,7 +3812,7 @@ export function ClientPage() {
               <button
                 type="button"
                 onClick={() => void openCapturePreflight("photo")}
-                className="aspect-[4/3] rounded-xl border-2 border-dashed border-black/10 bg-[#FAF7F3] flex flex-col items-center justify-center gap-1 hover:bg-[#F5F3F0] transition"
+                className="aspect-[4/3] min-h-11 rounded-xl border-2 border-dashed border-black/10 bg-[#FAF7F3] flex flex-col items-center justify-center gap-1 hover:bg-[#F5F3F0] transition"
               >
                 <Camera className="w-6 h-6 text-[#9CA3AF]" />
                 <span className="text-[11px] font-medium text-[#6B7280]">{messages.photos.add}</span>
@@ -3215,6 +3820,16 @@ export function ClientPage() {
               </button>
             )}
           </div>
+          {photos.length < 5 ? (
+            <button
+              type="button"
+              onClick={() => photoGalleryInput.current?.click()}
+              className="mt-3 min-h-11 w-full rounded-full border border-[#DBEAFE] bg-[#F8FAFF] px-4 text-[12px] font-bold text-[#2563EB] inline-flex items-center justify-center gap-2"
+            >
+              <Upload className="h-4 w-4" aria-hidden="true" />
+              {messages.mediaImport.photoGallery}
+            </button>
+          ) : null}
           {expandedPhotoId != null &&
             photos.some((photo) => photo.id === expandedPhotoId) && (
               <div className="mt-3 rounded-2xl overflow-hidden border border-black/10 bg-black">
@@ -3244,13 +3859,14 @@ export function ClientPage() {
                 </button>
               </div>
             )}
-          <input
-            ref={photoInput}
-            type="file"
-            accept="image/*"
-            multiple
-            className="hidden"
-            onChange={(event) => void onPhotos(event)}
+          <MediaPickerInputs
+            photoCaptureRef={photoCaptureInput}
+            photoGalleryRef={photoGalleryInput}
+            videoCaptureRef={videoCaptureInput}
+            videoGalleryRef={videoGalleryInput}
+            onPhotos={(event) => void onPhotos(event)}
+            onVideo={(event) => void onVideoFiles(event)}
+            onCaptureCancel={releaseCaptureLock}
           />
           <div className="mt-3 flex gap-2 bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl p-2.5">
             <span className="text-[12px]">💡</span>
@@ -3291,15 +3907,16 @@ export function ClientPage() {
               <p className="text-[15px] font-bold">{messages.video.start}</p>
               <p className="text-[12px] text-[#8A8A8A] mt-1">{messages.video.startSub}</p>
             </div>
+            <button
+              type="button"
+              disabled={clips.length >= 4}
+              onClick={() => videoGalleryInput.current?.click()}
+              className="mt-3 min-h-11 rounded-full border border-[#DBEAFE] bg-[#F8FAFF] px-4 text-[12px] font-bold text-[#2563EB] inline-flex items-center justify-center gap-2 disabled:opacity-40"
+            >
+              <Upload className="h-4 w-4" aria-hidden="true" />
+              {messages.mediaImport.videoGallery}
+            </button>
           </div>
-          <input
-            ref={videoInput}
-            type="file"
-            accept="video/*"
-            capture="environment"
-            className="hidden"
-            onChange={(e) => void onVideoFiles(e)}
-          />
           {clips.length > 0 && (
             <div className="mt-4 grid grid-cols-2 gap-2">
               {clips.map((clip) => (
@@ -3434,43 +4051,74 @@ export function ClientPage() {
           }
         />
 
-        {showLoginGate && (
-          <div className="fixed inset-0 z-50 flex justify-center bg-black/40 backdrop-blur-[2px] p-4 overflow-auto">
-            <div className="w-full max-w-[420px] my-auto bg-white rounded-[24px] p-5 shadow-[0_20px_60px_rgba(0,0,0,0.2)]">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="text-[18px] font-bold">{messages.loginGate.title}</h3>
-                  <p className="text-[12px] text-[#8A8A8A] mt-1 leading-[1.45]">
-                    {messages.loginGate.body}
-                  </p>
-                </div>
+        {showAiConsent && (
+          <Dialog
+            open
+            onClose={() => decideAiConsent(false)}
+            title={messages.aiBoundary.consentTitle}
+            description={messages.aiBoundary.consentBody}
+          >
+              <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                 <button
                   type="button"
+                  onClick={() => decideAiConsent(false)}
+                  className="min-h-11 rounded-full border border-black/10 px-5 text-[13px] font-bold"
+                >
+                  {messages.aiBoundary.consentDecline}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => decideAiConsent(true)}
+                  className="min-h-11 rounded-full bg-[#111] px-5 text-[13px] font-bold text-white"
+                >
+                  {messages.aiBoundary.consentAccept}
+                </button>
+              </div>
+          </Dialog>
+        )}
+
+        {showLoginGate && (
+          <Dialog
+            open
+            onClose={() => setShowLoginGate(false)}
+            title={messages.loginGate.title}
+            description={messages.loginGate.body}
+            backdropClassName="z-50 backdrop-blur-[2px] overflow-auto"
+            className="relative"
+          >
+                <button
+                  type="button"
+                  aria-label={messages.card.close}
                   onClick={() => setShowLoginGate(false)}
-                  className="w-8 h-8 rounded-full bg-[#F5F3F0] flex items-center justify-center"
+                  className="absolute right-4 top-4 min-w-11 min-h-11 rounded-full bg-[#F5F3F0] flex items-center justify-center"
                 >
                   <X className="w-4 h-4" />
                 </button>
-              </div>
 
               <form onSubmit={(event) => void handleLoginForCard(event)} className="mt-4 space-y-3">
-                <input
-                  type="email"
-                  required
-                  value={loginEmail}
-                  onChange={(event) => setLoginEmail(event.target.value)}
-                  placeholder={messages.loginGate.email}
-                  className="w-full h-[44px] px-4 rounded-full bg-[#F8F4EF] border border-black/5 text-[14px] outline-none"
-                />
-                <input
-                  type="password"
-                  required
-                  minLength={6}
-                  value={loginPassword}
-                  onChange={(event) => setLoginPassword(event.target.value)}
-                  placeholder={messages.loginGate.password}
-                  className="w-full h-[44px] px-4 rounded-full bg-[#F8F4EF] border border-black/5 text-[14px] outline-none"
-                />
+                <label className="block text-[12px] font-bold">
+                  {messages.loginGate.email}
+                  <input
+                    type="email"
+                    required
+                    autoComplete="email"
+                    value={loginEmail}
+                    onChange={(event) => setLoginEmail(event.target.value)}
+                    className="mt-1.5 w-full h-[44px] px-4 rounded-full bg-[#F8F4EF] border border-black/5 text-[14px] outline-none"
+                  />
+                </label>
+                <label className="block text-[12px] font-bold">
+                  {messages.loginGate.password}
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    autoComplete={loginMode === "signin" ? "current-password" : "new-password"}
+                    value={loginPassword}
+                    onChange={(event) => setLoginPassword(event.target.value)}
+                    className="mt-1.5 w-full h-[44px] px-4 rounded-full bg-[#F8F4EF] border border-black/5 text-[14px] outline-none"
+                  />
+                </label>
                 <button
                   type="submit"
                   disabled={syncingCard}
@@ -3485,7 +4133,7 @@ export function ClientPage() {
               </form>
 
               {loginError && (
-                <p className="mt-3 text-[12px] text-[#991B1B] leading-[1.4]">{loginError}</p>
+                <p role="alert" className="mt-3 text-[12px] text-[#991B1B] leading-[1.4]">{loginError}</p>
               )}
 
               <button
@@ -3494,34 +4142,32 @@ export function ClientPage() {
                   setLoginMode((current) => (current === "signin" ? "signup" : "signin"));
                   setLoginError("");
                 }}
-                className="mt-4 text-[12px] font-medium text-[#6B7280]"
+                className="mt-4 min-h-11 text-[12px] font-medium text-[#6B7280]"
               >
                 {loginMode === "signin"
                   ? messages.loginGate.switchToSignUp
                   : messages.loginGate.switchToSignIn}
               </button>
-            </div>
-          </div>
+          </Dialog>
         )}
 
         {showPaywall && (
-          <div className="fixed inset-0 z-50 flex justify-center bg-black/40 backdrop-blur-[2px] p-4 overflow-auto">
-            <div className="w-full max-w-[420px] my-auto bg-white rounded-[24px] p-5 shadow-[0_20px_60px_rgba(0,0,0,0.2)]">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="text-[18px] font-bold">{messages.paywall.title}</h3>
-                  <p className="text-[12px] text-[#8A8A8A] mt-1 leading-[1.45]">
-                    {messages.paywall.body}
-                  </p>
-                </div>
+          <Dialog
+            open
+            onClose={() => setShowPaywall(false)}
+            title={messages.paywall.title}
+            description={messages.paywall.body}
+            backdropClassName="z-50 backdrop-blur-[2px] overflow-auto"
+            className="relative"
+          >
                 <button
                   type="button"
+                  aria-label={messages.card.close}
                   onClick={() => setShowPaywall(false)}
-                  className="w-8 h-8 rounded-full bg-[#F5F3F0] flex items-center justify-center"
+                  className="absolute right-4 top-4 min-w-11 min-h-11 rounded-full bg-[#F5F3F0] flex items-center justify-center"
                 >
                   <X className="w-4 h-4" />
                 </button>
-              </div>
 
               <div className="mt-4 rounded-[18px] bg-[#111] text-white p-4">
                 <p className="text-[11px] tracking-[0.16em] opacity-60">KANFANGJI PRO</p>
@@ -3547,27 +4193,23 @@ export function ClientPage() {
               <p className="mt-3 text-[11px] text-[#9CA3AF] text-center">
                 {messages.paywall.footer}
               </p>
-            </div>
-          </div>
+          </Dialog>
         )}
 
         {showCard && cardDraft && (
-          <div
-            className="fixed inset-0 z-[60] flex justify-center bg-black/40 backdrop-blur-[2px] p-3 sm:p-4 overflow-auto"
-            role="dialog"
-            aria-modal="true"
-            onClick={() => setShowCard(false)}
+          <Dialog
+            open
+            onClose={() => setShowCard(false)}
+            title={<span className="sr-only">{messages.card.eyebrow}</span>}
+            backdropClassName="z-[60] backdrop-blur-[2px] overflow-auto p-3 sm:p-4"
+            className="max-w-[720px] p-0 bg-transparent shadow-none"
           >
-            <div
-              className="w-full max-w-[720px] my-auto"
-              onClick={(event) => event.stopPropagation()}
-            >
               <div className="relative">
                 <button
                   type="button"
                   aria-label={messages.card.close}
                   onClick={() => setShowCard(false)}
-                  className="absolute top-3 right-3 z-20 w-9 h-9 rounded-full bg-black/70 text-white hover:bg-black/80 flex items-center justify-center"
+                  className="absolute top-3 right-3 z-20 min-w-11 min-h-11 rounded-full bg-black/70 text-white hover:bg-black/80 flex items-center justify-center"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -3702,8 +4344,7 @@ export function ClientPage() {
                   }
                 />
               </div>
-            </div>
-          </div>
+          </Dialog>
         )}
 
         <SharePrivacyCheck

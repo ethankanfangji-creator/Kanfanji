@@ -5,6 +5,7 @@ import {
   type ViewingSession,
 } from "@/lib/draft-db";
 import { extensionFor } from "@/lib/media-paths";
+import { getMedia as getCanonicalMedia } from "@/lib/idb/draft-store";
 import { backoffMs, classifySyncError } from "./errors";
 import { decideMerge, syncStatusToUi } from "./merge";
 import type {
@@ -27,6 +28,7 @@ export class SyncEngine {
   private readonly db: DraftDb;
   private readonly adapter: ViewingSyncAdapter;
   private running = false;
+  private readonly workerId = `sync-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
   private isPro: boolean;
 
   constructor(options: SyncEngineOptions) {
@@ -139,7 +141,9 @@ export class SyncEngine {
       const existingMedia = await this.db.media.get(item.id);
       if (existingMedia) {
         await this.db.media.update(item.id, {
-          blob: item.blob,
+          blob: null,
+          mediaRefId: item.id,
+          size: item.size,
           mimeType: item.mimeType,
           label: item.label,
           tag: item.label,
@@ -154,7 +158,9 @@ export class SyncEngine {
           id: item.id,
           sessionId: session.id,
           kind: item.kind,
-          blob: item.blob,
+          blob: null,
+          mediaRefId: item.id,
+          size: item.size,
           mimeType: item.mimeType,
           label: item.label,
           tag: item.label,
@@ -243,8 +249,13 @@ export class SyncEngine {
     for (const row of rows) {
       if (row.syncStatus === "failed" || row.syncStatus === "conflict") {
         await this.db.syncQueue.markStatus(row.id, "pending", {
+          attempts: 0,
           lastError: null,
           nextRetryAt: null,
+        });
+        await this.db.syncQueue.update(row.id, {
+          leaseOwner: null,
+          leaseExpiresAt: null,
         });
       }
     }
@@ -284,17 +295,9 @@ export class SyncEngine {
     this.running = true;
 
     try {
-      // Session jobs first, then media (depends on remoteViewingId).
-      const runnable = await this.db.syncQueue.listRunnable();
-      const ordered = [
-        ...runnable.filter((row) => row.entityType === "viewingSession"),
-        ...runnable.filter((row) => row.entityType === "media"),
-        ...runnable.filter(
-          (row) => row.entityType !== "viewingSession" && row.entityType !== "media",
-        ),
-      ];
-
-      for (const job of ordered) {
+      for (;;) {
+        const job = await this.db.syncQueue.claimNextRunnable(this.workerId);
+        if (!job) break;
         result.processed += 1;
         const outcome = await this.processJob(job);
         if (outcome === "ok") result.succeeded += 1;
@@ -315,9 +318,15 @@ export class SyncEngine {
   private async processJob(
     job: SyncQueueItem,
   ): Promise<"ok" | "failed" | "conflict" | "offline" | "skipped"> {
-    if (!this.adapter.isOnline()) return "offline";
+    if (!this.adapter.isOnline()) {
+      await this.db.syncQueue.transitionClaimed(job, {
+        syncStatus: "pending",
+        leaseOwner: null,
+        leaseExpiresAt: null,
+      });
+      return "offline";
+    }
 
-    await this.db.syncQueue.markStatus(job.id, "syncing");
     await this.db.viewingSessions.update(job.sessionId, {
       syncStatus: "syncing",
       lastSyncError: null,
@@ -330,19 +339,28 @@ export class SyncEngine {
       if (job.entityType === "media" && job.operation === "upload") {
         return await this.processMediaUploadJob(job);
       }
-      await this.db.syncQueue.markStatus(job.id, "synced", { lastError: null });
+      await this.db.syncQueue.transitionClaimed(job, {
+        syncStatus: "synced",
+        lastError: null,
+        leaseOwner: null,
+        leaseExpiresAt: null,
+      });
       return "ok";
     } catch (error) {
       const classified = classifySyncError(error, this.adapter.isOnline());
       if (classified.code === "offline" || classified.code === "network") {
         const attempts = job.attempts + 1;
-        await this.db.syncQueue.markStatus(job.id, "pending", {
+        const giveUp = attempts >= MAX_ATTEMPTS;
+        await this.db.syncQueue.transitionClaimed(job, {
+          syncStatus: giveUp ? "failed" : "pending",
           attempts,
           lastError: classified.message,
-          nextRetryAt: new Date(Date.now() + backoffMs(attempts)).toISOString(),
+          nextRetryAt: giveUp ? null : new Date(Date.now() + backoffMs(attempts)).toISOString(),
+          leaseOwner: null,
+          leaseExpiresAt: null,
         });
         await this.db.viewingSessions.update(job.sessionId, {
-          syncStatus: "pending",
+          syncStatus: giveUp ? "failed" : "pending",
           lastSyncError: classified.message,
         });
         return classified.code === "offline" ? "offline" : "failed";
@@ -350,12 +368,15 @@ export class SyncEngine {
 
       const attempts = job.attempts + 1;
       const giveUp = attempts >= MAX_ATTEMPTS || !classified.retryable;
-      await this.db.syncQueue.markStatus(job.id, giveUp ? "failed" : "pending", {
+      await this.db.syncQueue.transitionClaimed(job, {
+        syncStatus: giveUp ? "failed" : "pending",
         attempts,
         lastError: classified.message,
         nextRetryAt: giveUp
           ? null
           : new Date(Date.now() + backoffMs(attempts)).toISOString(),
+        leaseOwner: null,
+        leaseExpiresAt: null,
       });
       await this.db.viewingSessions.update(job.sessionId, {
         syncStatus: "failed",
@@ -404,7 +425,12 @@ export class SyncEngine {
 
     if (decision === "conflict") {
       const message = "本機與雲端資料衝突，未覆寫任一方。點擊重試前請先確認要以哪一邊為準";
-      await this.db.syncQueue.markStatus(job.id, "conflict", { lastError: message });
+      await this.db.syncQueue.transitionClaimed(job, {
+        syncStatus: "conflict",
+        lastError: message,
+        leaseOwner: null,
+        leaseExpiresAt: null,
+      });
       await this.db.viewingSessions.update(session.id, {
         syncStatus: "conflict",
         lastSyncError: message,
@@ -413,11 +439,17 @@ export class SyncEngine {
     }
 
     if (decision === "skip_remote_newer_clean") {
-      await this.db.syncQueue.markStatus(job.id, "synced", { lastError: null });
+      await this.db.syncQueue.transitionClaimed(job, {
+        syncStatus: "synced",
+        lastError: null,
+        leaseOwner: null,
+        leaseExpiresAt: null,
+      });
       await this.db.viewingSessions.update(session.id, {
         syncStatus: "synced",
         lastSyncError: null,
         remoteViewingId: remote?.id ?? session.remoteViewingId,
+        remoteRevision: remote?.revision ?? session.remoteRevision,
       });
       return "ok";
     }
@@ -461,34 +493,40 @@ export class SyncEngine {
           : null,
       isPro: Boolean(session.propertyDraft.isPro ?? this.isPro),
       clientUpdatedAt,
-      shareToken:
-        typeof session.propertyDraft.shareToken === "string"
-          ? session.propertyDraft.shareToken
-          : null,
+      idempotencyKey: session.id,
+      expectedRevision: session.remoteRevision ?? remote?.revision ?? null,
     });
 
     if (result.conflict) {
       const message = "雲端有較新版本，未覆寫。點擊重試可在確認後再處理";
-      await this.db.syncQueue.markStatus(job.id, "conflict", { lastError: message });
+      await this.db.syncQueue.transitionClaimed(job, {
+        syncStatus: "conflict",
+        lastError: message,
+        leaseOwner: null,
+        leaseExpiresAt: null,
+      });
       await this.db.viewingSessions.update(session.id, {
         syncStatus: "conflict",
         lastSyncError: message,
         remoteViewingId: result.id,
+        remoteRevision: result.revision,
       });
       return "conflict";
     }
 
     await this.db.viewingSessions.update(session.id, {
       remoteViewingId: result.id,
+      remoteRevision: result.revision,
       userId,
       syncStatus: hasUnsyncedMedia ? "pending" : "synced",
       lastSyncError: null,
-      propertyDraft: {
-        ...session.propertyDraft,
-        shareToken: result.shareToken,
-      },
     });
-    await this.db.syncQueue.markStatus(job.id, "synced", { lastError: null });
+    await this.db.syncQueue.transitionClaimed(job, {
+      syncStatus: "synced",
+      lastError: null,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+    });
     return "ok";
   }
 
@@ -496,9 +534,12 @@ export class SyncEngine {
     const session = await this.db.viewingSessions.require(job.sessionId);
     if (!session.remoteViewingId) {
       // Session not on cloud yet — requeue after session job.
-      await this.db.syncQueue.markStatus(job.id, "pending", {
+      await this.db.syncQueue.transitionClaimed(job, {
+        syncStatus: "pending",
         lastError: "等待案件先同步到雲端",
         nextRetryAt: new Date(Date.now() + 500).toISOString(),
+        leaseOwner: null,
+        leaseExpiresAt: null,
       });
       return "skipped";
     }
@@ -513,19 +554,27 @@ export class SyncEngine {
         media.storagePath,
       );
       await this.db.media.update(media.id, { syncStatus: "synced" });
-      await this.db.syncQueue.markStatus(job.id, "synced", { lastError: null });
+      await this.db.syncQueue.transitionClaimed(job, {
+        syncStatus: "synced",
+        lastError: null,
+        leaseOwner: null,
+        leaseExpiresAt: null,
+      });
       await this.refreshSessionStatus(session.id);
       return "ok";
     }
 
     await this.db.media.update(media.id, { uploadStatus: "uploading", syncStatus: "syncing" });
 
-    const filename = `${media.id}.${extensionFor(media.blob, fallbackExt(media.kind))}`;
+    const canonical = media.mediaRefId ? await getCanonicalMedia(media.mediaRefId) : null;
+    const blob = media.blob ?? canonical?.blob ?? null;
+    if (!blob) throw new Error("找不到本機媒體原始檔，請重新選取後手動重試");
+    const filename = `${media.id}.${extensionFor(blob, fallbackExt(media.kind))}`;
     const uploaded = await this.adapter.uploadRemoteMedia({
       remoteViewingId: session.remoteViewingId,
       mediaId: media.id,
       kind: media.kind,
-      blob: media.blob,
+      blob,
       mimeType: media.mimeType,
       filename,
     });
@@ -541,7 +590,12 @@ export class SyncEngine {
       uploadStatus: "uploaded",
       syncStatus: "synced",
     });
-    await this.db.syncQueue.markStatus(job.id, "synced", { lastError: null });
+    await this.db.syncQueue.transitionClaimed(job, {
+      syncStatus: "synced",
+      lastError: null,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+    });
     await this.refreshSessionStatus(session.id);
     return "ok";
   }

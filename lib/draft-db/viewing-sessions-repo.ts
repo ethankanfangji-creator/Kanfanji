@@ -2,6 +2,8 @@ import { assertImmutableId, createEntityId, nowIso } from "./ids";
 import { DraftDbError } from "./errors";
 import {
   filterListed,
+  inAccountScope,
+  isVisibleInScope,
   requireFound,
   withStoreError,
   type RepoContext,
@@ -14,12 +16,14 @@ import type {
   ViewingSession,
 } from "./types";
 
-function buildSession(input: CreateViewingSessionInput): ViewingSession {
+function buildSession(input: CreateViewingSessionInput, defaultScope?: string): ViewingSession {
   const timestamp = nowIso();
   return {
     id: input.id ?? createEntityId(),
+    accountScope: input.accountScope ?? defaultScope ?? "guest:legacy",
     userId: input.userId ?? null,
     remoteViewingId: input.remoteViewingId ?? null,
+    remoteRevision: input.remoteRevision ?? null,
     address: input.address ?? "",
     tags: input.tags ?? [],
     market: input.market ?? null,
@@ -41,7 +45,7 @@ export function createViewingSessionsRepository(ctx: RepoContext) {
   return {
     async create(input: CreateViewingSessionInput = {}): Promise<ViewingSession> {
       return withStoreError("viewingSessions.create", async () => {
-        const record = buildSession(input);
+        const record = buildSession(input, ctx.accountScope);
         await ctx.db.put(STORE.viewingSessions, record);
         return record;
       });
@@ -51,7 +55,7 @@ export function createViewingSessionsRepository(ctx: RepoContext) {
       return withStoreError("viewingSessions.get", async () => {
         if (!id) throw new DraftDbError("id is required", "invalid_input");
         const row = await ctx.db.get(STORE.viewingSessions, id);
-        return row ?? null;
+        return isVisibleInScope(row, ctx.accountScope) ? row ?? null : null;
       });
     },
 
@@ -68,6 +72,9 @@ export function createViewingSessionsRepository(ctx: RepoContext) {
           "viewingSession",
           id,
         );
+        if (!isVisibleInScope(existing, ctx.accountScope)) {
+          throw new DraftDbError("viewingSession is locked to another account", "not_found");
+        }
         const next: ViewingSession = {
           ...existing,
           ...patch,
@@ -91,6 +98,10 @@ export function createViewingSessionsRepository(ctx: RepoContext) {
     async delete(id: string): Promise<void> {
       return withStoreError("viewingSessions.delete", async () => {
         if (!id) throw new DraftDbError("id is required", "invalid_input");
+        const existing = await ctx.db.get(STORE.viewingSessions, id);
+        if (!isVisibleInScope(existing, ctx.accountScope)) {
+          throw new DraftDbError("viewingSession is locked to another account", "not_found");
+        }
         await ctx.db.delete(STORE.viewingSessions, id);
       });
     },
@@ -98,7 +109,7 @@ export function createViewingSessionsRepository(ctx: RepoContext) {
     async list(options?: ListOptions): Promise<ViewingSession[]> {
       return withStoreError("viewingSessions.list", async () => {
         const rows = await ctx.db.getAllFromIndex(STORE.viewingSessions, "byUpdatedAt");
-        return filterListed(rows, options).sort((a, b) =>
+        return filterListed(inAccountScope(rows, ctx.accountScope), options).sort((a, b) =>
           a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0,
         );
       });

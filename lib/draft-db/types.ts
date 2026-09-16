@@ -28,11 +28,14 @@ export type NoteKind = "transcript" | "text";
 export type SyncEntityType = "viewingSession" | "note" | "media";
 
 export type SyncOperation = "create" | "update" | "delete" | "upload";
+export type AiJobKind = "audio" | "photo";
 
 export type UploadStatus = "local" | "uploading" | "uploaded" | "failed";
 
 /** Shared sync / audit fields for future cloud sync. */
 export type SyncableFields = {
+  /** Local authorization boundary. Guest and user rows never share a scope. */
+  accountScope: string;
   userId: string | null;
   syncStatus: SyncStatus;
   createdAt: string;
@@ -45,6 +48,7 @@ export type SyncableFields = {
 export type ViewingSession = SyncableFields & {
   id: string;
   remoteViewingId: string | null;
+  remoteRevision: number | null;
   address: string;
   tags: string[];
   market: "CA" | "TH" | "OTHER" | null;
@@ -77,7 +81,9 @@ export type MediaItem = SyncableFields & {
   tag: string | null;
   durationSec: number | null;
   /** Binary payload — never base64 / localStorage. */
-  blob: Blob;
+  /** Legacy DraftDb blobs remain readable; new bridge rows reference canonical kanfangji media. */
+  blob: Blob | null;
+  mediaRefId: string | null;
   remoteUrl: string | null;
   storagePath: string | null;
   uploadStatus: UploadStatus;
@@ -93,12 +99,42 @@ export type SyncQueueItem = SyncableFields & {
   attempts: number;
   lastError: string | null;
   nextRetryAt: string | null;
+  leaseOwner: string | null;
+  leaseExpiresAt: string | null;
+};
+
+export type AiJob = SyncableFields & {
+  id: string;
+  sessionId: string;
+  mediaId: string;
+  kind: AiJobKind;
+  consentVersion: string;
+  payload: Record<string, unknown>;
+  result: Record<string, unknown> | null;
+  appliedAt: string | null;
+  attempts: number;
+  lastError: string | null;
+  nextRetryAt: string | null;
+  leaseOwner: string | null;
+  leaseExpiresAt: string | null;
+};
+
+export type CreateAiJobInput = {
+  sessionId: string;
+  mediaId: string;
+  kind: AiJobKind;
+  consentVersion: string;
+  payload?: Record<string, unknown>;
+  accountScope?: string;
+  userId?: string | null;
 };
 
 export type CreateViewingSessionInput = {
   id?: string;
+  accountScope?: string;
   userId?: string | null;
   remoteViewingId?: string | null;
+  remoteRevision?: number | null;
   address?: string;
   tags?: string[];
   market?: ViewingSession["market"];
@@ -123,6 +159,7 @@ export type CreateNoteInput = {
   durationSec?: number | null;
   matchedQuestionIds?: number[];
   mediaId?: string | null;
+  accountScope?: string;
   userId?: string | null;
   syncStatus?: SyncStatus;
 };
@@ -136,11 +173,14 @@ export type CreateMediaInput = {
   id?: string;
   sessionId: string;
   kind: MediaKind;
-  blob: Blob;
+  blob?: Blob | null;
+  mediaRefId?: string | null;
+  size?: number;
   mimeType?: string;
   label?: string | null;
   tag?: string | null;
   durationSec?: number | null;
+  accountScope?: string;
   remoteUrl?: string | null;
   storagePath?: string | null;
   uploadStatus?: UploadStatus;
@@ -162,6 +202,9 @@ export type CreateSyncQueueInput = {
   attempts?: number;
   lastError?: string | null;
   nextRetryAt?: string | null;
+  leaseOwner?: string | null;
+  leaseExpiresAt?: string | null;
+  accountScope?: string;
   userId?: string | null;
   syncStatus?: SyncStatus;
 };
@@ -183,6 +226,7 @@ export type DraftDbSchemaV1 = {
       bySyncStatus: string;
       byUserId: string;
       byDeletedAt: string;
+      byAccountScope: string;
     };
   };
   notes: {
@@ -193,6 +237,7 @@ export type DraftDbSchemaV1 = {
       bySyncStatus: string;
       byUpdatedAt: string;
       byDeletedAt: string;
+      byAccountScope: string;
     };
   };
   media: {
@@ -204,6 +249,7 @@ export type DraftDbSchemaV1 = {
       byUploadStatus: string;
       byUpdatedAt: string;
       byDeletedAt: string;
+      byAccountScope: string;
     };
   };
   syncQueue: {
@@ -215,17 +261,29 @@ export type DraftDbSchemaV1 = {
       byNextRetryAt: string;
       byUpdatedAt: string;
       byDeletedAt: string;
+      byAccountScope: string;
     };
   };
 };
 
-/** Current schema = v1 stores + v2 additive indexes. */
+/** Current schema = v1 stores + additive indexes/stores. */
 export type DraftDbSchema = DraftDbSchemaV1 & {
   viewingSessions: {
     key: string;
     value: ViewingSession;
     indexes: DraftDbSchemaV1["viewingSessions"]["indexes"] & {
       byRemoteViewingId: string;
+    };
+  };
+  aiJobs: {
+    key: string;
+    value: AiJob;
+    indexes: {
+      bySessionId: string;
+      byMediaId: string;
+      bySyncStatus: string;
+      byNextRetryAt: string;
+      byAccountScope: string;
     };
   };
 };

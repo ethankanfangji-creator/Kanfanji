@@ -5,6 +5,10 @@ import { requireUser } from "@/lib/auth";
 import { CollaborationPanel } from "@/components/collaboration/CollaborationPanel";
 import { ViewingCollaborativeEditor } from "@/components/collaboration/ViewingCollaborativeEditor";
 import { getViewingRole } from "@/lib/collaboration/server";
+import {
+  projectViewingForRole,
+  VIEWING_PROJECTION_SELECT,
+} from "@/lib/collaboration/projection";
 import { signPathsWithClient } from "@/lib/viewing-sync";
 import type { Viewing, ViewingAudioNote } from "@/lib/types";
 import { createAdminClient } from "@/utils/supabase/admin";
@@ -29,15 +33,9 @@ export default async function ViewingDetailPage({
   const role = await getViewingRole(id, user.id);
   if (!role) notFound();
   const admin = createAdminClient();
-  const selectColumns: string =
-    role === "viewer"
-      ? "id, user_id, address, tags, market, questions, pros, risks, photo_urls, video_urls, property, revision, created_at, updated_at"
-      : role === "owner"
-        ? "id, user_id, address, tags, market, questions, notes, pros, risks, photo_urls, video_urls, audio_urls, share_token, property, revision, created_at, updated_at"
-        : "id, user_id, address, tags, market, questions, notes, pros, risks, photo_urls, video_urls, audio_urls, property, revision, created_at, updated_at";
   let { data, error } = await admin
     .from("viewings")
-    .select(selectColumns)
+    .select(VIEWING_PROJECTION_SELECT)
     .eq("id", id)
     .maybeSingle();
 
@@ -79,7 +77,10 @@ export default async function ViewingDetailPage({
 
   if (!data) notFound();
 
-  const rawViewing = data as unknown as Viewing;
+  const rawViewing = projectViewingForRole(
+    data as unknown as Record<string, unknown>,
+    role,
+  ) as unknown as Viewing;
   const [photoUrls, videoUrls] = await Promise.all([
     signPathsWithClient(supabase, rawViewing.photo_urls ?? []),
     signPathsWithClient(supabase, rawViewing.video_urls ?? []),

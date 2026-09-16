@@ -1,18 +1,20 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { newShareToken } from "@/lib/media-paths";
 import {
   generateShareToken,
   hashSharePassword,
-  shareTokenFingerprint,
   verifySharePassword,
 } from "./crypto";
-import {
-  isShareAccessState,
-  newShareAccessState,
-  type ShareAccessState,
-} from "./state";
 import type { ShareLinkRecord } from "./types";
 import { resolveShareLinkGate } from "./public-dto";
+import {
+  buildSharePublication,
+  isPublishedShareSnapshot,
+  parseMediaManifest,
+} from "./publication";
+import type {
+  PublishedShareMediaItem,
+  PublishedShareSnapshot,
+} from "./types";
 
 export type ViewingShareRow = {
   id: string;
@@ -26,51 +28,60 @@ export type ViewingShareRow = {
   property: Record<string, unknown> | null;
   updated_at: string;
   created_at: string;
+  shareLink?: ShareLinkRow | null;
 };
 
-function readAccess(property: Record<string, unknown> | null | undefined): ShareAccessState | null {
-  const raw = property?.shareAccess;
-  return isShareAccessState(raw) ? raw : null;
-}
+export type ShareLinkRow = {
+  id: string;
+  viewing_id: string;
+  token: string;
+  capability: "read";
+  status: "active" | "revoked";
+  expires_at: string | null;
+  password_hash: string | null;
+  access_version: number;
+  created_at: string;
+  updated_at: string;
+  revoked_at: string | null;
+  last_resolved_at: string | null;
+  published_snapshot: unknown;
+  media_manifest: unknown;
+};
 
-function withAccess(
-  property: Record<string, unknown> | null | undefined,
-  access: ShareAccessState,
-): Record<string, unknown> {
-  return {
-    ...(property ?? {}),
-    shareAccess: access,
-  };
-}
+const LINK_COLUMNS =
+  "id, viewing_id, token, capability, status, expires_at, password_hash, access_version, created_at, updated_at, revoked_at, last_resolved_at, published_snapshot, media_manifest";
+const LINK_GATE_COLUMNS =
+  "id, viewing_id, token, capability, status, expires_at, password_hash, access_version, created_at, updated_at, revoked_at, last_resolved_at";
 
-export function toShareLinkRecord(
-  viewingId: string,
-  token: string | null,
-  access: ShareAccessState,
-): ShareLinkRecord {
+export type PublishedShareRow = {
+  shareLink: ShareLinkRow;
+  snapshot: PublishedShareSnapshot;
+  mediaManifest: PublishedShareMediaItem[];
+  ownerId: string;
+};
+
+export type ShareGateRow = {
+  shareLink: ShareLinkRow;
+};
+
+export function toShareLinkRecord(row: ShareLinkRow): ShareLinkRecord {
   const expired =
-    access.expiresAt && new Date(access.expiresAt).getTime() <= Date.now();
-  const status = access.status === "revoked" ? "revoked" : expired ? "expired" : "active";
+    row.expires_at && new Date(row.expires_at).getTime() <= Date.now();
+  const status = row.status === "revoked" ? "revoked" : expired ? "expired" : "active";
   return {
-    id: access.linkId,
-    viewingId,
-    token: token || "",
+    id: row.id,
+    viewingId: row.viewing_id,
+    token: row.token,
     capability: "read",
     status,
-    expiresAt: access.expiresAt,
-    passwordEnabled: Boolean(access.passwordHash),
-    createdAt: access.createdAt,
-    updatedAt: access.updatedAt,
-    revokedAt: access.revokedAt,
-    lastResolvedAt: access.lastResolvedAt,
+    expiresAt: row.expires_at,
+    passwordEnabled: Boolean(row.password_hash),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    revokedAt: row.revoked_at,
+    lastResolvedAt: row.last_resolved_at,
+    accessVersion: row.access_version,
   };
-}
-
-export async function shareLinksTableAvailable(
-  admin: SupabaseClient,
-): Promise<boolean> {
-  const { error } = await admin.from("share_links").select("id").limit(1);
-  return !error;
 }
 
 async function fetchOwnedViewing(
@@ -97,13 +108,34 @@ export async function getOwnerShareLink(
 ): Promise<{ link: ShareLinkRecord | null; viewing: ViewingShareRow | null }> {
   const viewing = await fetchOwnedViewing(supabase, userId, viewingId);
   if (!viewing) return { link: null, viewing: null };
-  const access = readAccess(viewing.property);
-  if (!access && !viewing.share_token) return { link: null, viewing };
-  const state = access ?? newShareAccessState();
+  const { data, error } = await supabase
+    .from("share_links")
+    .select(LINK_COLUMNS)
+    .eq("viewing_id", viewingId)
+    .eq("status", "active")
+    .is("revoked_at", null)
+    .maybeSingle();
+  if (error) throw error;
   return {
-    link: toShareLinkRecord(viewing.id, viewing.share_token, state),
+    link: data ? toShareLinkRecord(data as ShareLinkRow) : null,
     viewing,
   };
+}
+
+export async function listOwnerShareLinks(
+  supabase: SupabaseClient,
+  userId: string,
+  viewingId: string,
+): Promise<ShareLinkRecord[]> {
+  const viewing = await fetchOwnedViewing(supabase, userId, viewingId);
+  if (!viewing) throw new Error("VIEWING_NOT_FOUND");
+  const { data, error } = await supabase
+    .from("share_links")
+    .select(LINK_COLUMNS)
+    .eq("viewing_id", viewingId)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return ((data ?? []) as ShareLinkRow[]).map(toShareLinkRecord);
 }
 
 export async function ensureOwnerShareLink(
@@ -119,75 +151,46 @@ export async function ensureOwnerShareLink(
   const viewing = await fetchOwnedViewing(supabase, userId, viewingId);
   if (!viewing) throw new Error("VIEWING_NOT_FOUND");
 
-  const now = new Date().toISOString();
-  let access = readAccess(viewing.property) ?? newShareAccessState();
-  let token = viewing.share_token;
-
-  if (options?.rotateToken || !token || access.status === "revoked") {
-    token = generateShareToken();
-    access = {
-      ...access,
-      status: "active",
-      revokedAt: null,
-      updatedAt: now,
-      createdAt: access.status === "revoked" ? now : access.createdAt,
-    };
+  if (options?.rotateToken) {
+    const current = await getOwnerShareLink(supabase, userId, viewingId);
+    if (current.link) return rotateOwnerShareLink(supabase, userId, current.link.id);
   }
 
-  if (options && "expiresAt" in (options ?? {})) {
-    access = { ...access, expiresAt: options.expiresAt ?? null, updatedAt: now };
-  }
-  if (options && "password" in (options ?? {})) {
-    const password = options.password;
-    access = {
-      ...access,
-      passwordHash:
-        password == null || password === ""
-          ? null
-          : await hashSharePassword(password),
-      updatedAt: now,
-    };
+  const current = await getOwnerShareLink(supabase, userId, viewingId);
+  if (current.link) {
+    const patch: { expiresAt?: string | null; password?: string | null } = {};
+    if (options && Object.hasOwn(options, "expiresAt")) patch.expiresAt = options.expiresAt ?? null;
+    if (options && Object.hasOwn(options, "password")) patch.password = options.password ?? null;
+    const link =
+      Object.keys(patch).length > 0
+        ? await updateOwnerShareLink(supabase, userId, current.link.id, patch)
+        : current.link;
+    return { link, urlPath: `/s/${link.token}` };
   }
 
-  access = { ...access, status: "active", updatedAt: now };
-
-  const property = withAccess(viewing.property, access);
-  const { error } = await supabase
-    .from("viewings")
-    .update({
-      share_token: token,
-      property,
-      updated_at: now,
+  const passwordHash =
+    options && Object.hasOwn(options, "password") && options.password
+      ? await hashSharePassword(options.password)
+      : null;
+  const token = generateShareToken();
+  const publication = buildSharePublication(viewing);
+  const { data, error } = await supabase
+    .from("share_links")
+    .insert({
+      viewing_id: viewingId,
+      token,
+      expires_at:
+        options && Object.hasOwn(options, "expiresAt") ? options.expiresAt ?? null : null,
+      password_hash: passwordHash,
+      published_snapshot: publication.snapshot,
+      media_manifest: publication.mediaManifest,
     })
-    .eq("id", viewingId)
-    .eq("user_id", userId);
+    .select(LINK_COLUMNS)
+    .single();
   if (error) throw error;
-
-  // Best-effort mirror into share_links when migration is applied.
-  try {
-    if (await shareLinksTableAvailable(supabase)) {
-      await supabase.from("share_links").upsert(
-        {
-          id: access.linkId,
-          viewing_id: viewingId,
-          token,
-          capability: "read",
-          status: "active",
-          expires_at: access.expiresAt,
-          password_hash: access.passwordHash,
-          created_at: access.createdAt,
-          updated_at: access.updatedAt,
-          revoked_at: null,
-        },
-        { onConflict: "id" },
-      );
-    }
-  } catch {
-    // optional table
-  }
-
+  const link = toShareLinkRecord(data as ShareLinkRow);
   return {
-    link: toShareLinkRecord(viewingId, token, access),
+    link,
     urlPath: `/s/${token}`,
   };
 }
@@ -198,26 +201,44 @@ export async function updateOwnerShareLink(
   linkId: string,
   patch: { expiresAt?: string | null; password?: string | null },
 ): Promise<ShareLinkRecord> {
-  const { data: rows, error } = await supabase
-    .from("viewings")
-    .select(
-      "id, user_id, address, tags, pros, risks, photo_urls, share_token, property, updated_at, created_at",
-    )
-    .eq("user_id", userId);
-  if (error) throw error;
-
-  const viewing = ((rows ?? []) as ViewingShareRow[]).find((row) => {
-    const access = readAccess(row.property);
-    return access?.linkId === linkId || (!access && row.id === linkId);
+  const row = await fetchOwnedLink(supabase, userId, linkId);
+  if (!row || row.status !== "active") throw new Error("LINK_NOT_FOUND");
+  const setExpires = Object.hasOwn(patch, "expiresAt");
+  const setPassword = Object.hasOwn(patch, "password");
+  if (!setExpires && !setPassword) return toShareLinkRecord(row);
+  let passwordHash: string | null = null;
+  if (Object.hasOwn(patch, "password")) {
+    passwordHash = patch.password ? await hashSharePassword(patch.password) : null;
+  }
+  const { data, error } = await supabase.rpc("mutate_share_link_security", {
+    p_link_id: linkId,
+    p_user_id: userId,
+    p_expected_access_version: row.access_version,
+    p_set_expires: setExpires,
+    p_expires_at: patch.expiresAt ?? null,
+    p_set_password: setPassword,
+    p_password_hash: passwordHash,
+    p_revoke: false,
   });
-  if (!viewing) throw new Error("LINK_NOT_FOUND");
+  if (error) throw error;
+  const next = (Array.isArray(data) ? data[0] : data) as ShareLinkRow | null;
+  if (!next) throw new Error("LINK_CONFLICT");
+  return toShareLinkRecord(next);
+}
 
-  return (
-    await ensureOwnerShareLink(supabase, userId, viewing.id, {
-      expiresAt: patch.expiresAt,
-      password: patch.password,
-    })
-  ).link;
+async function fetchOwnedLink(
+  supabase: SupabaseClient,
+  userId: string,
+  linkId: string,
+): Promise<ShareLinkRow | null> {
+  const { data, error } = await supabase
+    .from("share_links")
+    .select(LINK_COLUMNS)
+    .eq("id", linkId)
+    .maybeSingle();
+  if (error || !data) return null;
+  const row = data as ShareLinkRow;
+  return (await fetchOwnedViewing(supabase, userId, row.viewing_id)) ? row : null;
 }
 
 export async function revokeOwnerShareLink(
@@ -225,57 +246,22 @@ export async function revokeOwnerShareLink(
   userId: string,
   linkId: string,
 ): Promise<ShareLinkRecord> {
-  const { data: rows, error } = await supabase
-    .from("viewings")
-    .select(
-      "id, user_id, address, tags, pros, risks, photo_urls, share_token, property, updated_at, created_at",
-    )
-    .eq("user_id", userId);
-  if (error) throw error;
-
-  const viewing = ((rows ?? []) as ViewingShareRow[]).find((row) => {
-    const access = readAccess(row.property);
-    return access?.linkId === linkId;
+  const row = await fetchOwnedLink(supabase, userId, linkId);
+  if (!row || row.status !== "active") throw new Error("LINK_NOT_FOUND");
+  const { data, error } = await supabase.rpc("mutate_share_link_security", {
+    p_link_id: linkId,
+    p_user_id: userId,
+    p_expected_access_version: row.access_version,
+    p_set_expires: false,
+    p_expires_at: null,
+    p_set_password: false,
+    p_password_hash: null,
+    p_revoke: true,
   });
-  if (!viewing) throw new Error("LINK_NOT_FOUND");
-
-  const now = new Date().toISOString();
-  const prev = readAccess(viewing.property) ?? newShareAccessState({ linkId });
-  const access: ShareAccessState = {
-    ...prev,
-    status: "revoked",
-    revokedAt: now,
-    updatedAt: now,
-  };
-  const property = withAccess(viewing.property, access);
-  const { error: updErr } = await supabase
-    .from("viewings")
-    .update({
-      share_token: null,
-      property,
-      updated_at: now,
-    })
-    .eq("id", viewing.id)
-    .eq("user_id", userId);
-  if (updErr) throw updErr;
-
-  try {
-    if (await shareLinksTableAvailable(supabase)) {
-      await supabase
-        .from("share_links")
-        .update({
-          status: "revoked",
-          revoked_at: now,
-          updated_at: now,
-          token: `revoked_${shareTokenFingerprint(viewing.share_token || linkId)}_${Date.now()}`,
-        })
-        .eq("id", linkId);
-    }
-  } catch {
-    // optional
-  }
-
-  return toShareLinkRecord(viewing.id, null, access);
+  if (error) throw error;
+  const next = (Array.isArray(data) ? data[0] : data) as ShareLinkRow | null;
+  if (!next) throw new Error("LINK_CONFLICT");
+  return toShareLinkRecord(next);
 }
 
 export async function rotateOwnerShareLink(
@@ -283,141 +269,107 @@ export async function rotateOwnerShareLink(
   userId: string,
   linkId: string,
 ): Promise<{ link: ShareLinkRecord; urlPath: string }> {
-  const { data: rows, error } = await supabase
-    .from("viewings")
-    .select(
-      "id, user_id, share_token, property",
-    )
-    .eq("user_id", userId);
+  const row = await fetchOwnedLink(supabase, userId, linkId);
+  if (!row || row.status !== "active") throw new Error("LINK_NOT_FOUND");
+  const token = generateShareToken();
+  const { data, error } = await supabase.rpc("rotate_share_link", {
+    p_link_id: linkId,
+    p_user_id: userId,
+    p_token: token,
+  });
   if (error) throw error;
-  const viewing = ((rows ?? []) as Pick<ViewingShareRow, "id" | "share_token" | "property">[]).find(
-    (row) => readAccess(row.property)?.linkId === linkId,
-  );
-  if (!viewing) throw new Error("LINK_NOT_FOUND");
-  return ensureOwnerShareLink(supabase, userId, viewing.id, { rotateToken: true });
+  const next = (Array.isArray(data) ? data[0] : data) as ShareLinkRow | null;
+  if (!next) throw new Error("LINK_NOT_FOUND");
+  return { link: toShareLinkRecord(next), urlPath: `/s/${token}` };
 }
 
 export async function fetchViewingByShareTokenAdmin(
   admin: SupabaseClient,
   token: string,
-): Promise<ViewingShareRow | null> {
+): Promise<PublishedShareRow | null> {
   const trimmed = token.trim();
   if (!trimmed) return null;
 
-  // Prefer share_links when present.
-  try {
-    if (await shareLinksTableAvailable(admin)) {
-      const { data: link } = await admin
-        .from("share_links")
-        .select(
-          "id, viewing_id, token, status, expires_at, password_hash, revoked_at, last_resolved_at, created_at, updated_at",
-        )
-        .eq("token", trimmed)
-        .maybeSingle();
-      if (link) {
-        const { data: viewing } = await admin
-          .from("viewings")
-          .select(
-            "id, user_id, address, tags, pros, risks, photo_urls, share_token, property, updated_at, created_at",
-          )
-          .eq("id", link.viewing_id)
-          .maybeSingle();
-        if (!viewing) return null;
-        const row = viewing as ViewingShareRow;
-        const access = newShareAccessState({
-          linkId: String(link.id),
-          status: link.status === "revoked" ? "revoked" : "active",
-          expiresAt: link.expires_at ? String(link.expires_at) : null,
-          passwordHash: link.password_hash ? String(link.password_hash) : null,
-          revokedAt: link.revoked_at ? String(link.revoked_at) : null,
-          lastResolvedAt: link.last_resolved_at
-            ? String(link.last_resolved_at)
-            : null,
-          createdAt: String(link.created_at),
-          updatedAt: String(link.updated_at),
-        });
-        return {
-          ...row,
-          share_token: trimmed,
-          property: withAccess(row.property, access),
-        };
-      }
-    }
-  } catch {
-    // fall through
-  }
+  const { data, error } = await admin.rpc("resolve_share_publication", {
+    p_token: trimmed,
+  });
+  if (error || !data || typeof data !== "object" || Array.isArray(data)) return null;
+  const resolved = data as { shareLink?: unknown; ownerId?: unknown };
+  if (!resolved.shareLink || typeof resolved.shareLink !== "object") return null;
+  const linkRow = resolved.shareLink as ShareLinkRow;
+  if (!isPublishedShareSnapshot(linkRow.published_snapshot)) return null;
+  if (typeof resolved.ownerId !== "string") return null;
+  return {
+    shareLink: linkRow,
+    snapshot: linkRow.published_snapshot,
+    mediaManifest: parseMediaManifest(linkRow.media_manifest),
+    ownerId: resolved.ownerId,
+  };
+}
 
+/** Fetches access metadata only, so locked requests never read published content. */
+export async function fetchShareGateByTokenAdmin(
+  admin: SupabaseClient,
+  token: string,
+): Promise<ShareGateRow | null> {
+  const trimmed = token.trim();
+  if (!trimmed) return null;
   const { data, error } = await admin
-    .from("viewings")
-    .select(
-      "id, user_id, address, tags, pros, risks, photo_urls, share_token, property, updated_at, created_at",
-    )
-    .eq("share_token", trimmed)
+    .from("share_links")
+    .select(LINK_GATE_COLUMNS)
+    .eq("token", trimmed)
     .maybeSingle();
   if (error || !data) return null;
-  return data as ViewingShareRow;
+  return { shareLink: data as ShareLinkRow };
 }
 
 export async function touchShareResolved(
   admin: SupabaseClient,
-  viewing: ViewingShareRow,
+  viewing: PublishedShareRow | ShareGateRow,
 ): Promise<void> {
-  const access = readAccess(viewing.property);
-  if (!access) return;
+  const link = viewing.shareLink;
+  if (!link || link.status !== "active") return;
   const now = new Date().toISOString();
-  const next = { ...access, lastResolvedAt: now, updatedAt: access.updatedAt };
   await admin
-    .from("viewings")
-    .update({ property: withAccess(viewing.property, next) })
-    .eq("id", viewing.id);
-  try {
-    if (await shareLinksTableAvailable(admin)) {
-      await admin
-        .from("share_links")
-        .update({ last_resolved_at: now })
-        .eq("id", access.linkId);
-    }
-  } catch {
-    // optional
-  }
+    .from("share_links")
+    .update({ last_resolved_at: now })
+    .eq("id", link.id)
+    .eq("status", "active");
 }
 
 export function gateFromViewing(
-  viewing: ViewingShareRow | null,
+  viewing: PublishedShareRow | ShareGateRow | null,
   unlocked: boolean,
 ): ReturnType<typeof resolveShareLinkGate> {
   if (!viewing) return "missing";
-  const access = readAccess(viewing.property);
+  const access = viewing.shareLink;
   return resolveShareLinkGate({
     found: true,
-    revokedAt: access?.status === "revoked" ? access.revokedAt || access.updatedAt : null,
-    expiresAt: access?.expiresAt ?? null,
-    passwordHash: access?.passwordHash ?? null,
+    revokedAt: access?.status === "revoked" ? access.revoked_at || access.updated_at : null,
+    expiresAt: access?.expires_at ?? null,
+    passwordHash: access?.password_hash ?? null,
     unlocked,
   });
 }
 
 export async function verifyViewingSharePassword(
-  viewing: ViewingShareRow,
+  viewing: PublishedShareRow | ShareGateRow,
   password: string,
 ): Promise<boolean> {
-  const hash = readAccess(viewing.property)?.passwordHash;
+  const hash = viewing.shareLink?.password_hash;
   if (!hash) return true;
   return verifySharePassword(password, hash);
 }
 
-export function getShareAccess(viewing: ViewingShareRow): ShareAccessState | null {
-  return readAccess(viewing.property);
+export function getShareAccess(viewing: PublishedShareRow | ShareGateRow): ShareLinkRow {
+  return viewing.shareLink;
 }
 
-/** Ensure newly synced viewings have shareAccess metadata without wiping token. */
+/** @deprecated Share metadata now lives only in share_links. */
 export function ensureShareAccessOnProperty(
   property: Record<string, unknown>,
   shareToken: string | null,
 ): Record<string, unknown> {
-  if (!shareToken) return property;
-  if (isShareAccessState(property.shareAccess)) return property;
-  return withAccess(property, newShareAccessState());
+  void shareToken;
+  return property;
 }
-
-export { newShareToken };

@@ -49,30 +49,43 @@ export function createMockViewingSyncAdapter(
 
       if (input.remoteViewingId) {
         const remote = state.remotes.get(input.remoteViewingId);
+        if (
+          input.expectedRevision != null &&
+          remote?.revision != null &&
+          input.expectedRevision !== remote.revision
+        ) {
+          return {
+            id: input.remoteViewingId,
+            conflict: true,
+            skippedAsStale: false,
+            revision: remote.revision,
+          };
+        }
         if (remote?.clientUpdatedAt) {
           const remoteTs = Date.parse(remote.clientUpdatedAt) || 0;
           const localTs = Date.parse(input.clientUpdatedAt) || 0;
           if (remoteTs > localTs) {
             return {
               id: input.remoteViewingId,
-              shareToken: remote.shareToken || input.shareToken || "",
               conflict: true,
               skippedAsStale: true,
+              revision: remote.revision ?? 1,
             };
           }
         }
       }
 
       const id = input.remoteViewingId || `remote-${state.saveCalls.length}`;
-      const shareToken = input.shareToken || `tok-${id}`;
+      const revision = (state.remotes.get(id)?.revision ?? 0) + 1;
       state.remotes.set(id, {
         id,
         address: input.address,
         clientUpdatedAt: input.clientUpdatedAt,
         updatedAt: input.clientUpdatedAt,
-        shareToken,
+        shareToken: null,
+        revision,
       });
-      return { id, shareToken, conflict: false, skippedAsStale: false };
+      return { id, conflict: false, skippedAsStale: false, revision };
     },
     uploadRemoteMedia: async (input) => {
       state.uploadCalls.push(input);

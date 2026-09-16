@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef } from "react";
+import { Dialog } from "@/components/ui/Dialog";
 import type { PhotoTagId } from "@/lib/field-capture";
 
 export function PhotoAnnotator({
@@ -36,47 +36,14 @@ export function PhotoAnnotator({
   onSave: () => void;
   onCancel: () => void;
 }) {
-  const titleId = useId();
-  const dialogRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const node = dialogRef.current;
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    node?.querySelector<HTMLElement>("button, textarea, [href], input, select")?.focus();
-
-    function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onCancel();
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      previouslyFocused?.focus?.();
-    };
-  }, [open, onCancel]);
-
-  if (!open) return null;
-
   return (
-    <div
-      className="fixed inset-0 z-[70] flex justify-center bg-black/45 backdrop-blur-[2px] p-4"
-      role="presentation"
-      onClick={onCancel}
+    <Dialog
+      open={open}
+      onClose={onCancel}
+      title={title}
+      backdropClassName="backdrop-blur-[2px]"
+      className="max-h-[90vh] overflow-auto"
     >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="w-full max-w-[420px] my-auto bg-white rounded-[24px] p-5 shadow-[0_20px_60px_rgba(0,0,0,0.25)] max-h-[90vh] overflow-auto"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <h3 id={titleId} className="text-[17px] font-bold">
-          {title}
-        </h3>
         {previewUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -143,7 +110,6 @@ export function PhotoAnnotator({
             {saveLabel}
           </button>
         </div>
-      </div>
-    </div>
+    </Dialog>
   );
 }

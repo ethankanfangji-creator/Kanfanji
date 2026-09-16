@@ -2,6 +2,7 @@ export type DraftDbErrorCode =
   | "not_found"
   | "invalid_input"
   | "immutable_id"
+  | "lease_lost"
   | "transaction_failed"
   | "open_failed"
   | "unknown";

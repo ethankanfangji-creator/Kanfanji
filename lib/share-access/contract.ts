@@ -18,7 +18,7 @@ export const shareApiContract = {
     method: "GET",
     path: "/api/share/links?viewingId=",
     auth: "owner",
-    success: "200 { link: ShareLinkRecord | null }",
+    success: "200 { link: ShareLinkRecord | null, history: ShareLinkRecord[] }",
     errors: ["401", "403", "404"],
   },
   updateLink: {

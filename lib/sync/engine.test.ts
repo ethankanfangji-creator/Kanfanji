@@ -9,7 +9,7 @@ const TEST_DB = "kanfangji-sync-engine-test";
 const openHandles: DraftDb[] = [];
 
 async function openDb() {
-  const db = await DraftDb.open({ name: TEST_DB, version: 2 });
+  const db = await DraftDb.open({ name: TEST_DB, version: 3 });
   openHandles.push(db);
   return db;
 }
@@ -118,12 +118,59 @@ describe("SyncEngine queue", () => {
 
     const syncedSession = await db.viewingSessions.require(session.id);
     expect(syncedSession.remoteViewingId).toBeTruthy();
+    expect(syncedSession.remoteRevision).toBe(1);
     expect(syncedSession.syncStatus).toBe("synced");
 
     const syncedMedia = await db.media.require(media.id);
     expect(syncedMedia.uploadStatus).toBe("uploaded");
     expect(syncedMedia.storagePath).toContain(media.id);
     expect(adapter.state.uploadCalls).toHaveLength(1);
+  });
+
+  it("references canonical media without duplicating blob bytes in DraftDb", async () => {
+    const db = await openDb();
+    const engine = createSyncEngine({
+      db,
+      adapter: createMockViewingSyncAdapter({ userId: null, online: false }),
+    });
+    const blob = new Blob([new Uint8Array([1, 2, 3])], { type: "image/jpeg" });
+
+    const sessionId = await engine.importActiveDraft({
+      sessionId: "local-session",
+      userId: null,
+      remoteViewingId: null,
+      shareToken: null,
+      address: "Canonical media",
+      tags: [],
+      market: "CA",
+      identified: true,
+      questions: [],
+      notes: [],
+      pros: [],
+      risks: [],
+      propertyDraft: {},
+      clientUpdatedAt: new Date().toISOString(),
+      media: [
+        {
+          id: "canonical-media",
+          kind: "photo",
+          label: "photo",
+          mimeType: blob.type,
+          size: blob.size,
+          blob,
+          remotePath: null,
+          uploadStatus: "local",
+        },
+      ],
+    });
+
+    const [media] = await db.media.listBySession(sessionId);
+    expect(media).toMatchObject({
+      id: "canonical-media",
+      blob: null,
+      mediaRefId: "canonical-media",
+      size: blob.size,
+    });
   });
 
   it("does not re-upload the same mediaId (idempotent)", async () => {
@@ -296,5 +343,75 @@ describe("SyncEngine queue", () => {
     expect(ui?.status).toBe("failed");
     expect(ui?.errorMessage).toMatch(/檔案過大/);
     expect(ui?.canRetry).toBe(true);
+  });
+
+  it("reuses the owner-scoped create key after a network retry", async () => {
+    const db = await openDb();
+    const adapter = createMockViewingSyncAdapter({
+      userId: "user-1",
+      failNextSave: new Error("Failed to fetch"),
+    });
+    const engine = createSyncEngine({ db, adapter });
+    const session = await db.viewingSessions.create({
+      address: "Stable create",
+      propertyDraft: { clientUpdatedAt: new Date().toISOString() },
+    });
+    await engine.enqueueSession(session.id, { userId: "user-1" });
+    await engine.processQueue();
+    const [job] = await db.syncQueue.listBySession(session.id);
+    await db.syncQueue.update(job!.id, { nextRetryAt: null });
+    await engine.processQueue();
+    expect(adapter.state.saveCalls).toHaveLength(2);
+    expect(adapter.state.saveCalls.map((call) => call.idempotencyKey)).toEqual([
+      session.id,
+      session.id,
+    ]);
+  });
+
+  it("treats a revision CAS miss as conflict", async () => {
+    const db = await openDb();
+    const adapter = createMockViewingSyncAdapter({ userId: "user-1" });
+    const session = await db.viewingSessions.create({
+      address: "CAS local",
+      remoteViewingId: "remote-cas",
+      remoteRevision: 1,
+      syncStatus: "pending",
+      propertyDraft: { clientUpdatedAt: "2026-01-02T00:00:00.000Z" },
+    });
+    adapter.state.remotes.set("remote-cas", {
+      id: "remote-cas",
+      address: "CAS remote",
+      clientUpdatedAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      shareToken: "cas",
+      revision: 2,
+    });
+    const engine = createSyncEngine({ db, adapter });
+    await engine.enqueueSession(session.id, { userId: "user-1" });
+    const result = await engine.processQueue();
+    expect(result.conflicts).toBe(1);
+    expect((await db.viewingSessions.require(session.id)).syncStatus).toBe("conflict");
+  });
+
+  it("counts network failures toward max attempts and stops auto-drain", async () => {
+    const db = await openDb();
+    const adapter = createMockViewingSyncAdapter({ userId: "user-1" });
+    const engine = createSyncEngine({ db, adapter });
+    const session = await db.viewingSessions.create({
+      address: "Network terminal",
+      propertyDraft: { clientUpdatedAt: new Date().toISOString() },
+    });
+    await engine.enqueueSession(session.id, { userId: "user-1" });
+    const [job] = await db.syncQueue.listBySession(session.id);
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      adapter.state.failNextSave = new Error("Failed to fetch");
+      await db.syncQueue.update(job!.id, { nextRetryAt: null });
+      await engine.processQueue();
+    }
+    const terminal = await db.syncQueue.require(job!.id);
+    expect(terminal).toMatchObject({ syncStatus: "failed", attempts: 8 });
+    const calls = adapter.state.saveCalls.length;
+    await engine.processQueue();
+    expect(adapter.state.saveCalls).toHaveLength(calls);
   });
 });

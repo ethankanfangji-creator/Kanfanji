@@ -2,7 +2,9 @@
 -- Keeps viewings.user_id as the canonical owner so the existing single-viewing
 -- workflow remains unchanged.
 
-create extension if not exists "citext";
+create schema if not exists extensions;
+create extension if not exists "citext" with schema extensions;
+grant usage on schema extensions to postgres, anon, authenticated, service_role;
 create extension if not exists "pgcrypto";
 
 alter table public.viewings

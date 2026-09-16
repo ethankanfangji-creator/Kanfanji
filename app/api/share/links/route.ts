@@ -3,9 +3,11 @@ import { createClient } from "@/utils/supabase/server";
 import {
   ensureOwnerShareLink,
   getOwnerShareLink,
+  listOwnerShareLinks,
 } from "@/lib/share-access/server";
 import type { CreateShareLinkRequest } from "@/lib/share-access/types";
 import { createAdminClient } from "@/utils/supabase/admin";
+import { MAX_SHARE_PASSWORD_LENGTH } from "@/lib/share-access/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -27,15 +29,8 @@ export async function GET(req: Request) {
     if (!viewing) {
       return NextResponse.json({ error: "找不到案件" }, { status: 404 });
     }
-    // Lazy-ensure metadata when a legacy token exists.
-    if (viewing.share_token && (!link || !link.token)) {
-      const ensured = await ensureOwnerShareLink(admin, user.id, viewingId);
-      return NextResponse.json({ link: ensured.link });
-    }
-    if (viewing.share_token && link && !link.passwordEnabled && link.status === "active") {
-      return NextResponse.json({ link });
-    }
-    return NextResponse.json({ link });
+    const history = await listOwnerShareLinks(admin, user.id, viewingId);
+    return NextResponse.json({ link, history });
   } catch (error) {
     const message = error instanceof Error ? error.message : "讀取分享連結失敗";
     return NextResponse.json({ error: message }, { status: 500 });
@@ -55,13 +50,22 @@ export async function POST(req: Request) {
     if (!body.viewingId?.trim()) {
       return NextResponse.json({ error: "缺少 viewingId" }, { status: 400 });
     }
-    if (body.password != null && body.password !== "" && body.password.length < 4) {
-      return NextResponse.json({ error: "密碼至少 4 碼" }, { status: 400 });
+    if (
+      body.password != null &&
+      body.password !== "" &&
+      (body.password.length < 4 || body.password.length > MAX_SHARE_PASSWORD_LENGTH)
+    ) {
+      return NextResponse.json({ error: "密碼需為 4–256 碼" }, { status: 400 });
     }
-    const result = await ensureOwnerShareLink(createAdminClient(), user.id, body.viewingId.trim(), {
-      expiresAt: body.expiresAt,
-      password: body.password,
-    });
+    const options: { expiresAt?: string | null; password?: string | null } = {};
+    if (Object.hasOwn(body, "expiresAt")) options.expiresAt = body.expiresAt ?? null;
+    if (Object.hasOwn(body, "password")) options.password = body.password ?? null;
+    const result = await ensureOwnerShareLink(
+      createAdminClient(),
+      user.id,
+      body.viewingId.trim(),
+      options,
+    );
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "建立分享連結失敗";

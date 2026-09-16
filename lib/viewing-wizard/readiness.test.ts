@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   canEnterStep,
   canGenerateShareCard,
+  getPublishReadiness,
   getShareChecklist,
   getStepStatus,
   isStep1Complete,
@@ -99,5 +100,19 @@ describe("viewing wizard readiness", () => {
     expect(next.city).toBe("Coquitlam");
     expect(next.unitLabel).toBe("1202");
     expect(next.viewingAt).toBe("2026-09-15T10:00:00.000Z");
+  });
+});
+
+describe("publish readiness", () => {
+  it("requires uploaded remote paths for every selected item", () => {
+    const media = [
+      { id: "a", uploadStatus: "uploaded" as const, remotePath: "u/v/photos/a.jpg" },
+      { id: "b", uploadStatus: "failed" as const, remotePath: null },
+    ];
+    expect(getPublishReadiness(["a"], media)).toEqual({ ready: true, blockingIds: [] });
+    expect(getPublishReadiness(["a", "b", "missing"], media)).toEqual({
+      ready: false,
+      blockingIds: ["b", "missing"],
+    });
   });
 });

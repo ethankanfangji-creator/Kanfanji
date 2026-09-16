@@ -186,7 +186,7 @@ export function CollaborationPanel({ viewingId }: { viewingId: string }) {
 
   if (!overview && !error) {
     return (
-      <div className="rounded-[22px] bg-white border border-black/[0.05] p-4 mb-4 text-[12px] text-[#6B7280]">
+      <div role="status" aria-live="polite" className="rounded-[22px] bg-white border border-black/[0.05] p-4 mb-4 text-[12px] text-[#6B7280]">
         載入家人協作…
       </div>
     );
@@ -194,7 +194,7 @@ export function CollaborationPanel({ viewingId }: { viewingId: string }) {
 
   if (!overview) {
     return (
-      <div className="rounded-[22px] bg-[#FFFBEB] border border-[#FDE68A] p-4 mb-4 text-[12px] text-[#92400E]">
+      <div role="alert" className="rounded-[22px] bg-[#FFFBEB] border border-[#FDE68A] p-4 mb-4 text-[12px] text-[#92400E]">
         家人協作尚未啟用：{error}
       </div>
     );
@@ -217,7 +217,7 @@ export function CollaborationPanel({ viewingId }: { viewingId: string }) {
       </p>
 
       {error ? (
-        <p className="mt-3 rounded-xl bg-[#FEF2F2] p-2 text-[11px] text-[#991B1B]">
+        <p role="alert" className="mt-3 rounded-xl bg-[#FEF2F2] p-2 text-[11px] text-[#991B1B]">
           {error}
         </p>
       ) : null}
@@ -230,12 +230,15 @@ export function CollaborationPanel({ viewingId }: { viewingId: string }) {
           <div className="mt-2 flex gap-2">
             <input
               type="email"
+              aria-label="家人電子郵件"
+              autoComplete="email"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               placeholder="family@example.com"
               className="min-w-0 flex-1 h-10 rounded-full bg-white border border-black/10 px-3 text-[12px] outline-none"
             />
             <select
+              aria-label="邀請權限"
               value={role}
               onChange={(event) => setRole(event.target.value as MemberRole)}
               className="h-10 rounded-full bg-white border border-black/10 px-2 text-[11px]"
@@ -249,7 +252,7 @@ export function CollaborationPanel({ viewingId }: { viewingId: string }) {
             type="button"
             disabled={busy || !email.includes("@")}
             onClick={() => void createInvite()}
-            className="mt-2 w-full h-10 rounded-full bg-black text-white text-[12px] font-bold disabled:opacity-45"
+              className="mt-2 w-full min-h-11 rounded-full bg-black text-white text-[12px] font-bold disabled:opacity-45"
           >
             建立 7 天邀請連結
           </button>
@@ -287,6 +290,7 @@ export function CollaborationPanel({ viewingId }: { viewingId: string }) {
                   <>
                     <select
                       value={member.role}
+                      aria-label={`${member.displayEmail || "家人成員"}權限`}
                       disabled={busy}
                       onChange={(event) =>
                         void changeMember(
@@ -305,7 +309,7 @@ export function CollaborationPanel({ viewingId }: { viewingId: string }) {
                       aria-label="移除成員"
                       disabled={busy}
                       onClick={() => void revokeMember(member.id)}
-                      className="w-8 h-8 rounded-full border border-[#FECACA] text-[#991B1B] flex items-center justify-center"
+                      className="min-w-11 min-h-11 rounded-full border border-[#FECACA] text-[#991B1B] flex items-center justify-center"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -337,8 +341,9 @@ export function CollaborationPanel({ viewingId }: { viewingId: string }) {
                 <button
                   type="button"
                   disabled={busy}
+                  aria-label={`撤銷 ${invite.email} 的邀請`}
                   onClick={() => void revokeInvite(invite.id)}
-                  className="font-bold text-[#991B1B]"
+                  className="min-h-11 px-2 font-bold text-[#991B1B]"
                 >
                   撤銷
                 </button>
@@ -372,6 +377,7 @@ export function CollaborationPanel({ viewingId }: { viewingId: string }) {
         {canComment ? (
           <div className="mt-2 flex gap-2">
             <input
+              aria-label="新增家人留言"
               value={comment}
               onChange={(event) => setComment(event.target.value)}
               placeholder="新增不會修改案件正文的留言…"
@@ -381,7 +387,7 @@ export function CollaborationPanel({ viewingId }: { viewingId: string }) {
               type="button"
               disabled={busy || !comment.trim()}
               onClick={() => void addComment()}
-              className="h-10 px-3 rounded-full bg-black text-white text-[11px] font-bold disabled:opacity-45"
+              className="min-h-11 px-3 rounded-full bg-black text-white text-[11px] font-bold disabled:opacity-45"
             >
               留言
             </button>

@@ -16,7 +16,11 @@ export async function POST() {
     const supabase = await createClient();
     const {
       data: { user },
+      error: authError,
     } = await supabase.auth.getUser();
+    if (authError) {
+      return NextResponse.json({ error: "AUTH_LOOKUP_FAILED" }, { status: 500 });
+    }
     if (!user) {
       return NextResponse.json({ error: "請先登入" }, { status: 401 });
     }
@@ -24,11 +28,12 @@ export async function POST() {
     const stripe = getStripe();
     const admin = createAdminClient();
 
-    const { data: existing } = await admin
+    const { data: existing, error: subscriptionError } = await admin
       .from("subscriptions")
       .select("stripe_customer_id, status, plan")
       .eq("user_id", user.id)
       .maybeSingle();
+    if (subscriptionError) throw new Error("SUBSCRIPTION_LOOKUP_FAILED");
 
     let customerId = existing?.stripe_customer_id ?? null;
     if (!customerId) {
@@ -37,7 +42,7 @@ export async function POST() {
         metadata: { supabase_user_id: user.id },
       });
       customerId = customer.id;
-      await admin.from("subscriptions").upsert(
+      const { error: customerPersistError } = await admin.from("subscriptions").upsert(
         {
           user_id: user.id,
           stripe_customer_id: customerId,
@@ -47,6 +52,7 @@ export async function POST() {
         },
         { onConflict: "user_id" },
       );
+      if (customerPersistError) throw new Error("CUSTOMER_PERSIST_FAILED");
     }
 
     const session = await stripe.checkout.sessions.create({
@@ -67,8 +73,7 @@ export async function POST() {
     }
 
     return NextResponse.json({ url: session.url });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Checkout 失敗";
-    return NextResponse.json({ error: message }, { status: 500 });
+  } catch {
+    return NextResponse.json({ error: "CHECKOUT_FAILED" }, { status: 500 });
   }
 }

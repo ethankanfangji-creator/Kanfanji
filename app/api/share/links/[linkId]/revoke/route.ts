@@ -21,7 +21,8 @@ export async function POST(_req: Request, ctx: Ctx) {
     return NextResponse.json({ link });
   } catch (error) {
     const message = error instanceof Error ? error.message : "取消分享失敗";
-    const status = message === "LINK_NOT_FOUND" ? 404 : 500;
+    const status =
+      message === "LINK_NOT_FOUND" ? 404 : message === "LINK_CONFLICT" ? 409 : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }

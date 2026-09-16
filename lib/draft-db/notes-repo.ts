@@ -3,13 +3,15 @@ import { DraftDbError } from "./errors";
 import { STORE } from "./migrations";
 import {
   filterListed,
+  inAccountScope,
+  isVisibleInScope,
   requireFound,
   withStoreError,
   type RepoContext,
 } from "./repository-utils";
 import type { CreateNoteInput, ListOptions, Note, UpdateNoteInput } from "./types";
 
-function buildNote(input: CreateNoteInput): Note {
+function buildNote(input: CreateNoteInput, defaultScope?: string): Note {
   if (!input.sessionId) {
     throw new DraftDbError("sessionId is required", "invalid_input");
   }
@@ -19,6 +21,7 @@ function buildNote(input: CreateNoteInput): Note {
   const timestamp = nowIso();
   return {
     id: input.id ?? createEntityId(),
+    accountScope: input.accountScope ?? defaultScope ?? "guest:legacy",
     sessionId: input.sessionId,
     kind: input.kind ?? "text",
     body: input.body,
@@ -38,7 +41,7 @@ export function createNotesRepository(ctx: RepoContext) {
   return {
     async create(input: CreateNoteInput): Promise<Note> {
       return withStoreError("notes.create", async () => {
-        const record = buildNote(input);
+        const record = buildNote(input, ctx.accountScope);
         await ctx.db.put(STORE.notes, record);
         return record;
       });
@@ -47,7 +50,8 @@ export function createNotesRepository(ctx: RepoContext) {
     async get(id: string): Promise<Note | null> {
       return withStoreError("notes.get", async () => {
         if (!id) throw new DraftDbError("id is required", "invalid_input");
-        return (await ctx.db.get(STORE.notes, id)) ?? null;
+        const row = await ctx.db.get(STORE.notes, id);
+        return isVisibleInScope(row, ctx.accountScope) ? row ?? null : null;
       });
     },
 
@@ -60,6 +64,9 @@ export function createNotesRepository(ctx: RepoContext) {
       return withStoreError("notes.update", async () => {
         assertImmutableId(id, (patch as { id?: string }).id);
         const existing = requireFound(await ctx.db.get(STORE.notes, id), "note", id);
+        if (!isVisibleInScope(existing, ctx.accountScope)) {
+          throw new DraftDbError("note is locked to another account", "not_found");
+        }
         const next: Note = {
           ...existing,
           ...patch,
@@ -84,6 +91,10 @@ export function createNotesRepository(ctx: RepoContext) {
     async delete(id: string): Promise<void> {
       return withStoreError("notes.delete", async () => {
         if (!id) throw new DraftDbError("id is required", "invalid_input");
+        const existing = await ctx.db.get(STORE.notes, id);
+        if (!isVisibleInScope(existing, ctx.accountScope)) {
+          throw new DraftDbError("note is locked to another account", "not_found");
+        }
         await ctx.db.delete(STORE.notes, id);
       });
     },
@@ -91,7 +102,7 @@ export function createNotesRepository(ctx: RepoContext) {
     async list(options?: ListOptions): Promise<Note[]> {
       return withStoreError("notes.list", async () => {
         const rows = await ctx.db.getAll(STORE.notes);
-        return filterListed(rows, options).sort((a, b) =>
+        return filterListed(inAccountScope(rows, ctx.accountScope), options).sort((a, b) =>
           a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0,
         );
       });
@@ -101,7 +112,7 @@ export function createNotesRepository(ctx: RepoContext) {
       return withStoreError("notes.listBySession", async () => {
         if (!sessionId) throw new DraftDbError("sessionId is required", "invalid_input");
         const rows = await ctx.db.getAllFromIndex(STORE.notes, "bySessionId", sessionId);
-        return filterListed(rows, options).sort((a, b) =>
+        return filterListed(inAccountScope(rows, ctx.accountScope), options).sort((a, b) =>
           a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0,
         );
       });

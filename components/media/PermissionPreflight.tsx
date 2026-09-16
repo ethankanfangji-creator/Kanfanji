@@ -1,5 +1,6 @@
 "use client";
 
+import { Dialog } from "@/components/ui/Dialog";
 import type { CaptureKind, MediaPermissionStatus } from "@/lib/media-permissions";
 
 export type PermissionCopy = {
@@ -46,16 +47,21 @@ export function PermissionPreflight({
     status === "permission-revoked";
 
   return (
-    <div className="fixed inset-0 z-[60] flex justify-center bg-black/40 backdrop-blur-[2px] p-4">
-      <div className="w-full max-w-[420px] my-auto bg-white rounded-[24px] p-5 shadow-[0_20px_60px_rgba(0,0,0,0.2)]">
-        <h3 className="text-[17px] font-bold leading-snug">{title}</h3>
-        <p className="mt-2 text-[13px] text-[#4B5563] leading-[1.5]">{body}</p>
+    <Dialog
+      open
+      onClose={onCancel}
+      title={title}
+      description={body}
+      closeOnBackdrop={!busy}
+      backdropClassName="z-[60] backdrop-blur-[2px]"
+    >
         <p className="mt-3 text-[12px] text-[#6B7280] leading-[1.45] rounded-xl bg-[#F8F4EF] border border-black/5 px-3 py-2.5">
           {copy.localNote}
         </p>
 
         {status && status !== "prompt" && status !== "granted" ? (
           <div
+            role={blocking ? "alert" : "status"}
             className={`mt-3 rounded-xl border px-3 py-2.5 text-[12px] leading-[1.45] ${
               blocking
                 ? "bg-[#FEF2F2] border-[#FECACA] text-[#991B1B]"
@@ -73,7 +79,7 @@ export function PermissionPreflight({
               type="button"
               disabled={busy}
               onClick={onContinue}
-              className="h-12 rounded-full bg-black text-white text-[14px] font-bold active:scale-[0.98] disabled:opacity-50"
+              className="min-h-12 rounded-full bg-black text-white text-[14px] font-bold active:scale-[0.98] disabled:opacity-50"
             >
               {copy.continue}
             </button>
@@ -83,7 +89,7 @@ export function PermissionPreflight({
               type="button"
               disabled={busy}
               onClick={onImport}
-              className="h-12 rounded-full bg-[#F8FAFF] border border-[#DBEAFE] text-[#2563EB] text-[14px] font-bold active:scale-[0.98] disabled:opacity-50"
+              className="min-h-12 rounded-full bg-[#F8FAFF] border border-[#DBEAFE] text-[#2563EB] text-[14px] font-bold active:scale-[0.98] disabled:opacity-50"
             >
               {copy.importInstead}
             </button>
@@ -92,12 +98,11 @@ export function PermissionPreflight({
             type="button"
             disabled={busy}
             onClick={onCancel}
-            className="h-12 rounded-full bg-white border border-black/10 text-[14px] font-bold active:scale-[0.98]"
+            className="min-h-12 rounded-full bg-white border border-black/10 text-[14px] font-bold active:scale-[0.98]"
           >
             {copy.cancel}
           </button>
         </div>
-      </div>
-    </div>
+    </Dialog>
   );
 }

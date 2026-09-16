@@ -155,6 +155,23 @@ const en: Messages = {
       "permission-revoked": "Permission was revoked mid-session",
     },
   },
+  mediaImport: {
+    photoGallery: "Choose photos from gallery",
+    videoGallery: "Choose a video from gallery",
+    invalidPhoto: "Choose a valid image file.",
+    invalidVideo: "Choose a valid video file.",
+    emptyFile: "That file is empty.",
+    photoTooLarge: "Photos must be 25 MB or smaller.",
+    videoTooLarge: "Videos must be 250 MB or smaller.",
+  },
+  offline: {
+    offline: "You’re offline. Local drafts remain available.",
+    backOnline: "Back online.",
+    updateReady: "An app update is ready.",
+    refresh: "Refresh",
+    fallbackTitle: "You’re offline",
+    fallbackBody: "Reconnect to open this page. Your local viewing drafts are still stored on this device.",
+  },
   share: {
     button: "Generate shareable card",
     uploading: "Uploading...",
@@ -188,6 +205,9 @@ const en: Messages = {
     confirmRevoke: "Revoke this link? Anyone with the old URL will lose access.",
     busy: "Working…",
     errorGeneric: "Share access update failed",
+    historyTitle: "Previous links",
+    historyEmpty: "No revoked links",
+    historyRevokedAt: "Revoked",
   },
   loginGate: {
     title: "Sign in to generate card",
@@ -292,6 +312,19 @@ const en: Messages = {
       low: "Low",
       needs_verification: "Needs verification",
     },
+  },
+  aiBoundary: {
+    consentTitle: "Use AI for this viewing?",
+    consentBody:
+      "Your selected audio or resized photo derivative will be sent to the AI provider. Originals remain saved on this device. Consent applies only to this viewing and policy version.",
+    consentAccept: "Allow AI",
+    consentDecline: "Keep local only",
+    declined: "Saved locally. No AI request was sent.",
+    queued: "AI analysis queued on this device",
+    processing: "AI analysis in progress…",
+    quota: "AI limit reached. Try again later.",
+    unavailable: "AI is unavailable safely; your media remains local.",
+    failed: "AI analysis failed; your media remains saved.",
   },
   loginPage: {
     signInTitle: "Sign in",

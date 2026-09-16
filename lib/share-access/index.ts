@@ -2,9 +2,12 @@ export type {
   CreateShareLinkRequest,
   CreateShareLinkResponse,
   PublicShareFailure,
+  PublicDecisionSummary,
   PublicSharePayload,
   PublicSharePasswordGate,
   PublicShareResult,
+  PublishedShareMediaItem,
+  PublishedShareSnapshot,
   RotateShareLinkResponse,
   ShareCapability,
   ShareLinkRecord,
@@ -32,7 +35,14 @@ export {
   publicShareFailure,
   resolveShareLinkGate,
   toPublicSharePayload,
+  toPublicDecisionSummaryDto,
 } from "./public-dto";
+export {
+  buildSharePublication,
+  isPublishedShareSnapshot,
+  parseMediaManifest,
+  type SharePublication,
+} from "./publication";
 export {
   isShareAccessState,
   newShareAccessState,

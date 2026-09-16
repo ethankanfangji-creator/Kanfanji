@@ -30,19 +30,36 @@ function maskEmail(email: string | null | undefined): string | null {
   return `${visible}${"*".repeat(Math.max(1, local.length - visible.length))}@${domain}`;
 }
 
-async function audit(
+async function atomicMutation(
+  operation: string,
   viewingId: string,
-  actorId: string | null,
-  action: string,
-  meta: Record<string, unknown> = {},
-) {
+  actorId: string,
+  payload: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
   const admin = createAdminClient();
-  await admin.from("viewing_audit_events").insert({
-    viewing_id: viewingId,
-    actor_id: actorId,
-    action,
-    meta,
+  const { data, error } = await admin.rpc("mutate_viewing_with_audit", {
+    p_operation: operation,
+    p_viewing_id: viewingId,
+    p_actor_id: actorId,
+    p_payload: payload,
   });
+  if (error) {
+    const known = [
+      "FORBIDDEN",
+      "UNAUTHENTICATED",
+      "INVALID_INVITE",
+      "INVITE_UNAVAILABLE",
+      "INVALID_ROLE",
+      "MEMBER_NOT_FOUND",
+      "INVITE_NOT_FOUND",
+      "REVISION_CONFLICT",
+    ].find((code) => error.message.includes(code));
+    throw new Error(known ?? "ATOMIC_MUTATION_FAILED");
+  }
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("ATOMIC_MUTATION_FAILED");
+  }
+  return data as Record<string, unknown>;
 }
 
 export async function getViewingRole(
@@ -211,7 +228,6 @@ export async function createViewingInvite(input: {
     throw new Error("INVALID_ROLE");
   }
 
-  const admin = createAdminClient();
   const token = randomBytes(32).toString("hex");
   const now = new Date();
   const expiresAt = input.expiresAt
@@ -221,35 +237,11 @@ export async function createViewingInvite(input: {
     throw new Error("INVALID_EXPIRY");
   }
 
-  await admin
-    .from("viewing_invites")
-    .update({
-      status: "revoked",
-      revoked_at: now.toISOString(),
-    })
-    .eq("viewing_id", input.viewingId)
-    .eq("email", email)
-    .eq("status", "pending");
-
-  const { data, error } = await admin
-    .from("viewing_invites")
-    .insert({
-      viewing_id: input.viewingId,
-      email,
-      role: input.role,
-      token_hash: tokenHash(token),
-      status: "pending",
-      invited_by: input.actor.id,
-      expires_at: expiresAt.toISOString(),
-    })
-    .select(INVITE_SELECT)
-    .single();
-  if (error || !data) throw error ?? new Error("INVITE_CREATE_FAILED");
-
-  await audit(input.viewingId, input.actor.id, "invite.create", {
-    inviteId: data.id,
+  const data = await atomicMutation("invite.create", input.viewingId, input.actor.id, {
+    email,
     role: input.role,
-    emailDomain: email.split("@")[1],
+    tokenHash: tokenHash(token),
+    expiresAt: expiresAt.toISOString(),
   });
   return { invite: toInvite(data), token };
 }
@@ -269,37 +261,16 @@ export async function acceptViewingInvite(
   if (error || !invite) throw new Error("INVITE_NOT_FOUND");
   if (invite.status !== "pending") throw new Error("INVITE_UNAVAILABLE");
   if (Date.parse(String(invite.expires_at)) <= Date.now()) {
-    await admin
-      .from("viewing_invites")
-      .update({ status: "expired" })
-      .eq("id", invite.id);
     throw new Error("INVITE_EXPIRED");
   }
   if (String(invite.email).toLowerCase() !== email) {
     throw new Error("INVITE_EMAIL_MISMATCH");
   }
 
-  const now = new Date().toISOString();
   const role = invite.role as MemberRole;
-  const { error: memberError } = await admin.from("viewing_members").upsert(
-    {
-      viewing_id: invite.viewing_id,
-      user_id: user.id,
-      role,
-      status: "active",
-      updated_at: now,
-      revoked_at: null,
-    },
-    { onConflict: "viewing_id,user_id" },
-  );
-  if (memberError) throw memberError;
-  await admin
-    .from("viewing_invites")
-    .update({ status: "accepted", accepted_at: now })
-    .eq("id", invite.id);
-  await audit(String(invite.viewing_id), user.id, "invite.accept", {
+  await atomicMutation("invite.accept", String(invite.viewing_id), user.id, {
     inviteId: invite.id,
-    role,
+    email,
   });
   return { viewingId: String(invite.viewing_id), role };
 }
@@ -314,21 +285,15 @@ export async function updateViewingMember(input: {
   if (!["viewer", "commenter", "editor"].includes(input.role)) {
     throw new Error("INVALID_ROLE");
   }
-  const admin = createAdminClient();
-  const now = new Date().toISOString();
-  const { data, error } = await admin
-    .from("viewing_members")
-    .update({ role: input.role, updated_at: now })
-    .eq("id", input.memberId)
-    .eq("viewing_id", input.viewingId)
-    .eq("status", "active")
-    .select(MEMBER_SELECT)
-    .maybeSingle();
-  if (error || !data) throw error ?? new Error("MEMBER_NOT_FOUND");
-  await audit(input.viewingId, input.actor.id, "member.role_change", {
+  const data = await atomicMutation(
+    "member.role_change",
+    input.viewingId,
+    input.actor.id,
+    {
     memberId: input.memberId,
     role: input.role,
-  });
+    },
+  );
   return toMember(data);
 }
 
@@ -338,18 +303,7 @@ export async function revokeViewingMember(input: {
   actor: User;
 }): Promise<void> {
   await requireViewingRole(input.viewingId, input.actor.id, "owner");
-  const admin = createAdminClient();
-  const now = new Date().toISOString();
-  const { data, error } = await admin
-    .from("viewing_members")
-    .update({ status: "revoked", revoked_at: now, updated_at: now })
-    .eq("id", input.memberId)
-    .eq("viewing_id", input.viewingId)
-    .eq("status", "active")
-    .select("id")
-    .maybeSingle();
-  if (error || !data) throw error ?? new Error("MEMBER_NOT_FOUND");
-  await audit(input.viewingId, input.actor.id, "member.revoke", {
+  await atomicMutation("member.revoke", input.viewingId, input.actor.id, {
     memberId: input.memberId,
   });
 }
@@ -360,18 +314,7 @@ export async function revokeViewingInvite(input: {
   actor: User;
 }): Promise<void> {
   await requireViewingRole(input.viewingId, input.actor.id, "owner");
-  const admin = createAdminClient();
-  const now = new Date().toISOString();
-  const { data, error } = await admin
-    .from("viewing_invites")
-    .update({ status: "revoked", revoked_at: now })
-    .eq("id", input.inviteId)
-    .eq("viewing_id", input.viewingId)
-    .eq("status", "pending")
-    .select("id")
-    .maybeSingle();
-  if (error || !data) throw error ?? new Error("INVITE_NOT_FOUND");
-  await audit(input.viewingId, input.actor.id, "invite.revoke", {
+  await atomicMutation("invite.revoke", input.viewingId, input.actor.id, {
     inviteId: input.inviteId,
   });
 }
@@ -385,21 +328,18 @@ export async function addViewingComment(input: {
   await requireViewingRole(input.viewingId, input.actor.id, "commenter");
   const body = input.body.trim();
   if (!body || body.length > 4000) throw new Error("INVALID_COMMENT");
-  const admin = createAdminClient();
-  const { data, error } = await admin
-    .from("viewing_comments")
-    .insert({
-      viewing_id: input.viewingId,
-      author_id: input.actor.id,
+  const data = await atomicMutation(
+    "comment.create",
+    input.viewingId,
+    input.actor.id,
+    {
       body,
       anchor: input.anchor ?? null,
-    })
-    .select(COMMENT_SELECT)
-    .single();
-  if (error || !data) throw error ?? new Error("COMMENT_CREATE_FAILED");
-  await audit(input.viewingId, input.actor.id, "comment.create", {
-    commentId: data.id,
-  });
+    },
+  );
+  if (!data.id) {
+    throw new Error("COMMENT_CREATE_FAILED");
+  }
   return toComment(data, maskEmail(input.actor.email) ?? "家人");
 }
 
@@ -440,17 +380,18 @@ export async function updateViewingWithRevision(input: {
     throw new Error("EMPTY_PATCH");
   }
 
-  const admin = createAdminClient();
   if (actorRole === "editor" && "property" in safePatch) {
     const incoming = safePatch.property;
     if (!incoming || typeof incoming !== "object" || Array.isArray(incoming)) {
       throw new Error("INVALID_PROPERTY");
     }
-    const { data: current } = await admin
+    const admin = createAdminClient();
+    const { data: current, error: currentError } = await admin
       .from("viewings")
       .select("property")
       .eq("id", input.viewingId)
       .single();
+    if (currentError) throw currentError;
     const currentProperty =
       current?.property &&
       typeof current.property === "object" &&
@@ -468,21 +409,17 @@ export async function updateViewingWithRevision(input: {
       ? { ...editableProperty, shareAccess: currentProperty.shareAccess }
       : editableProperty;
   }
-  const nextRevision = input.expectedRevision + 1;
-  const updatedAt = new Date().toISOString();
-  const { data, error } = await admin
-    .from("viewings")
-    .update({
-      ...safePatch,
-      revision: nextRevision,
-      updated_at: updatedAt,
-    })
-    .eq("id", input.viewingId)
-    .eq("revision", input.expectedRevision)
-    .select("revision, updated_at")
-    .maybeSingle();
-  if (error) throw error;
-  if (!data) {
+  let data: Record<string, unknown>;
+  try {
+    data = await atomicMutation(
+      "viewing.update",
+      input.viewingId,
+      input.actor.id,
+      { ...safePatch, expectedRevision: input.expectedRevision },
+    );
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== "REVISION_CONFLICT") throw error;
+    const admin = createAdminClient();
     const { data: latest } = await admin
       .from("viewings")
       .select("revision, updated_at")
@@ -495,11 +432,6 @@ export async function updateViewingWithRevision(input: {
     throw conflict;
   }
 
-  await audit(input.viewingId, input.actor.id, "viewing.update", {
-    fromRevision: input.expectedRevision,
-    toRevision: nextRevision,
-    fields: Object.keys(safePatch),
-  });
   return {
     revision: Number(data.revision),
     updatedAt: String(data.updated_at),
@@ -531,42 +463,15 @@ export async function appendViewingMediaPath(input: {
   }[input.column];
   if (segments[2] !== expectedFolder) throw new Error("INVALID_MEDIA_PATH");
 
-  const admin = createAdminClient();
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const { data: current, error: readError } = await admin
-      .from("viewings")
-      .select(`${input.column}, revision`)
-      .eq("id", input.viewingId)
-      .single();
-    if (readError || !current) throw readError ?? new Error("VIEWING_NOT_FOUND");
-    const currentRow = current as unknown as Record<string, unknown>;
-    const paths = Array.isArray(currentRow[input.column])
-      ? (currentRow[input.column] as string[])
-      : [];
-    const revision = Number(current.revision ?? 1);
-    if (paths.includes(path)) return { revision, alreadyExisted: true };
-
-    const { data: updated, error: updateError } = await admin
-      .from("viewings")
-      .update({
-        [input.column]: [...paths, path],
-        revision: revision + 1,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", input.viewingId)
-      .eq("revision", revision)
-      .select("revision")
-      .maybeSingle();
-    if (updateError) throw updateError;
-    if (updated) {
-      await audit(input.viewingId, input.actor.id, "media.append", {
-        column: input.column,
-        fromRevision: revision,
-        toRevision: revision + 1,
-      });
-      return { revision: Number(updated.revision), alreadyExisted: false };
-    }
-  }
-  throw new Error("REVISION_CONFLICT");
+  const result = await atomicMutation(
+    "media.append",
+    input.viewingId,
+    input.actor.id,
+    { column: input.column, path },
+  );
+  return {
+    revision: Number(result.revision),
+    alreadyExisted: result.alreadyExisted === true,
+  };
 }
 

@@ -22,6 +22,7 @@ export type RemoteViewingSnapshot = {
   updatedAt: string | null;
   address: string;
   shareToken: string | null;
+  revision?: number | null;
 };
 
 export type SaveRemoteViewingInput = {
@@ -39,15 +40,18 @@ export type SaveRemoteViewingInput = {
   propertyId: string | null;
   isPro: boolean;
   clientUpdatedAt: string;
-  shareToken: string | null;
+  /** Stable owner-scoped key used for create retries. */
+  idempotencyKey: string;
+  /** Revision last observed locally; required for update CAS. */
+  expectedRevision: number | null;
 };
 
 export type SaveRemoteViewingResult = {
   id: string;
-  shareToken: string;
   /** Adapter observed a newer remote and refused to overwrite. */
   conflict: boolean;
   skippedAsStale: boolean;
+  revision: number;
 };
 
 export type UploadRemoteMediaInput = {

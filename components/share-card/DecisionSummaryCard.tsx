@@ -137,8 +137,9 @@ function TextList({
             <button
               type="button"
               aria-pressed={item.selected}
+              aria-label={`${selectHint}: ${item.text}`}
               onClick={() => onToggle?.(item.id)}
-              className={`mt-0.5 w-4 h-4 shrink-0 rounded border flex items-center justify-center ${
+              className={`mt-0.5 min-w-11 min-h-11 shrink-0 rounded border flex items-center justify-center ${
                 item.selected
                   ? good
                     ? "bg-[#166534] border-[#166534] text-white"
@@ -212,8 +213,9 @@ function NeutralList({
             <button
               type="button"
               aria-pressed={item.selected}
+              aria-label={`${selectHint}: ${item.text}`}
               onClick={() => onToggle?.(item.id)}
-              className={`mt-0.5 w-4 h-4 shrink-0 rounded border flex items-center justify-center ${
+              className={`mt-0.5 min-w-11 min-h-11 shrink-0 rounded border flex items-center justify-center ${
                 item.selected
                   ? "bg-[#1A1A1A] border-[#1A1A1A] text-white"
                   : "border-black/25 bg-white"
@@ -289,8 +291,9 @@ function PhotoGrid({
               <button
                 type="button"
                 aria-pressed={photo.selected}
+                aria-label={`${selectHint}: ${photo.tag}${photo.note ? `, ${photo.note}` : ""}`}
                 onClick={() => onToggle?.(photo.id)}
-                className={`absolute top-2 left-2 w-6 h-6 rounded-full flex items-center justify-center text-white ${
+                className={`absolute top-2 left-2 min-w-11 min-h-11 rounded-full flex items-center justify-center text-white ${
                   photo.selected ? "bg-[#1A1A1A]" : "bg-black/40"
                 }`}
               >
@@ -366,8 +369,10 @@ export function DecisionSummaryCard({
           <div className="flex justify-end">
             <button
               type="button"
+              aria-pressed={editing}
+              aria-expanded={editing}
               onClick={onToggleEditing}
-              className="h-9 px-3 rounded-full bg-[#F5F3F0] text-[11px] font-bold"
+              className="min-h-11 px-3 rounded-full bg-[#F5F3F0] text-[11px] font-bold"
             >
               {editing ? labels.doneEdit : labels.edit}
             </button>
@@ -450,8 +455,10 @@ export function DecisionSummaryCard({
                 <button
                   key={n}
                   type="button"
+                  aria-label={`${labels.rating}: ${n} / 5`}
+                  aria-pressed={snapshot.overallRating === n}
                   onClick={() => onSetRating(n)}
-                  className={`w-9 h-9 rounded-full text-[13px] font-bold border ${
+                  className={`min-w-11 min-h-11 rounded-full text-[13px] font-bold border ${
                     snapshot.overallRating === n
                       ? "bg-[#1A1A1A] text-white border-[#1A1A1A]"
                       : "bg-white border-black/10"
@@ -462,8 +469,9 @@ export function DecisionSummaryCard({
               ))}
               <button
                 type="button"
+                aria-pressed={snapshot.overallRating == null}
                 onClick={() => onSetRating(null)}
-                className="h-9 px-3 rounded-full text-[11px] font-bold border border-black/10 bg-white"
+                className="min-h-11 px-3 rounded-full text-[11px] font-bold border border-black/10 bg-white"
               >
                 {labels.ratingEmpty}
               </button>

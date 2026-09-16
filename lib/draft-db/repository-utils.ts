@@ -14,6 +14,28 @@ export function filterListed<T extends { deletedAt: string | null }>(
   return rows.filter(isActiveRecord);
 }
 
+export function inAccountScope<T extends { accountScope?: string }>(
+  rows: T[],
+  accountScope: string,
+): T[] {
+  return rows.filter(
+    (row) =>
+      row.accountScope === accountScope ||
+      (!row.accountScope && accountScope.startsWith("guest:")),
+  );
+}
+
+export function isVisibleInScope(
+  record: { accountScope?: string } | null | undefined,
+  accountScope: string,
+): boolean {
+  return (
+    Boolean(record) &&
+    (record?.accountScope === accountScope ||
+      (!record?.accountScope && accountScope.startsWith("guest:")))
+  );
+}
+
 export async function withStoreError<T>(
   operation: string,
   run: () => Promise<T>,
@@ -38,4 +60,5 @@ export function requireFound<T>(
 
 export type RepoContext = {
   db: DraftDatabase;
+  accountScope: string;
 };

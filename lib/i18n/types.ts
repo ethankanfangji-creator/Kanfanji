@@ -145,6 +145,23 @@ export type Messages = {
       "permission-revoked": string;
     };
   };
+  mediaImport: {
+    photoGallery: string;
+    videoGallery: string;
+    invalidPhoto: string;
+    invalidVideo: string;
+    emptyFile: string;
+    photoTooLarge: string;
+    videoTooLarge: string;
+  };
+  offline: {
+    offline: string;
+    backOnline: string;
+    updateReady: string;
+    refresh: string;
+    fallbackTitle: string;
+    fallbackBody: string;
+  };
   share: {
     button: string;
     uploading: string;
@@ -178,6 +195,9 @@ export type Messages = {
     confirmRevoke: string;
     busy: string;
     errorGeneric: string;
+    historyTitle: string;
+    historyEmpty: string;
+    historyRevokedAt: string;
   };
   loginGate: {
     title: string;
@@ -279,6 +299,18 @@ export type Messages = {
       low: string;
       needs_verification: string;
     };
+  };
+  aiBoundary: {
+    consentTitle: string;
+    consentBody: string;
+    consentAccept: string;
+    consentDecline: string;
+    declined: string;
+    queued: string;
+    processing: string;
+    quota: string;
+    unavailable: string;
+    failed: string;
   };
   loginPage: {
     signInTitle: string;

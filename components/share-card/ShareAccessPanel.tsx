@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link2, RefreshCw, ShieldOff, Timer } from "lucide-react";
 import type { ShareLinkRecord } from "@/lib/share-access/types";
 
@@ -30,6 +30,9 @@ export type ShareAccessPanelLabels = {
   confirmRevoke: string;
   busy: string;
   errorGeneric: string;
+  historyTitle: string;
+  historyEmpty: string;
+  historyRevokedAt: string;
 };
 
 type Props = {
@@ -66,6 +69,25 @@ export function ShareAccessPanel({
   const [error, setError] = useState("");
   const [showExpiry, setShowExpiry] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [history, setHistory] = useState<ShareLinkRecord[]>([]);
+
+  useEffect(() => {
+    if (!viewingId) return;
+    let cancelled = false;
+    void fetch(`/api/share/links?viewingId=${encodeURIComponent(viewingId)}`)
+      .then(async (response) => {
+        if (!response.ok) return [];
+        const payload = (await response.json()) as { history?: ShareLinkRecord[] };
+        return payload.history ?? [];
+      })
+      .then((items) => {
+        if (!cancelled) setHistory(items.filter((item) => item.status === "revoked"));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [viewingId, link?.updatedAt]);
 
   const status =
     link?.status === "revoked"
@@ -119,7 +141,7 @@ export function ShareAccessPanel({
       <div className="flex items-start justify-between gap-2">
         <div>
           <p className="text-[12px] font-[800] tracking-widest">{labels.title}</p>
-          <p className="mt-1 text-[12px] text-[#6B7280]">
+          <p role="status" aria-live="polite" className="mt-1 text-[12px] text-[#6B7280]">
             {labels.statusLabel}: <span className="font-bold text-[#1A1A1A]">{status}</span>
           </p>
           <p className="mt-0.5 text-[11px] text-[#9CA3AF]">
@@ -144,7 +166,8 @@ export function ShareAccessPanel({
         <button
           type="button"
           onClick={onCopyLink}
-          className="w-full text-left text-[11px] break-all rounded-xl bg-[#FAF7F3] border border-black/5 px-3 py-2 text-[#2563EB]"
+          aria-label={`${labels.copyHint}: ${shareUrl}`}
+          className="w-full min-h-11 text-left text-[11px] break-all rounded-xl bg-[#FAF7F3] border border-black/5 px-3 py-2 text-[#2563EB]"
         >
           <span className="inline-flex items-center gap-1 font-bold text-[#1A1A1A] mb-1">
             <Link2 className="w-3.5 h-3.5" /> {labels.copyHint}
@@ -155,22 +178,24 @@ export function ShareAccessPanel({
       ) : null}
 
       {hasToken ? <p className="text-[11px] text-[#166534]">{labels.tokenOk}</p> : null}
-      {error ? <p className="text-[12px] text-[#B91C1C]">{error}</p> : null}
+      {error ? <p role="alert" className="text-[12px] text-[#B91C1C]">{error}</p> : null}
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
         <button
           type="button"
           disabled={busy || !viewingId}
+          aria-expanded={showExpiry}
           onClick={() => setShowExpiry((v) => !v)}
-          className="h-10 rounded-full border border-black/10 text-[11px] font-bold flex items-center justify-center gap-1.5 disabled:opacity-45"
+          className="min-h-11 rounded-full border border-black/10 text-[11px] font-bold flex items-center justify-center gap-1.5 disabled:opacity-45"
         >
           <Timer className="w-3.5 h-3.5" /> {labels.expiry}
         </button>
         <button
           type="button"
           disabled={busy || !viewingId}
+          aria-expanded={showPassword}
           onClick={() => setShowPassword((v) => !v)}
-          className="h-10 rounded-full border border-black/10 text-[11px] font-bold flex items-center justify-center gap-1.5 disabled:opacity-45"
+          className="min-h-11 rounded-full border border-black/10 text-[11px] font-bold flex items-center justify-center gap-1.5 disabled:opacity-45"
         >
           <ShieldOff className="w-3.5 h-3.5" /> {labels.password}
         </button>
@@ -194,7 +219,7 @@ export function ShareAccessPanel({
               onLinkChanged({ link: payload.link, urlPath: payload.urlPath });
             })
           }
-          className="h-10 rounded-full border border-black/10 text-[11px] font-bold flex items-center justify-center gap-1.5 disabled:opacity-45"
+          className="min-h-11 rounded-full border border-black/10 text-[11px] font-bold flex items-center justify-center gap-1.5 disabled:opacity-45"
         >
           <RefreshCw className="w-3.5 h-3.5" /> {busy ? labels.busy : labels.rotate}
         </button>
@@ -204,6 +229,7 @@ export function ShareAccessPanel({
         <div className="rounded-xl border border-black/5 bg-[#FAF7F3] p-3 space-y-2">
           <input
             type="datetime-local"
+            aria-label={labels.expiry}
             value={expiresLocal}
             onChange={(event) => setExpiresLocal(event.target.value)}
             className="w-full h-10 rounded-full border border-black/10 px-3 text-[12px]"
@@ -244,6 +270,7 @@ export function ShareAccessPanel({
         <div className="rounded-xl border border-black/5 bg-[#FAF7F3] p-3 space-y-2">
           <input
             type="password"
+            aria-label={labels.password}
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             placeholder={labels.passwordPlaceholder}
@@ -332,6 +359,22 @@ export function ShareAccessPanel({
       >
         {labels.revoke}
       </button>
+
+      <div className="border-t border-black/5 pt-3">
+        <p className="text-[11px] font-bold text-[#6B7280]">{labels.historyTitle}</p>
+        {!viewingId || history.length === 0 ? (
+          <p className="mt-1 text-[11px] text-[#9CA3AF]">{labels.historyEmpty}</p>
+        ) : (
+          <ul className="mt-1 space-y-1">
+            {history.map((item) => (
+              <li key={item.id} className="text-[11px] text-[#9CA3AF]">
+                {labels.historyRevokedAt}:{" "}
+                {new Date(item.revokedAt ?? item.updatedAt).toLocaleString()}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </section>
   );
 }

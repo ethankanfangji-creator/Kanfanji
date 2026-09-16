@@ -28,6 +28,45 @@ export type ShareLinkRecord = {
   updatedAt: string;
   revokedAt: string | null;
   lastResolvedAt: string | null;
+  /** Increments whenever existing unlock cookies must stop working. */
+  accessVersion: number;
+};
+
+export type PublicShareTextItem = {
+  id: string;
+  text: string;
+  selected: true;
+};
+
+export type PublicSharePhotoItem = {
+  id: string;
+  url: string;
+  tag: string;
+  note: string;
+  selected: true;
+};
+
+/** Explicit public allowlist; intentionally has no remotePath or internal fields. */
+export type PublicDecisionSummary = {
+  version: 1;
+  address: string;
+  viewingAt: string;
+  unitLabel: string;
+  priceLabel: string;
+  layoutLabel: string;
+  areaLabel?: string;
+  managementFeeLabel?: string;
+  listingUrl: string;
+  setupNotes: string;
+  overallRating: number | null;
+  pros: PublicShareTextItem[];
+  risks: PublicShareTextItem[];
+  facts: PublicShareTextItem[];
+  followUps: PublicShareTextItem[];
+  actionItems: PublicShareTextItem[];
+  photos: PublicSharePhotoItem[];
+  disclaimer: string;
+  generatedAt: string;
 };
 
 /** Public payload — least privilege for /s/[token]. */
@@ -38,7 +77,7 @@ export type PublicSharePayload = {
   title: string;
   address: string;
   updatedAt: string | null;
-  decisionSummary: import("@/lib/share-card").DecisionSummarySnapshot | null;
+  decisionSummary: PublicDecisionSummary | null;
   /** Selected photo object paths already signed for display. */
   photoUrls: string[];
   /** Legacy cards without decisionSummary — capped lists only. */
@@ -53,6 +92,26 @@ export type PublicSharePayload = {
     /** ISO time when the shared snapshot was last published. */
     snapshotUpdatedAt: string | null;
   };
+};
+
+/** Frozen, explicit allowlist persisted on share_links at publish time. */
+export type PublishedShareSnapshot = {
+  version: 1;
+  title: string;
+  address: string;
+  updatedAt: string | null;
+  decisionSummary: PublicDecisionSummary | null;
+  legacyHighlights?: {
+    pros: string[];
+    risks: string[];
+  };
+  publishedAt: string;
+};
+
+/** Server-only manifest. Paths are storage object keys, never signed URLs. */
+export type PublishedShareMediaItem = {
+  id: string;
+  path: string;
 };
 
 export type PublicShareFailure = {
@@ -96,6 +155,8 @@ export const PUBLIC_SHARE_FORBIDDEN_KEYS = [
   "shareAccess",
   "passwordHash",
   "password_hash",
+  "remotePath",
+  "property",
 ] as const;
 
 export type CreateShareLinkRequest = {

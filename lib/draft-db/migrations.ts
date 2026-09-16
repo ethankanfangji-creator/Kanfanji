@@ -4,13 +4,14 @@ import type { DraftDbSchema } from "./types";
 export const DRAFT_DB_NAME = "kanfangji-drafts";
 
 /** Bump only when adding additive upgrades in `applyDraftDbMigrations`. */
-export const DRAFT_DB_VERSION = 2;
+export const DRAFT_DB_VERSION = 4;
 
 export const STORE = {
   viewingSessions: "viewingSessions",
   notes: "notes",
   media: "media",
   syncQueue: "syncQueue",
+  aiJobs: "aiJobs",
 } as const;
 
 type VersionChangeTx = IDBPTransaction<
@@ -33,6 +34,12 @@ export function applyDraftDbMigrations(
   }
   if (oldVersion < 2) {
     migrateToV2(transaction);
+  }
+  if (oldVersion < 3) {
+    migrateToV3(transaction);
+  }
+  if (oldVersion < 4) {
+    migrateToV4(db);
   }
 }
 
@@ -78,4 +85,30 @@ function migrateToV2(transaction: VersionChangeTx): void {
   if (!sessions.indexNames.contains("byRemoteViewingId")) {
     sessions.createIndex("byRemoteViewingId", "remoteViewingId");
   }
+}
+
+/** v3: account boundaries and queue lease lookup; rows are claimed explicitly after upgrade. */
+function migrateToV3(transaction: VersionChangeTx): void {
+  for (const storeName of [
+    STORE.viewingSessions,
+    STORE.notes,
+    STORE.media,
+    STORE.syncQueue,
+  ] as const) {
+    const store = transaction.objectStore(storeName);
+    if (!store.indexNames.contains("byAccountScope")) {
+      store.createIndex("byAccountScope", "accountScope");
+    }
+  }
+}
+
+/** v4: durable, account-scoped AI jobs; media bytes remain in the media stores. */
+function migrateToV4(db: IDBPDatabase<DraftDbSchema>): void {
+  if (db.objectStoreNames.contains(STORE.aiJobs)) return;
+  const jobs = db.createObjectStore(STORE.aiJobs, { keyPath: "id" });
+  jobs.createIndex("bySessionId", "sessionId");
+  jobs.createIndex("byMediaId", "mediaId");
+  jobs.createIndex("bySyncStatus", "syncStatus");
+  jobs.createIndex("byNextRetryAt", "nextRetryAt");
+  jobs.createIndex("byAccountScope", "accountScope");
 }

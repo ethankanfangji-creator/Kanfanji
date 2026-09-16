@@ -4,6 +4,8 @@ import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useI18n } from "@/components/I18nProvider";
+import { claimCanonicalGuestData } from "@/lib/idb/draft-store";
+import { claimGuestDrafts } from "@/lib/sync";
 import { createClient } from "@/utils/supabase/client";
 
 export default function LoginPage() {
@@ -37,6 +39,12 @@ export default function LoginPage() {
           password,
         });
         if (error) throw error;
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) throw new Error(messages.loginPage.submitSignIn);
+        await claimGuestDrafts(user.id);
+        await claimCanonicalGuestData(user.id);
         const next = new URLSearchParams(window.location.search).get("next");
         window.location.href =
           next && next.startsWith("/") && !next.startsWith("//") ? next : "/";

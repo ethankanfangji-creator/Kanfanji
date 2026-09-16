@@ -140,7 +140,7 @@ describe("DraftDb notes / media / syncQueue", () => {
 
     const reloaded = await db.media.require(media.id);
     expect(reloaded.blob).toBeInstanceOf(Blob);
-    expect(await reloaded.blob.arrayBuffer()).toEqual(await blob.arrayBuffer());
+    expect(await reloaded.blob!.arrayBuffer()).toEqual(await blob.arrayBuffer());
 
     const video = await db.media.create({
       sessionId: session.id,
@@ -279,7 +279,7 @@ describe("DraftDb reopen and migration", () => {
     const restoredMedia = await db2.media.require(media.id);
     expect(restoredMedia.blob).toBeInstanceOf(Blob);
     expect(restoredMedia.size).toBe(3);
-    expect(await restoredMedia.blob.arrayBuffer()).toEqual(await blob.arrayBuffer());
+    expect(await restoredMedia.blob!.arrayBuffer()).toEqual(await blob.arrayBuffer());
   });
 
   it("migrates v1 → v2 without clearing user data", async () => {
@@ -323,6 +323,19 @@ describe("DraftDb reopen and migration", () => {
       expect(byRemote?.id).toBe(session.id);
     } finally {
       raw.close();
+    }
+  });
+
+  it("migrates v2 → v3 with account-scope indexes and preserves rows", async () => {
+    const v2 = await openTestDb(2);
+    const session = await v2.viewingSessions.create({ address: "Keep through v3" });
+    v2.close();
+    openHandles.splice(openHandles.indexOf(v2), 1);
+
+    const v3 = await openTestDb(3);
+    expect((await v3.viewingSessions.require(session.id)).address).toBe("Keep through v3");
+    for (const storeName of ["viewingSessions", "notes", "media", "syncQueue"] as const) {
+      expect(v3.db.transaction(storeName).store.indexNames.contains("byAccountScope")).toBe(true);
     }
   });
 

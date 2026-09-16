@@ -155,6 +155,23 @@ const zhHant: Messages = {
       "permission-revoked": "權限中途被撤銷",
     },
   },
+  mediaImport: {
+    photoGallery: "從相簿選擇照片",
+    videoGallery: "從相簿選擇影片",
+    invalidPhoto: "請選擇有效的圖片檔案。",
+    invalidVideo: "請選擇有效的影片檔案。",
+    emptyFile: "此檔案是空的。",
+    photoTooLarge: "照片大小不可超過 25 MB。",
+    videoTooLarge: "影片大小不可超過 250 MB。",
+  },
+  offline: {
+    offline: "目前離線，本機草稿仍可使用。",
+    backOnline: "已恢復連線。",
+    updateReady: "應用程式更新已準備好。",
+    refresh: "重新整理",
+    fallbackTitle: "目前離線",
+    fallbackBody: "請恢復連線後再開啟此頁；本機看房草稿仍保存在這台裝置。",
+  },
   share: {
     button: "生成看房卡片 SHAREABLE CARD",
     uploading: "上傳中...",
@@ -188,6 +205,9 @@ const zhHant: Messages = {
     confirmRevoke: "確定取消此分享連結？舊網址將立即失效。",
     busy: "處理中…",
     errorGeneric: "更新分享設定失敗",
+    historyTitle: "歷史連結",
+    historyEmpty: "尚無已取消連結",
+    historyRevokedAt: "取消於",
   },
   loginGate: {
     title: "登入後生成卡片",
@@ -290,6 +310,19 @@ const zhHant: Messages = {
       low: "信心低",
       needs_verification: "待查證",
     },
+  },
+  aiBoundary: {
+    consentTitle: "本次看房使用 AI？",
+    consentBody:
+      "所選錄音或縮小後的照片副本會傳送給 AI 服務商；原件仍保存在此裝置。授權只適用於本次看房與目前政策版本。",
+    consentAccept: "允許 AI",
+    consentDecline: "只保存在本機",
+    declined: "已保存在本機，沒有送出 AI 請求。",
+    queued: "AI 分析已在此裝置排隊",
+    processing: "AI 分析中…",
+    quota: "已達 AI 使用上限，請稍後再試。",
+    unavailable: "AI 目前安全停用，媒體仍保存在本機。",
+    failed: "AI 分析失敗，媒體仍已保存。",
   },
   loginPage: {
     signInTitle: "登入",

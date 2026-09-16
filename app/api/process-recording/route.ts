@@ -6,125 +6,71 @@ import {
   validateAndNormalizeSummary,
   type ProcessRecordingLegacyPayload,
 } from "@/lib/ai-summary";
+import {
+  AiInputError,
+  aiErrorResponse,
+  aiTimeoutMs,
+  assertContentLength,
+  authorizeAiRequest,
+  validateRecordingForm,
+} from "@/lib/ai-boundary/server-entry";
 
 export const runtime = "nodejs";
 
-type QuestionInput = {
-  id: number;
-  text: string;
-};
-
 export async function POST(request: Request) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json(
-      { error: "尚未設定 OPENAI_API_KEY，請加到 .env.local" },
-      { status: 500 },
-    );
-  }
-
   try {
+    assertContentLength(request);
     const form = await request.formData();
-    const audio = form.get("audio");
-    const questionsRaw = form.get("questions");
-    const address = String(form.get("address") ?? "");
-    const market = String(form.get("market") ?? "CA");
-    const locale = String(form.get("locale") ?? "zh-Hant");
-    const openDataRaw = form.get("openData");
-    const propertyContextRaw = form.get("propertyContext");
-    const markersRaw = form.get("markers");
-    const mediaId = String(form.get("mediaId") ?? "") || null;
-    const noteIdRaw = form.get("noteId");
-    const noteId =
-      typeof noteIdRaw === "string" && noteIdRaw.trim()
-        ? Number(noteIdRaw)
-        : null;
+    const input = validateRecordingForm(form);
+    const boundary = await authorizeAiRequest(request, input);
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) throw new AiInputError("ai_unavailable", 503);
+    const {
+      audio,
+      questions,
+      address,
+      market,
+      locale,
+      mediaId,
+      noteId,
+      markers,
+      openData,
+      propertyContext: property,
+    } = input;
 
-    if (!(audio instanceof File)) {
-      return NextResponse.json({ error: "缺少錄音檔" }, { status: 400 });
-    }
-    if (typeof questionsRaw !== "string") {
-      return NextResponse.json({ error: "缺少題庫" }, { status: 400 });
-    }
+    const markersContext = markers
+      .map((m) => {
+        const t = typeof m.t === "number" ? m.t.toFixed(1) : "?";
+        const tag = typeof m.tag === "string" ? m.tag : "other";
+        const note = typeof m.note === "string" && m.note.trim() ? ` (${m.note.trim()})` : "";
+        return `- ${t}s · ${tag}${note}`;
+      })
+      .join("\n");
 
-    let questions: QuestionInput[] = [];
-    try {
-      questions = JSON.parse(questionsRaw) as QuestionInput[];
-      if (!Array.isArray(questions)) throw new Error("questions not array");
-    } catch {
-      return NextResponse.json(
-        { error: "題庫 JSON 格式錯誤，請重新整理後再試" },
-        { status: 400 },
-      );
-    }
+    const od = openData ?? {};
+    const openDataContext = [
+      typeof od.city === "string" ? `城市：${od.city}` : "",
+      typeof od.zoningCode === "string"
+        ? `Zoning：${od.zoningCode}${
+            typeof od.zoningLabel === "string" ? `（${od.zoningLabel}）` : ""
+          }`
+        : "",
+      typeof od.pid === "string" ? `PID：${od.pid}` : "",
+      typeof od.planNumber === "string" ? `Plan：${od.planNumber}` : "",
+      typeof od.lotNumber === "string" ? `Lot：${od.lotNumber}` : "",
+      typeof od.legalDescription === "string" ? `Legal：${od.legalDescription}` : "",
+      typeof od.source === "string" ? `資料來源：${od.source}` : "",
+    ]
+      .filter(Boolean)
+      .join("；");
 
-    let markersContext = "";
-    try {
-      if (typeof markersRaw === "string" && markersRaw.trim()) {
-        const markers = JSON.parse(markersRaw) as Array<{
-          t?: number;
-          tag?: string;
-          note?: string;
-        }>;
-        if (Array.isArray(markers) && markers.length > 0) {
-          markersContext = markers
-            .slice(0, 40)
-            .map((m) => {
-              const t = typeof m.t === "number" ? m.t.toFixed(1) : "?";
-              const tag = typeof m.tag === "string" ? m.tag : "other";
-              const note =
-                typeof m.note === "string" && m.note.trim()
-                  ? ` (${m.note.trim()})`
-                  : "";
-              return `- ${t}s · ${tag}${note}`;
-            })
-            .join("\n");
-        }
-      }
-    } catch {
-      markersContext = "";
-    }
-
-    let openDataContext = "";
-    try {
-      if (typeof openDataRaw === "string" && openDataRaw && openDataRaw !== "null") {
-        const od = JSON.parse(openDataRaw) as Record<string, unknown>;
-        const bits = [
-          od.city ? `城市：${od.city}` : "",
-          od.zoningCode
-            ? `Zoning：${od.zoningCode}${od.zoningLabel ? `（${od.zoningLabel}）` : ""}`
-            : "",
-          od.pid ? `PID：${od.pid}` : "",
-          od.planNumber ? `Plan：${od.planNumber}` : "",
-          od.lotNumber ? `Lot：${od.lotNumber}` : "",
-          od.legalDescription ? `Legal：${od.legalDescription}` : "",
-          od.source ? `資料來源：${od.source}` : "",
-        ].filter(Boolean);
-        openDataContext = bits.join("；");
-      }
-    } catch {
-      openDataContext = "";
-    }
-
-    let propertyContext = "";
-    try {
-      if (typeof propertyContextRaw === "string" && propertyContextRaw) {
-        const pc = JSON.parse(propertyContextRaw) as {
-          tags?: string[];
-          neighborhood?: string;
-          city?: string;
-        };
-        propertyContext = [
-          pc.city ? `城市：${pc.city}` : "",
-          pc.neighborhood ? `社區：${pc.neighborhood}` : "",
-          pc.tags?.length ? `標籤：${pc.tags.join(", ")}` : "",
-        ]
-          .filter(Boolean)
-          .join("；");
-      }
-    } catch {
-      propertyContext = "";
-    }
+    const propertyContext = [
+      typeof property?.city === "string" ? `城市：${property.city}` : "",
+      typeof property?.neighborhood === "string" ? `社區：${property.neighborhood}` : "",
+      Array.isArray(property?.tags) ? `標籤：${property.tags.join(", ")}` : "",
+    ]
+      .filter(Boolean)
+      .join("；");
 
     const openai = new OpenAI({ apiKey });
 
@@ -141,27 +87,28 @@ export async function POST(request: Request) {
           ? "Simplified Chinese (简体中文)"
           : "Traditional Chinese (繁體中文)";
 
-    const transcription = await openai.audio.transcriptions.create({
-      file: audio,
-      model: "whisper-1",
-      language: whisperLang,
-    });
+    const transcription = await openai.audio.transcriptions.create(
+      {
+        file: audio,
+        model: "whisper-1",
+        language: whisperLang,
+      },
+      { signal: AbortSignal.timeout(aiTimeoutMs()) },
+    );
 
     const transcript = transcription.text?.trim() || "";
     if (!transcript) {
-      return NextResponse.json(
-        { error: "Whisper 沒有辨識到內容，請再錄一段或改匯入音檔" },
-        { status: 422 },
-      );
+      throw new AiInputError("ai_empty_transcript", 422);
     }
 
     const questionList = questions.map((q) => `- id:${q.id} ${q.text}`).join("\n");
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      temperature: 0.2,
-      response_format: { type: "json_object" },
-      messages: [
+    const completion = await openai.chat.completions.create(
+      {
+        model: "gpt-4o-mini",
+        temperature: 0.2,
+        response_format: { type: "json_object" },
+        messages: [
         {
           role: "system",
           content: `You are a Metro Vancouver open-house note structurer.
@@ -216,21 +163,17 @@ Rules:
 6. Prefer 2-5 items per list; empty arrays allowed
 7. sources should cite timestampSec / quote when possible`,
         },
-      ],
-    });
+        ],
+      },
+      { signal: AbortSignal.timeout(aiTimeoutMs()) },
+    );
 
     const content = completion.choices[0]?.message?.content ?? "";
     let raw: unknown;
     try {
       raw = extractJsonObject(content);
     } catch {
-      return NextResponse.json(
-        {
-          error: "AI 回傳格式錯誤（不是有效 JSON），請稍後再試",
-          code: "ai_json_parse_error",
-        },
-        { status: 422 },
-      );
+      throw new AiInputError("ai_response_invalid", 422);
     }
 
     const payload = {
@@ -244,14 +187,7 @@ Rules:
     });
 
     if (!validated.ok) {
-      return NextResponse.json(
-        {
-          error: validated.error,
-          code: "ai_schema_invalid",
-          issues: validated.issues,
-        },
-        { status: 422 },
-      );
+      throw new AiInputError("ai_schema_invalid", 422);
     }
 
     const summary = validated.value;
@@ -281,7 +217,7 @@ Rules:
           based_on: item.sources[0]?.quote || "",
         }));
 
-    return NextResponse.json({
+    return boundary.applyCookie(NextResponse.json({
       transcript: summary.transcript || transcript,
       answers: legacyAnswers,
       new_questions: newQuestions,
@@ -290,9 +226,9 @@ Rules:
       risks: claimsToLegacyStrings(summary.risks, 5),
       summary,
       warnings: validated.warnings,
-    });
+      jobId: mediaId,
+    }));
   } catch (error) {
-    const message = error instanceof Error ? error.message : "處理錄音失敗";
-    return NextResponse.json({ error: message, code: "ai_processing_failed" }, { status: 500 });
+    return aiErrorResponse(error);
   }
 }

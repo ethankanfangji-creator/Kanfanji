@@ -1,15 +1,13 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
+import { getViewingRole } from "@/lib/collaboration/server";
+import {
+  projectViewingForRole,
+  VIEWING_PROJECTION_SELECT,
+} from "@/lib/collaboration/projection";
 
 export const runtime = "nodejs";
-
-function publicProperty(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  const property = { ...(value as Record<string, unknown>) };
-  delete property.shareAccess;
-  return property;
-}
 
 export async function GET() {
   try {
@@ -21,35 +19,31 @@ export async function GET() {
       return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
     }
 
-    // RLS decides which rows are visible. Sensitive JSON is fetched with the
-    // server-only client only for those IDs, then stripped before returning.
     const { data: rows, error } = await supabase
       .from("viewings")
-      .select(
-        "id, address, tags, market, questions, pros, risks, photo_urls, video_urls, created_at, updated_at",
-      )
+      .select("id")
       .order("updated_at", { ascending: false });
     if (error) throw error;
     const ids = (rows ?? []).map((row) => String(row.id));
     if (ids.length === 0) return NextResponse.json({ viewings: [] });
 
-    const { data: propertyRows, error: propertyError } = await createAdminClient()
+    const { data: fullRows, error: fullRowsError } = await createAdminClient()
       .from("viewings")
-      .select("id, property")
+      .select(VIEWING_PROJECTION_SELECT)
       .in("id", ids);
-    if (propertyError) throw propertyError;
-    const properties = new Map(
-      (propertyRows ?? []).map((row) => [
-        String(row.id),
-        publicProperty(row.property),
-      ]),
-    );
+    if (fullRowsError) throw fullRowsError;
+    const safeFullRows = (fullRows ?? []) as unknown as Record<string, unknown>[];
+    const byId = new Map(safeFullRows.map((row) => [String(row.id), row]));
+    const roles = await Promise.all(ids.map((id) => getViewingRole(id, user.id)));
 
     return NextResponse.json({
-      viewings: (rows ?? []).map((row) => ({
-        ...row,
-        property: properties.get(String(row.id)) ?? {},
-      })),
+      viewings: ids.flatMap((id, index) => {
+        const row = byId.get(id);
+        const role = roles[index];
+        return row && role
+          ? [projectViewingForRole(row, role)]
+          : [];
+      }),
     });
   } catch (error) {
     return NextResponse.json(

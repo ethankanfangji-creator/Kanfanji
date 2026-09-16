@@ -9,16 +9,66 @@ Legend:
 
 ## Automated verification
 
-- [x] TypeScript typecheck passes.
-- [x] PDF privacy projection excludes unselected text and photos.
-- [x] Selected photo tags and annotations remain in the PDF model.
-- [x] PDF filename removes unsafe filesystem characters.
-- [x] Long-text stress fixture renders a non-empty multi-page PDF.
-- [x] Bundled Traditional/Simplified Chinese font renders successfully.
-- [x] Bundled Thai font renders successfully.
-- [x] Desktop Chromium local flow reaches the real PDF success state with Traditional Chinese content.
-- [x] Existing unit tests pass.
-- [x] Production build completes.
+- Final-run timestamp: `2026-09-16 13:56 UTC`
+- `npm test`: `PASS — 46 files / 197 tests / 9.86s`
+- `npm run test:e2e`: `PASS — Chromium only, 3 tests / 22.6s`
+- `npm run typecheck`: `PASS`
+- `npm run lint`: `PASS`
+- `npm run build`: `PASS — Next.js 16.3.4 production build`
+- `git diff --check`: `PASS`
+- Remote schema/RLS/policy/extension assertions: `PASS — read-only check at 2026-09-16 06:31 UTC`
+- Remote fixture-based owner/editor/commenter/viewer/revoked role exercise:
+  `PASS — isolated run kf-smoke-20260916135016-b0a03c7f; cleanup complete`
+- Supabase security advisors: `2026-09-16 13:53 UTC — one WARN: leaked-password protection disabled`
+- Supabase performance advisors: `2026-09-16 06:59 UTC — five INFO unused-index findings; retain through initial traffic and recheck`
+
+The unit suite is expected to cover PDF privacy projection, selected annotations,
+safe filenames, long-text rendering, bundled CJK/Thai fonts, hydration stability,
+immutable publication, account-scoped drafts, quota denial, and offline cache
+exclusions. The Chromium smoke suite covers the guest/local wizard, accessible
+control names, manifest and offline routes, and public-share cache headers.
+
+## Remote migration order
+
+The following entries are already recorded remotely; do not reapply them:
+
+1. `20260916061954 release_share_hardening` — `supabase/migrate-share-hardening.sql`
+2. `20260916062018 release_sync_idempotency` — `supabase/migrate-sync-idempotency.sql`
+3. `20260916062045 release_ai_quota_boundary` — `supabase/migrate-ai-boundary.sql`
+4. `20260916062112 release_billing_audit_authorization` — `supabase/migrate-billing-audit-authorization.sql`
+5. `20260916062531 release_advisor_risk_followup` — `supabase/migrate-advisor-risk-followup.sql`
+6. `20260916062612 release_extension_hardening` — `supabase/migrate-extension-hardening.sql`
+7. `20260916064503 release_sensitive_table_least_privilege` —
+   `supabase/migrate-sensitive-table-least-privilege.sql`
+8. `20260916134536 release_share_resolution_forward_fix`
+9. `20260916134935 release_share_resolution_forward_fix` — idempotent replay
+   recorded after the first approval response was lost; no schema divergence
+10. `20260916134952 release_stripe_ordering_forward_fix`
+11. `20260916134958 release_viewing_update_grants_forward_fix`
+
+See `docs/release-migration-runbook.md` for database assertions, role-matrix
+queries, advisor findings, and forward-fix guidance.
+
+## Database smoke assertions
+
+- [x] All eleven migration history entries above exist in order; the share
+  resolution forward fix is recorded twice because an approval response was
+  lost and the idempotent migration was replayed.
+- [x] RLS is enabled on `viewings`, collaboration tables, `share_links`,
+  `share_unlock_limits`, and `storage.objects`.
+- [x] Anonymous users cannot read or mutate private viewing/share rows.
+- [x] Owners can read/write their viewing; editors can update content and media;
+  commenters can read/comment; viewers are read-only and cannot receive audio.
+- [x] Revoked members lose row and new signed-URL access.
+- [x] Published snapshots and media manifests cannot be changed in place;
+  rotation revokes the old row and copies the immutable snapshot to a new row.
+- [x] Share unlock and AI quota functions reject client roles and execute only
+  through the server/service role.
+- [x] `citext` is installed in `extensions`, not
+  the exposed `public` schema.
+- [x] Storage paths use `owner_id/viewing_id/folder/file`; cross-owner paths fail.
+- [x] Stripe duplicate and out-of-order events do not regress subscription state
+  (route/contract tests; no real Stripe event was emitted).
 
 ## PDF content and privacy
 
@@ -38,6 +88,7 @@ Legend:
 
 ## iOS Safari
 
+- **Release status: PENDING physical-device verification; not passed.**
 - [ ] Open a local-only viewing and generate a PDF without network access.
 - [ ] Export uses the native file share sheet when file sharing is supported.
 - [ ] Fallback opens the PDF in a new tab when direct file sharing is unavailable.
@@ -47,6 +98,7 @@ Legend:
 
 ## Android Chrome
 
+- **Release status: PENDING physical-device verification; not passed.**
 - [ ] Local-only PDF generation works offline.
 - [ ] PDF downloads or opens through the native share flow.
 - [ ] Chinese/Thai text and page breaks render correctly.
@@ -62,6 +114,7 @@ Legend:
 
 ## Desktop Safari
 
+- **Release status: PENDING physical-device verification; not passed.**
 - [ ] `.pdf` downloads or opens in a new tab.
 - [ ] CJK/Thai glyphs, links and page numbers render correctly.
 - [ ] Multi-page text and images do not overlap.
@@ -121,9 +174,9 @@ Legend:
 
 ## Release sign-off
 
-- [ ] iOS Safari complete.
-- [ ] Android Chrome complete.
+- [ ] iOS Safari physical-device checks complete (**PENDING**).
+- [ ] Android Chrome physical-device checks complete (**PENDING**).
 - [ ] Desktop Chrome complete.
-- [ ] Desktop Safari complete.
+- [ ] Desktop Safari checks complete (**PENDING**).
 - [ ] Product owner confirms PDF visual hierarchy and wording.
 

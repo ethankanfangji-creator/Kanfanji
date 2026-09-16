@@ -5,7 +5,7 @@ export type { MockSyncAdapterState } from "./mock-adapter";
 export { decideMerge, syncStatusToUi } from "./merge";
 export { classifySyncError, backoffMs } from "./errors";
 export { createSupabaseViewingSyncAdapter } from "./supabase-adapter";
-export { getSyncEngine, resetSyncEngineSingleton } from "./runtime";
+export { claimGuestDrafts, getSyncEngine, resetSyncEngineSingleton } from "./runtime";
 export type {
   ActiveDraftBridgeInput,
   ClassifiedSyncError,

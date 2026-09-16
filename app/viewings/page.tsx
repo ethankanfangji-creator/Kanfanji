@@ -43,7 +43,7 @@ export default function ViewingsPage() {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) {
-        window.location.href = "/login";
+        router.replace("/login");
         return;
       }
       setEmail(user.email ?? "");
@@ -56,7 +56,7 @@ export default function ViewingsPage() {
       setViewings(body.viewings ?? []);
       setLoading(false);
     })();
-  }, []);
+  }, [router]);
 
   function toggleSelect(id: string) {
     setSelected((prev) => {

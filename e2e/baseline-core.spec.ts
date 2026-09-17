@@ -15,7 +15,7 @@ test("critical controls expose accessible names", async ({ page }) => {
   await page.goto("/");
 
   await expectCriticalControlsHaveNames(page);
-  await expect(page.getByRole("button", { name: /STEP 1.*建立紀錄/ })).toBeEnabled();
+  await expect(page.getByRole("button", { name: /STEP 1.*建立新的看房紀錄/ })).toBeEnabled();
   await expect(page.getByRole("button", { name: /STEP 2.*現場記錄/ })).toBeEnabled();
   await expect(page.getByRole("button", { name: /STEP 3.*分享卡片/ })).toBeEnabled();
 });
@@ -65,7 +65,7 @@ test("reload restores the guest wizard draft", async ({ page }) => {
 
   await page.reload();
   await expect(page.getByText("TEXT 文字筆記", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: /STEP 1.*建立紀錄/ }).click();
+  await page.getByRole("button", { name: /STEP 1.*建立新的看房紀錄/ }).click();
   await expect(address).toHaveValue("Reload Restore Baseline");
   await expect(page.getByLabel(/看房日期與時間/)).toHaveValue("2026-09-18T14:45");
 });

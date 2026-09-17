@@ -27,7 +27,7 @@ const zhHant: Messages = {
     retry: "重試",
   },
   wizard: {
-    step1: "建立紀錄",
+    step1: "建立新的看房紀錄",
     step2: "現場記錄",
     step3: "分享卡片",
     back: "上一步",
@@ -45,7 +45,7 @@ const zhHant: Messages = {
     saveEdits: "完成編輯",
   },
   setup: {
-    title: "看房資訊",
+    title: "建立新的看房紀錄",
     viewingAt: "看房日期與時間",
     unitLabel: "房屋名稱／單位編號",
     priceLabel: "價格",
@@ -63,6 +63,7 @@ const zhHant: Messages = {
     hint: "BC Geocoder · 大溫 Open Data",
     lookingUp: "查詢地址 + 大溫市政府 Open Data（zoning／地段）...",
     identified: "已辨識",
+    autofilledHint: "已從地址自動填入，可修改",
     openDataPrefix: "Open Data：",
   },
   bank: {

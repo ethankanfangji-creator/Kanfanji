@@ -8,7 +8,7 @@ test.beforeEach(async ({}, testInfo) => {
 test("guest local wizard renders with accessible controls", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page.getByText("看房資訊", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "建立新的看房紀錄" })).toBeVisible();
   await expect(page.getByPlaceholder("輸入看房地址…")).toBeVisible();
   await expect(page.getByRole("button", { name: "Lookup address" })).toBeVisible();
   await expect(page.getByRole("link", { name: /看房紀錄/ })).toBeVisible();

@@ -27,7 +27,7 @@ const en: Messages = {
     retry: "Retry",
   },
   wizard: {
-    step1: "Set up",
+    step1: "Create a new viewing",
     step2: "On-site",
     step3: "Share card",
     back: "Back",
@@ -45,7 +45,7 @@ const en: Messages = {
     saveEdits: "Done editing",
   },
   setup: {
-    title: "Viewing details",
+    title: "Create a new viewing",
     viewingAt: "Date & time",
     unitLabel: "Name / unit #",
     priceLabel: "Price",
@@ -63,6 +63,7 @@ const en: Messages = {
     hint: "BC Geocoder · Metro Vancouver Open Data",
     lookingUp: "Looking up address + municipal Open Data (zoning / parcel)...",
     identified: "Matched",
+    autofilledHint: "Auto-filled from address — you can edit",
     openDataPrefix: "Open Data: ",
   },
   bank: {

@@ -164,6 +164,9 @@ body {
 
 .ui-input {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   min-height: var(--touch-target);
   padding-inline: var(--space-4);
   border: 1px solid var(--color-border);
@@ -210,6 +213,75 @@ body {
 
 .ui-card:focus-within {
   border-color: rgb(37 99 235 / 28%);
+}
+
+.setup-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+  width: 100%;
+}
+
+.setup-form-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-4);
+  min-width: 0;
+  width: 100%;
+}
+
+.setup-field {
+  display: block;
+  min-width: 0;
+  width: 100%;
+}
+
+.setup-field--full {
+  grid-column: 1 / -1;
+}
+
+.setup-field--datetime {
+  grid-column: 1 / -1;
+}
+
+.setup-field > span,
+.setup-field > label {
+  display: block;
+}
+
+.setup-field input,
+.setup-field select,
+.setup-field textarea,
+.setup-form input,
+.setup-form select,
+.setup-form textarea {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.setup-field input[type="datetime-local"] {
+  display: block;
+  /* WebKit datetime-local can force intrinsic min-width; keep it in the grid track. */
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (min-width: 641px) {
+  .ui-card {
+    padding: var(--space-5);
+  }
+
+  .setup-form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-4);
+  }
+
+  .setup-field--datetime {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 639px) {

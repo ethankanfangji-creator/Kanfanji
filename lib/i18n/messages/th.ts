@@ -27,7 +27,7 @@ const th: Messages = {
     retry: "ลองใหม่",
   },
   wizard: {
-    step1: "สร้างรายการ",
+    step1: "สร้างรายการดูบ้านใหม่",
     step2: "บันทึกหน้างาน",
     step3: "แชร์การ์ด",
     back: "ย้อนกลับ",
@@ -45,7 +45,7 @@ const th: Messages = {
     saveEdits: "เสร็จสิ้น",
   },
   setup: {
-    title: "รายละเอียดการดูบ้าน",
+    title: "สร้างรายการดูบ้านใหม่",
     viewingAt: "วันและเวลา",
     unitLabel: "ชื่อบ้าน / ห้อง",
     priceLabel: "ราคา",
@@ -63,6 +63,7 @@ const th: Messages = {
     hint: "BC Geocoder · Metro Vancouver Open Data",
     lookingUp: "กำลังค้นหาที่อยู่ + Open Data เทศบาล...",
     identified: "พบแล้ว",
+    autofilledHint: "เติมจากที่อยู่แล้ว แก้ไขได้",
     openDataPrefix: "Open Data: ",
   },
   bank: {

@@ -142,6 +142,10 @@ import {
   type WizardStep,
 } from "@/lib/viewing-wizard/readiness";
 import {
+  mergeAddressLookupPropertyDraft,
+  resolveLookupDisplayAddress,
+} from "@/lib/viewing-wizard/address-autofill";
+import {
   initialViewingDraftFormState,
   viewingDraftFormReducer,
 } from "@/lib/viewing-wizard/draft-state";
@@ -2235,9 +2239,11 @@ export function ClientPage() {
         checked: false,
       }));
 
-      if (payload.displayAddress) {
-        setAddress(payload.displayAddress);
-      }
+      const nextAddress = resolveLookupDisplayAddress(
+        address,
+        payload.displayAddress,
+      );
+      setAddress(nextAddress);
       setMarketCode(nextMarket);
       setTags(nextTags);
       setQuestions((current) => {
@@ -2251,14 +2257,14 @@ export function ClientPage() {
       const propertyId = String(
         payload.propertyId ?? payload.details?.propertyId ?? "",
       );
-      const nextPropertyDraft = {
+      const nextPropertyDraft = mergeAddressLookupPropertyDraft(propertyDraft, {
         source: payload.source,
-        propertyId: payload.propertyId ?? payload.details?.propertyId,
-        ...payload.details,
-      };
+        propertyId: payload.propertyId ?? (payload.details?.propertyId as string | undefined),
+        details: payload.details,
+      });
       setPropertyDraft(nextPropertyDraft);
       const persisted = await flushDraftToIdb({
-        address: payload.displayAddress || address.trim(),
+        address: nextAddress,
         tags: nextTags,
         marketCode: nextMarket,
         identified: true,

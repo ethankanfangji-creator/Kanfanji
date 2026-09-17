@@ -60,6 +60,7 @@ export type Messages = {
     hint: string;
     lookingUp: string;
     identified: string;
+    autofilledHint: string;
     openDataPrefix: string;
   };
   bank: {

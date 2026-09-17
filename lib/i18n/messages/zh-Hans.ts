@@ -27,7 +27,7 @@ const zhHans: Messages = {
     retry: "重试",
   },
   wizard: {
-    step1: "建立记录",
+    step1: "建立新的看房记录",
     step2: "现场记录",
     step3: "分享卡片",
     back: "上一步",
@@ -45,7 +45,7 @@ const zhHans: Messages = {
     saveEdits: "完成编辑",
   },
   setup: {
-    title: "看房信息",
+    title: "建立新的看房记录",
     viewingAt: "看房日期与时间",
     unitLabel: "房屋名称／单位编号",
     priceLabel: "价格",
@@ -63,6 +63,7 @@ const zhHans: Messages = {
     hint: "BC Geocoder · 大温 Open Data",
     lookingUp: "查询地址 + 大温市政府 Open Data（zoning／地段）...",
     identified: "已识别",
+    autofilledHint: "已从地址自动填入，可修改",
     openDataPrefix: "Open Data：",
   },
   bank: {

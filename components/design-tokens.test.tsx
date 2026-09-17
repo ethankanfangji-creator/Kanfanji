@@ -32,6 +32,8 @@ describe("design tokens and UI primitives", () => {
     ]) {
       expect(css).toContain(token);
     }
+    expect(css).toContain(".setup-form-grid");
+    expect(css).toContain("repeat(2, minmax(0, 1fr))");
     expect(css).toContain(".page-container");
     expect(css).toContain(".ui-button");
     expect(css).toContain(".ui-input");

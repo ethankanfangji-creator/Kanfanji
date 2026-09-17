@@ -8,6 +8,7 @@ export type StepSetupMessages = {
     hint: string;
     lookingUp: string;
     identified: string;
+    autofilledHint: string;
     openDataPrefix: string;
   };
   setup: {
@@ -23,6 +24,9 @@ export type StepSetupMessages = {
     lookupOptional: string;
   };
 };
+
+const fieldControlClassName =
+  "mt-[var(--space-2)] w-full min-w-0 max-w-full min-h-[var(--touch-target)] box-border px-[var(--space-4)] rounded-[var(--radius-control)] bg-[var(--color-surface-muted)] border border-[var(--color-border)] text-[16px] sm:text-[var(--font-size-sm)] text-[var(--color-text)] outline-none focus:ring-2 focus:ring-[var(--color-focus)]/20";
 
 export function StepSetup({
   messages,
@@ -85,25 +89,31 @@ export function StepSetup({
 
   return (
     <form
-      className="space-y-4"
+      className="setup-form"
       aria-label={messages.setup.title}
       onSubmit={(event) => event.preventDefault()}
     >
-      <div className="bg-white rounded-[22px] border border-black/[0.05] shadow-[0_4px_20px_rgba(0,0,0,0.04)] p-4">
-        <div className="flex flex-wrap items-center justify-between gap-1 mb-3">
+      <h2 className="text-[var(--font-size-lg)] font-extrabold tracking-tight text-[var(--color-text)]">
+        {messages.setup.title}
+      </h2>
+
+      <div className="ui-card min-w-0">
+        <div className="mb-[var(--space-3)] flex flex-wrap items-center justify-between gap-[var(--space-1)]">
           <label
             htmlFor="setup-address"
-            className="text-[12px] font-[700] tracking-widest"
+            className="text-[var(--font-size-xs)] font-bold tracking-widest text-[var(--color-text)]"
           >
             ADDRESS
           </label>
-          <span className="text-[10px] text-[#9CA3AF]">{messages.address.hint}</span>
+          <span className="text-[var(--font-size-xs)] text-[var(--color-text-muted)]">
+            {messages.address.hint}
+          </span>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="min-w-0 flex-1 relative">
+        <div className="flex min-w-0 items-center gap-[var(--space-2)]">
+          <div className="relative min-w-0 flex-1">
             <MapPin
               aria-hidden="true"
-              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]"
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-text-muted)]"
             />
             <input
               id="setup-address"
@@ -113,52 +123,70 @@ export function StepSetup({
               placeholder={messages.address.placeholder}
               autoComplete="street-address"
               maxLength={200}
-              className="w-full h-[48px] pl-9 pr-3 rounded-full bg-[#F8F4EF] border border-black/5 text-[16px] sm:text-[14px] font-medium outline-none focus:ring-2 focus:ring-black/10"
+              className={`${fieldControlClassName} rounded-full pl-9 pr-3 font-medium`}
             />
           </div>
           <button
             type="button"
             onClick={onLookup}
             disabled={lookingUp}
-            className="w-[48px] h-[48px] rounded-full bg-black text-white flex items-center justify-center shrink-0 active:scale-95 transition disabled:opacity-60"
+            className="ui-button ui-button--primary shrink-0"
             aria-label="Lookup address"
+            aria-busy={lookingUp}
           >
             {lookingUp ? (
               <div
                 aria-hidden="true"
-                className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"
+                className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white"
               />
             ) : (
-              <Search aria-hidden="true" className="w-5 h-5" />
+              <Search aria-hidden="true" className="h-5 w-5" />
             )}
           </button>
         </div>
-        <p className="mt-2 text-[11px] text-[#9CA3AF]">{messages.setup.lookupOptional}</p>
-        {lookingUp && (
-          <div className="mt-3 flex items-center gap-2 text-[12px] text-[#6B7280] animate-pulse">
-            <Zap aria-hidden="true" className="w-4 h-4" /> {messages.address.lookingUp}
+        <p className="mt-[var(--space-2)] text-[var(--font-size-xs)] text-[var(--color-text-muted)]">
+          {messages.setup.lookupOptional}
+        </p>
+        {lookingUp ? (
+          <div
+            role="status"
+            aria-live="polite"
+            className="mt-[var(--space-3)] flex items-center gap-[var(--space-2)] text-[var(--font-size-xs)] text-[var(--color-text-muted)]"
+          >
+            <Zap aria-hidden="true" className="h-4 w-4 animate-pulse" />{" "}
+            {messages.address.lookingUp}
           </div>
-        )}
-        {lookupError && syncMessage ? (
-          <p className="mt-3 text-[12px] text-[#991B1B]">{syncMessage}</p>
         ) : null}
-        {identified && (
-          <div className="mt-3 flex flex-wrap gap-2">
+        {lookupError && syncMessage ? (
+          <p role="alert" className="mt-[var(--space-3)] text-[var(--font-size-xs)] text-[var(--color-danger)]">
+            {syncMessage}
+          </p>
+        ) : null}
+        {identified ? (
+          <div className="mt-[var(--space-3)] flex flex-wrap gap-[var(--space-2)]">
             {tags.map((tag) => (
               <span
                 key={tag}
-                className="px-3 py-1.5 rounded-full bg-[#F3F0EB] text-[12px] font-medium border border-black/5"
+                className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-1.5 text-[var(--font-size-xs)] font-medium"
               >
                 {tag}
               </span>
             ))}
-            <span className="px-3 py-1.5 rounded-full bg-[#E8F5E9] text-[12px] font-medium text-[#2E7D32] flex items-center gap-1">
-              <Check aria-hidden="true" className="w-3 h-3" /> {messages.address.identified}
+            <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-success-bg)] px-3 py-1.5 text-[var(--font-size-xs)] font-medium text-[var(--color-success)]">
+              <Check aria-hidden="true" className="h-3 w-3" /> {messages.address.identified}
             </span>
           </div>
-        )}
-        {identified && Boolean(openData?.zoningCode) && (
-          <div className="mt-3 rounded-xl bg-[#EEF2FF] border border-[#C7D2FE] p-3 text-[11px] text-[#3730A3] leading-[1.45]">
+        ) : null}
+        {identified ? (
+          <p
+            role="status"
+            className="mt-[var(--space-3)] rounded-[var(--radius-md)] border border-[var(--color-info-border)] bg-[var(--color-info-bg)] px-[var(--space-3)] py-[var(--space-2)] text-[var(--font-size-xs)] leading-[1.45] text-[var(--color-info)]"
+          >
+            {messages.address.autofilledHint}
+          </p>
+        ) : null}
+        {identified && Boolean(openData?.zoningCode) ? (
+          <div className="mt-[var(--space-3)] rounded-[var(--radius-md)] border border-[var(--color-info-border)] bg-[var(--color-info-bg)] p-[var(--space-3)] text-[var(--font-size-xs)] leading-[1.45] text-[var(--color-info)]">
             {messages.address.openDataPrefix}
             {String(openData?.city || "")}
             {" · "}
@@ -166,73 +194,80 @@ export function StepSetup({
             {openData?.zoningLabel ? `（${openData.zoningLabel}）` : ""}
             {openData?.pid ? ` · PID ${openData.pid}` : ""}
           </div>
-        )}
+        ) : null}
         {!lookupError && syncMessage ? (
-          <p className="mt-3 text-[11px] text-[#6B7280]">{syncMessage}</p>
+          <p role="status" className="mt-[var(--space-3)] text-[var(--font-size-xs)] text-[var(--color-text-muted)]">
+            {syncMessage}
+          </p>
         ) : null}
       </div>
 
-      <div className="bg-white rounded-[22px] border border-black/[0.05] shadow-[0_4px_20px_rgba(0,0,0,0.04)] p-4 space-y-3">
-        <p className="text-[12px] font-[800] tracking-widest">{messages.setup.title}</p>
-        <label className="block">
-          <span className="text-[12px] font-bold text-[#374151]">
-            {messages.setup.viewingAt} <span aria-hidden="true">*</span>
-          </span>
-          <input
-            type="datetime-local"
-            required
-            value={viewingAtLocal}
-            onChange={(event) => onViewingAtChange(event.target.value)}
-            className="mt-1.5 w-full h-[48px] px-4 rounded-2xl bg-[#F8F4EF] border border-black/5 text-[16px] sm:text-[14px] outline-none focus:ring-2 focus:ring-black/10"
-          />
-        </label>
-        <label className="block">
-          <span className="text-[12px] font-bold text-[#374151]">{messages.setup.unitLabel}</span>
-          <input
-            value={unitLabel}
-            onChange={(event) => onUnitLabelChange(event.target.value)}
-            autoComplete="off"
-            maxLength={80}
-            className="mt-1.5 w-full h-[48px] px-4 rounded-2xl bg-[#F8F4EF] border border-black/5 text-[14px] outline-none focus:ring-2 focus:ring-black/10"
-          />
-        </label>
-        <div className="grid grid-cols-1 gap-2 min-[360px]:grid-cols-2">
-          <label className="block">
-            <span className="text-[12px] font-bold text-[#374151]">{messages.setup.priceLabel}</span>
+      <div className="ui-card min-w-0">
+        <div className="setup-form-grid">
+          <label className="setup-field setup-field--datetime">
+            <span className="text-[var(--font-size-xs)] font-bold text-[var(--color-text)]">
+              {messages.setup.viewingAt} <span aria-hidden="true">*</span>
+            </span>
+            <input
+              type="datetime-local"
+              required
+              value={viewingAtLocal}
+              onChange={(event) => onViewingAtChange(event.target.value)}
+              className={fieldControlClassName}
+            />
+          </label>
+          <label className="setup-field setup-field--full">
+            <span className="text-[var(--font-size-xs)] font-bold text-[var(--color-text)]">
+              {messages.setup.unitLabel}
+            </span>
+            <input
+              value={unitLabel}
+              onChange={(event) => onUnitLabelChange(event.target.value)}
+              autoComplete="off"
+              maxLength={80}
+              className={fieldControlClassName}
+            />
+          </label>
+          <label className="setup-field">
+            <span className="text-[var(--font-size-xs)] font-bold text-[var(--color-text)]">
+              {messages.setup.priceLabel}
+            </span>
             <input
               value={priceLabel}
               onChange={(event) => onPriceLabelChange(event.target.value)}
               inputMode="decimal"
               autoComplete="off"
               maxLength={40}
-              className="mt-1.5 w-full h-[48px] px-3 rounded-2xl bg-[#F8F4EF] border border-black/5 text-[14px] outline-none focus:ring-2 focus:ring-black/10"
+              className={fieldControlClassName}
             />
           </label>
-          <label className="block">
-            <span className="text-[12px] font-bold text-[#374151]">{messages.setup.layoutLabel}</span>
+          <label className="setup-field">
+            <span className="text-[var(--font-size-xs)] font-bold text-[var(--color-text)]">
+              {messages.setup.layoutLabel}
+            </span>
             <input
               value={layoutLabel}
               onChange={(event) => onLayoutLabelChange(event.target.value)}
               autoComplete="off"
               maxLength={60}
-              className="mt-1.5 w-full h-[48px] px-3 rounded-2xl bg-[#F8F4EF] border border-black/5 text-[14px] outline-none focus:ring-2 focus:ring-black/10"
+              className={fieldControlClassName}
             />
           </label>
-        </div>
-        <div className="grid grid-cols-1 gap-2 min-[360px]:grid-cols-2">
-          <label className="block">
-            <span className="text-[12px] font-bold text-[#374151]">{messages.setup.areaLabel}</span>
+          <label className="setup-field">
+            <span className="text-[var(--font-size-xs)] font-bold text-[var(--color-text)]">
+              {messages.setup.areaLabel}
+            </span>
             <input
               value={areaLabel}
               onChange={(event) => onAreaLabelChange(event.target.value)}
               inputMode="decimal"
               autoComplete="off"
               maxLength={40}
-              className="mt-1.5 w-full h-[48px] px-3 rounded-2xl bg-[#F8F4EF] border border-black/5 text-[14px] outline-none focus:ring-2 focus:ring-black/10"
+              className={fieldControlClassName}
             />
           </label>
-          <label className="block">
-            <span className="text-[12px] font-bold text-[#374151]">
+          <label className="setup-field">
+            <span className="text-[var(--font-size-xs)] font-bold text-[var(--color-text)]">
               {messages.setup.managementFeeLabel}
             </span>
             <input
@@ -241,33 +276,37 @@ export function StepSetup({
               inputMode="decimal"
               autoComplete="off"
               maxLength={40}
-              className="mt-1.5 w-full h-[48px] px-3 rounded-2xl bg-[#F8F4EF] border border-black/5 text-[14px] outline-none focus:ring-2 focus:ring-black/10"
+              className={fieldControlClassName}
+            />
+          </label>
+          <label className="setup-field setup-field--full">
+            <span className="text-[var(--font-size-xs)] font-bold text-[var(--color-text)]">
+              {messages.setup.listingUrl}
+            </span>
+            <input
+              type="url"
+              value={listingUrl}
+              onChange={(event) => onListingUrlChange(event.target.value)}
+              inputMode="url"
+              autoComplete="url"
+              maxLength={2048}
+              className={fieldControlClassName}
+              placeholder="https://"
+            />
+          </label>
+          <label className="setup-field setup-field--full">
+            <span className="text-[var(--font-size-xs)] font-bold text-[var(--color-text)]">
+              {messages.setup.setupNotes}
+            </span>
+            <textarea
+              value={setupNotes}
+              onChange={(event) => onSetupNotesChange(event.target.value)}
+              maxLength={2000}
+              rows={3}
+              className={`${fieldControlClassName} resize-none py-[var(--space-3)]`}
             />
           </label>
         </div>
-        <label className="block">
-          <span className="text-[12px] font-bold text-[#374151]">{messages.setup.listingUrl}</span>
-          <input
-            type="url"
-            value={listingUrl}
-            onChange={(event) => onListingUrlChange(event.target.value)}
-            inputMode="url"
-            autoComplete="url"
-            maxLength={2048}
-            className="mt-1.5 w-full h-[48px] px-4 rounded-2xl bg-[#F8F4EF] border border-black/5 text-[14px] outline-none focus:ring-2 focus:ring-black/10"
-            placeholder="https://"
-          />
-        </label>
-        <label className="block">
-          <span className="text-[12px] font-bold text-[#374151]">{messages.setup.setupNotes}</span>
-          <textarea
-            value={setupNotes}
-            onChange={(event) => onSetupNotesChange(event.target.value)}
-            maxLength={2000}
-            rows={3}
-            className="mt-1.5 w-full px-4 py-3 rounded-2xl bg-[#F8F4EF] border border-black/5 text-[14px] outline-none focus:ring-2 focus:ring-black/10 resize-none"
-          />
-        </label>
       </div>
     </form>
   );

@@ -59,7 +59,7 @@ describe("UI accessibility foundations", () => {
   it("adds native constraints and narrow-screen form layout", async () => {
     const user = userEvent.setup();
     const onViewingAtChange = vi.fn();
-    render(
+    const { container } = render(
       <StepSetup
         messages={setupMessages}
         address=""
@@ -92,10 +92,14 @@ describe("UI accessibility foundations", () => {
 
     const date = screen.getByLabelText(/Viewing time/);
     expect(date).toBeRequired();
+    expect(screen.getByRole("heading", { name: "Create a new viewing" })).toBeVisible();
+    expect(container.querySelector(".setup-form-grid")).not.toBeNull();
     expect(screen.getByLabelText("ADDRESS")).toBeRequired();
     expect(screen.getByLabelText("ADDRESS")).toHaveAttribute("autocomplete", "street-address");
     expect(screen.getByLabelText("Price")).toHaveAttribute("inputmode", "decimal");
     expect(screen.getByLabelText("Listing URL")).toHaveAttribute("maxlength", "2048");
+    expect(date).toHaveAttribute("type", "datetime-local");
+    expect(date.className).toMatch(/min-w-0/);
 
     await user.type(screen.getByLabelText("Unit"), "12A");
     expect(screen.getByLabelText("Unit")).toHaveAttribute("maxlength", "80");
@@ -108,10 +112,11 @@ const setupMessages: StepSetupMessages = {
     hint: "Optional lookup",
     lookingUp: "Looking up",
     identified: "Identified",
+    autofilledHint: "Auto-filled from address — you can edit",
     openDataPrefix: "Open data: ",
   },
   setup: {
-    title: "Setup",
+    title: "Create a new viewing",
     viewingAt: "Viewing time",
     unitLabel: "Unit",
     priceLabel: "Price",

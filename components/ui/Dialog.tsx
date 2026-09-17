@@ -124,7 +124,7 @@ export function Dialog({
 
   return createPortal(
     <div
-      className={`fixed inset-0 z-[70] flex justify-center bg-black/45 p-4 ${backdropClassName}`}
+      className={`fixed inset-0 z-[var(--z-modal)] flex justify-center bg-black/45 p-[var(--space-4)] ${backdropClassName}`}
       onMouseDown={handleBackdrop}
     >
       <div
@@ -134,13 +134,16 @@ export function Dialog({
         aria-labelledby={titleId}
         aria-describedby={descriptionId}
         tabIndex={-1}
-        className={`w-full max-w-[420px] my-auto rounded-[24px] bg-white p-5 shadow-[0_20px_60px_rgba(0,0,0,0.25)] ${className}`}
+        className={`w-full max-w-[var(--page-max-width-narrow)] my-auto rounded-[var(--radius-lg)] bg-[var(--color-surface)] p-[var(--space-5)] shadow-[var(--shadow-modal)] ${className}`}
       >
-        <h2 id={titleId} className="text-[17px] font-bold leading-snug">
+        <h2 id={titleId} className="text-[17px] font-bold leading-snug text-[var(--color-text)]">
           {title}
         </h2>
         {description ? (
-          <div id={descriptionId} className="mt-2 text-[13px] leading-[1.5] text-[#4B5563]">
+          <div
+            id={descriptionId}
+            className="mt-[var(--space-2)] text-[13px] leading-[1.5] text-[var(--color-text-muted)]"
+          >
             {description}
           </div>
         ) : null}

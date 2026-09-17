@@ -7,6 +7,7 @@ import { ArrowLeft, Camera, Check, GitCompare, MapPin, Video } from "lucide-reac
 import { ClientAuthBar } from "@/components/ClientAuthBar";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useI18n } from "@/components/I18nProvider";
+import { PageContainer } from "@/components/ui/primitives";
 import {
   buildComparisonDraft,
   COMPARE_MAX,
@@ -98,13 +99,13 @@ export default function ViewingsPage() {
   }
 
   return (
-    <div className="min-h-screen w-full flex justify-center bg-[#FDF6F0] text-[#1A1A1A]">
-      <div className="w-full max-w-[420px] px-4 pt-6 pb-28">
+    <div className="min-h-screen w-full flex justify-center bg-[var(--color-canvas)] text-[var(--color-text)]">
+      <PageContainer narrow className="pt-6 pb-28">
         <div className="flex items-start justify-between mb-5">
           <div>
             <Link
               href="/"
-              className="inline-flex items-center gap-1 text-[12px] font-medium text-[#6B7280] mb-2"
+              className="inline-flex min-h-[var(--touch-target)] items-center gap-1 text-[var(--font-size-xs)] font-medium text-[var(--color-text-muted)] mb-2"
             >
               <ArrowLeft className="w-3.5 h-3.5" /> {messages.viewings.back}
             </Link>
@@ -245,7 +246,7 @@ export default function ViewingsPage() {
             );
           })}
         </div>
-      </div>
+      </PageContainer>
     </div>
   );
 }

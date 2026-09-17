@@ -15,6 +15,7 @@ import {
 import { ComparisonBoard } from "@/components/comparison/ComparisonBoard";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useI18n } from "@/components/I18nProvider";
+import { PageContainer } from "@/components/ui/primitives";
 import {
   getComparison,
   putComparison,
@@ -119,22 +120,24 @@ export default function ComparePage({
   const labels = messages.compare;
 
   return (
-    <div className="min-h-screen w-full flex justify-center bg-[#FDF6F0] text-[#1A1A1A]">
-      <div className="w-full max-w-[960px] px-4 pt-6 pb-28">
+    <div className="min-h-screen w-full flex justify-center bg-[var(--color-canvas)] text-[var(--color-text)]">
+      <PageContainer className="pt-6 pb-28">
         <div className="flex items-start justify-between gap-3 mb-4">
           <div>
             <Link
               href="/viewings"
-              className="inline-flex items-center gap-1 text-[12px] font-medium text-[#6B7280] mb-2"
+              className="inline-flex min-h-[var(--touch-target)] items-center gap-1 text-[var(--font-size-xs)] font-medium text-[var(--color-text-muted)] mb-2"
             >
               <ArrowLeft className="w-3.5 h-3.5" /> {labels.backToList}
             </Link>
             <h1 className="text-[20px] font-[800] tracking-tight">{labels.title}</h1>
-            <p className="text-[12px] text-[#6B7280] mt-1">
+            <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)] mt-1">
               {labels.subtitle} · {labels.lastUpdated}{" "}
               {new Date(draft.updatedAt).toLocaleString()}
             </p>
-            <p className="text-[11px] text-[#9CA3AF] mt-1">{labels.readOnlySource}</p>
+            <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)] mt-1">
+              {labels.readOnlySource}
+            </p>
           </div>
           <LanguageSwitcher />
         </div>
@@ -276,11 +279,11 @@ export default function ComparePage({
         <button
           type="button"
           onClick={() => router.push("/viewings")}
-          className="mt-6 w-full max-w-[420px] mx-auto flex h-11 items-center justify-center gap-2 rounded-full border border-black/10 text-[13px] font-bold text-[#6B7280]"
+          className="ui-button ui-button--secondary mt-[var(--space-6)] w-full max-w-[var(--page-max-width-narrow)] mx-auto text-[var(--font-size-sm)]"
         >
           <X className="w-4 h-4" /> {labels.close}
         </button>
-      </div>
+      </PageContainer>
     </div>
   );
 }

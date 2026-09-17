@@ -4,7 +4,13 @@ import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useI18n } from "@/components/I18nProvider";
-import { Button, Card, Field, PageHeader } from "@/components/ui/primitives";
+import {
+  Button,
+  Card,
+  Field,
+  PageContainer,
+  PageHeader,
+} from "@/components/ui/primitives";
 import { claimGuestViewingData } from "@/lib/auth/claim-guest-data";
 import { safeInternalNextPath } from "@/lib/http/safe-next";
 import { createClient } from "@/utils/supabase/client";
@@ -57,8 +63,8 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen w-full flex justify-center bg-[#FDF6F0] text-[#1A1A1A]">
-      <div className="w-full max-w-[420px] px-4 pt-10 pb-28">
+    <div className="min-h-screen w-full flex justify-center bg-[var(--color-canvas)] text-[var(--color-text)]">
+      <PageContainer narrow className="pt-10 pb-28">
         <PageHeader
           eyebrow="KANFANGJI"
           title={
@@ -70,8 +76,8 @@ export default function LoginPage() {
           actions={<LanguageSwitcher />}
         />
 
-        <Card className="mt-6">
-          <form onSubmit={(event) => void onSubmit(event)} className="space-y-3">
+        <Card className="mt-[var(--space-6)]">
+          <form onSubmit={(event) => void onSubmit(event)} className="space-y-[var(--space-3)]">
             <Field
               label="EMAIL"
               type="email"
@@ -103,7 +109,11 @@ export default function LoginPage() {
             </Button>
 
             {message ? (
-              <p role="status" aria-live="polite" className="text-xs leading-5 text-[#6B7280]">
+              <p
+                role="status"
+                aria-live="polite"
+                className="text-[var(--font-size-xs)] leading-5 text-[var(--color-text-muted)]"
+              >
                 {message}
               </p>
             ) : null}
@@ -117,19 +127,22 @@ export default function LoginPage() {
             setMode((current) => (current === "signin" ? "signup" : "signin"));
             setMessage("");
           }}
-          className="mt-4"
+          className="mt-[var(--space-4)]"
         >
           {mode === "signin"
             ? messages.loginPage.switchToSignUp
             : messages.loginPage.switchToSignIn}
         </Button>
 
-        <div className="mt-8">
-          <Link href="/" className="text-[12px] text-[#9CA3AF]">
+        <div className="mt-[var(--space-8)]">
+          <Link
+            href="/"
+            className="inline-flex min-h-[var(--touch-target)] items-center text-[var(--font-size-xs)] font-medium text-[var(--color-text-muted)] underline-offset-2 hover:underline"
+          >
             {messages.loginPage.backHome}
           </Link>
         </div>
-      </div>
+      </PageContainer>
     </div>
   );
 }

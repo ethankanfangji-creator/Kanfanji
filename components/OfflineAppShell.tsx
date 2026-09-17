@@ -58,13 +58,13 @@ export function OfflineAppShell() {
     <div
       role="status"
       aria-live="polite"
-      className="fixed inset-x-3 top-3 z-[100] mx-auto flex min-h-11 max-w-[420px] items-center justify-between gap-3 rounded-2xl bg-[#111] px-4 py-2 text-[12px] font-bold text-white shadow-lg"
+      className="fixed inset-x-3 top-3 z-[var(--z-toast)] mx-auto flex min-h-[var(--touch-target)] max-w-[var(--page-max-width-narrow)] items-center justify-between gap-3 rounded-[var(--radius-lg)] bg-[var(--color-primary)] px-[var(--space-4)] py-[var(--space-2)] text-[var(--font-size-xs)] font-bold text-[var(--color-primary-fg)] shadow-[var(--shadow-toast)]"
     >
       <span>{waiting ? messages.offline.updateReady : messages.offline.offline}</span>
       {waiting ? (
         <button
           type="button"
-          className="min-h-11 shrink-0 rounded-full bg-white px-4 text-black"
+          className="ui-button ui-button--secondary shrink-0 min-h-[var(--touch-target)]"
           onClick={() => {
             refreshRequested.current = true;
             waiting.postMessage({ type: "SKIP_WAITING" });

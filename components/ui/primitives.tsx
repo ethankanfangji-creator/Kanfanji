@@ -12,16 +12,16 @@ export const Button = forwardRef<
 >(function Button({ className = "", tone = "primary", type = "button", ...props }, ref) {
   const toneClass =
     tone === "primary"
-      ? "bg-black text-white"
+      ? "ui-button--primary"
       : tone === "danger"
-        ? "bg-[#991B1B] text-white"
-        : "border border-black/10 bg-white text-[var(--color-text)]";
+        ? "ui-button--danger"
+        : "ui-button--secondary";
   return (
     <button
       {...props}
       ref={ref}
       type={type}
-      className={`inline-flex min-h-11 items-center justify-center rounded-full px-4 text-sm font-bold transition active:scale-[0.98] disabled:opacity-50 ${toneClass} ${className}`}
+      className={`ui-button ${toneClass} ${className}`}
     />
   );
 });
@@ -30,12 +30,7 @@ export function Card({
   className = "",
   ...props
 }: HTMLAttributes<HTMLElement>) {
-  return (
-    <section
-      {...props}
-      className={`rounded-[var(--radius-card)] border border-black/[0.05] bg-[var(--color-surface)] p-4 shadow-[var(--shadow-card)] ${className}`}
-    />
-  );
+  return <section {...props} className={`ui-card ${className}`} />;
 }
 
 export function Banner({
@@ -47,16 +42,16 @@ export function Banner({
 }) {
   const toneClass =
     tone === "danger"
-      ? "border-[#FECACA] bg-[#FEF2F2] text-[#991B1B]"
+      ? "border-[var(--color-danger-border)] bg-[var(--color-danger-bg)] text-[var(--color-danger)]"
       : tone === "success"
-        ? "border-[#BBF7D0] bg-[#F0FDF4] text-[#166534]"
+        ? "border-[var(--color-success-border)] bg-[var(--color-success-bg)] text-[var(--color-success)]"
         : tone === "info"
-          ? "border-[#BFDBFE] bg-[#EFF6FF] text-[#1D4ED8]"
-          : "border-black/10 bg-[#F8F4EF] text-[var(--color-text-muted)]";
+          ? "border-[var(--color-info-border)] bg-[var(--color-info-bg)] text-[var(--color-info)]"
+          : "border-[var(--color-border)] bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]";
   return (
     <div
       {...props}
-      className={`rounded-[var(--radius-control)] border p-3 text-sm leading-5 ${toneClass} ${className}`}
+      className={`rounded-[var(--radius-control)] border p-[var(--space-3)] text-[var(--font-size-sm)] leading-5 ${toneClass} ${className}`}
     />
   );
 }
@@ -65,19 +60,49 @@ export function Field({
   label,
   className = "",
   inputClassName = "",
+  error,
+  id,
   ...inputProps
 }: InputHTMLAttributes<HTMLInputElement> & {
   label: ReactNode;
   inputClassName?: string;
+  error?: string;
 }) {
+  const invalid = Boolean(error) || inputProps["aria-invalid"] === true;
+  const inputId = id ?? (typeof label === "string" ? `field-${label.toLowerCase().replace(/\s+/g, "-")}` : undefined);
   return (
-    <label className={`block text-xs font-bold ${className}`}>
-      {label}
+    <div className={className}>
+      <label
+        htmlFor={inputId}
+        className="block text-[var(--font-size-xs)] font-bold text-[var(--color-text)]"
+      >
+        {label}
+      </label>
       <input
         {...inputProps}
-        className={`mt-2 h-12 w-full rounded-full border border-black/5 bg-[#F8F4EF] px-4 text-base outline-none focus:ring-2 focus:ring-black/10 ${inputClassName}`}
+        id={inputId}
+        aria-invalid={invalid || undefined}
+        className={`ui-input mt-[var(--space-2)] ${invalid ? "is-error" : ""} ${inputClassName}`}
       />
-    </label>
+      {error ? (
+        <span role="alert" className="mt-[var(--space-2)] block text-[var(--font-size-xs)] text-[var(--color-danger)]">
+          {error}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+export function PageContainer({
+  className = "",
+  narrow = false,
+  ...props
+}: HTMLAttributes<HTMLDivElement> & { narrow?: boolean }) {
+  return (
+    <div
+      {...props}
+      className={`page-container ${narrow ? "page-container--narrow" : ""} ${className}`}
+    />
   );
 }
 
@@ -93,19 +118,23 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <header className="flex flex-col gap-[var(--space-4)] sm:flex-row sm:items-start sm:justify-between">
       <div className="min-w-0">
         {eyebrow ? (
-          <p className="text-xs font-bold tracking-[0.18em] text-[var(--color-text-muted)]">
+          <p className="text-[var(--font-size-xs)] font-bold tracking-[0.18em] text-[var(--color-text-muted)]">
             {eyebrow}
           </p>
         ) : null}
-        <h1 className="mt-1 text-2xl font-extrabold tracking-tight">{title}</h1>
+        <h1 className="mt-[var(--space-1)] text-[var(--font-size-xl)] font-extrabold tracking-tight text-[var(--color-text)]">
+          {title}
+        </h1>
         {description ? (
-          <p className="mt-2 text-sm leading-6 text-[var(--color-text-muted)]">{description}</p>
+          <p className="mt-[var(--space-2)] text-[var(--font-size-sm)] leading-6 text-[var(--color-text-muted)]">
+            {description}
+          </p>
         ) : null}
       </div>
-      {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+      {actions ? <div className="flex flex-wrap items-center gap-[var(--space-2)]">{actions}</div> : null}
     </header>
   );
 }

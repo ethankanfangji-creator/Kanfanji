@@ -3131,7 +3131,7 @@ export function ClientPage() {
 
   return (
     <div className="min-h-screen w-full flex justify-center bg-[var(--color-canvas,#FDF6F0)] text-[var(--color-text,#1A1A1A)]">
-      <div className="w-full max-w-[760px] px-4 pt-[max(24px,env(safe-area-inset-top))] pb-36 sm:px-6 lg:px-8">
+      <div className="page-container pt-[max(24px,env(safe-area-inset-top))] pb-36">
         {preflightKind ? (
           <PermissionPreflight
             kind={preflightKind}

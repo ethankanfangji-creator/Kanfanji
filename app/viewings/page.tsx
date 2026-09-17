@@ -68,9 +68,10 @@ export default function ViewingsPage() {
 
   async function startCompare() {
     if (selected.length < COMPARE_MIN || selected.length > COMPARE_MAX) {
-      alert(messages.compare.selectRange);
+      setError(messages.compare.selectRange);
       return;
     }
+    setError("");
     setCompareBusy(true);
     try {
       const picked = selected

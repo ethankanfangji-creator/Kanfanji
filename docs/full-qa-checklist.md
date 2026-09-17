@@ -1,6 +1,6 @@
 # KanFangJi full QA checklist
 
-Last updated: 2026-09-15
+Last updated: 2026-09-16
 
 Legend:
 
@@ -9,24 +9,42 @@ Legend:
 
 ## Automated verification
 
-- Final-run timestamp: `2026-09-16 13:56 UTC`
-- `npm test`: `PASS — 46 files / 197 tests / 9.86s`
-- `npm run test:e2e`: `PASS — Chromium only, 3 tests / 22.6s`
+- Final-run timestamp: `2026-09-16 21:13 PDT`
+- `npm test -- --run`: `PASS — 55 files / 236 tests`
+- Playwright combined final runs: `PASS — desktop Chromium/WebKit core;
+  320px, 390px, Pixel 7, iPhone 13 responsive overflow; release smoke`
+- Browser-matrix note: core behavior intentionally runs once per browser engine;
+  mobile projects run responsive assertions, so skipped matrix entries are expected.
 - `npm run typecheck`: `PASS`
-- `npm run lint`: `PASS`
-- `npm run build`: `PASS — Next.js 16.3.4 production build`
+- `npm run lint`: `PASS — 0 errors / 0 warnings`
+- `npm run build`: `PASS — Next.js 16.3.4 production build (Playwright web server)`
 - `git diff --check`: `PASS`
 - Remote schema/RLS/policy/extension assertions: `PASS — read-only check at 2026-09-16 06:31 UTC`
 - Remote fixture-based owner/editor/commenter/viewer/revoked role exercise:
   `PASS — isolated run kf-smoke-20260916135016-b0a03c7f; cleanup complete`
 - Supabase security advisors: `2026-09-16 13:53 UTC — one WARN: leaked-password protection disabled`
 - Supabase performance advisors: `2026-09-16 06:59 UTC — five INFO unused-index findings; retain through initial traffic and recheck`
+- Stripe sandbox webhook: `PASS — customer.subscription.updated applied as active
+  with a plan; signed replay returned duplicate; temporary Supabase user cleaned up`
 
 The unit suite is expected to cover PDF privacy projection, selected annotations,
 safe filenames, long-text rendering, bundled CJK/Thai fonts, hydration stability,
 immutable publication, account-scoped drafts, quota denial, and offline cache
-exclusions. The Chromium smoke suite covers the guest/local wizard, accessible
-control names, manifest and offline routes, and public-share cache headers.
+exclusions. Browser automation now covers guest/local wizard progression,
+IndexedDB reload restoration, keyboard login, auth loading/error states,
+accessible control names, 320/390/Pixel/iPhone overflow, manifest/offline routes,
+and public-share cache headers.
+
+## Verification boundary
+
+- **Automated:** reducer/lifecycle transitions, additive current-session pointer,
+  account-scoped claim, role projection, API input validation, permission error
+  classification, draft reload, offline/cache headers, and responsive overflow.
+- **Simulated browser/device:** Chromium desktop/320/390/Pixel 7 and WebKit
+  desktop/iPhone 13 through Playwright.
+- **Physical device required:** real camera/microphone permission sheets,
+  background/lock interruption, iOS native share sheet, Android native share,
+  and visual inspection of generated PDFs. These remain unchecked below.
 
 ## Remote migration order
 
@@ -68,7 +86,7 @@ queries, advisor findings, and forward-fix guidance.
   the exposed `public` schema.
 - [x] Storage paths use `owner_id/viewing_id/folder/file`; cross-owner paths fail.
 - [x] Stripe duplicate and out-of-order events do not regress subscription state
-  (route/contract tests; no real Stripe event was emitted).
+  (real Stripe sandbox event plus signed duplicate replay).
 
 ## PDF content and privacy
 

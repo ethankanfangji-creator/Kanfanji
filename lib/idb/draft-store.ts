@@ -16,6 +16,10 @@ function activeDraftKey(scope = activeAccountScope): string {
   return `${scope}:${ACTIVE_DRAFT_ID}`;
 }
 
+function currentSessionPointerKey(scope = activeAccountScope): string {
+  return `currentSession:${scope}`;
+}
+
 function storedDraftId(draftId = ACTIVE_DRAFT_ID): string {
   return draftId === ACTIVE_DRAFT_ID ? activeDraftKey() : draftId;
 }
@@ -176,6 +180,15 @@ export async function ensureSchemaMeta(): Promise<void> {
   });
 }
 
+export async function getCurrentSessionPointer(): Promise<string | null> {
+  const row = await withStore<{ key: string; value: string } | undefined>(
+    "meta",
+    "readonly",
+    (store) => req(store.get(currentSessionPointerKey())),
+  );
+  return row?.value ?? null;
+}
+
 export function emptyDraft(partial?: Partial<ViewingDraftRecord>): ViewingDraftRecord {
   const now = new Date().toISOString();
   return {
@@ -259,6 +272,14 @@ export async function putActiveDraft(
       const drafts = tx.objectStore("drafts");
       const meta = tx.objectStore("meta");
       drafts.put(next);
+      if (next.localSessionId) {
+        meta.put({
+          key: currentSessionPointerKey(),
+          value: next.localSessionId,
+          draftId: next.id,
+          updatedAt: next.updatedAt,
+        });
+      }
       if (activeAccountScope.startsWith("guest:")) {
         const legacyScope = await req<{ key: string; value: string } | undefined>(
           meta.get("activeDraftScope"),
@@ -285,6 +306,7 @@ export async function clearActiveDraft(): Promise<void> {
     const meta = tx.objectStore("meta");
     const key = activeDraftKey();
     drafts.delete(key);
+    meta.delete(currentSessionPointerKey());
     const mediaStore = tx.objectStore("media");
     const index = mediaStore.index("byDraftId");
     const keys = await req(index.getAllKeys(key));
@@ -686,6 +708,16 @@ export async function claimCanonicalGuestData(userId: string): Promise<void> {
       }
       if (source) drafts.delete(guestKey);
     }
+    const claimedDraft = target ?? source;
+    if (claimedDraft?.localSessionId) {
+      meta.put({
+        key: currentSessionPointerKey(nextScope),
+        value: claimedDraft.localSessionId,
+        draftId: userKey,
+        updatedAt: claimedDraft.updatedAt,
+      });
+    }
+    meta.delete(currentSessionPointerKey(guestScope));
     await txDone(tx);
     activeAccountScope = nextScope;
   } finally {

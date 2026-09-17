@@ -4,10 +4,12 @@ import {
   useEffect,
   useId,
   useRef,
+  useState,
   type MouseEvent,
   type RefObject,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -37,9 +39,37 @@ export function Dialog({
   const titleId = `${generatedId}-title`;
   const descriptionId = description ? `${generatedId}-description` : undefined;
   const dialogRef = useRef<HTMLDivElement>(null);
+  const [portalNode] = useState<HTMLDivElement | null>(() => {
+    if (typeof document === "undefined") return null;
+    const node = document.createElement("div");
+    node.dataset.dialogPortal = "";
+    return node;
+  });
 
   useEffect(() => {
-    if (!open) return;
+    if (!portalNode) return;
+    document.body.appendChild(portalNode);
+    return () => portalNode.remove();
+  }, [portalNode]);
+
+  useEffect(() => {
+    if (!open || !portalNode) return;
+    const bodyOverflow = document.body.style.overflow;
+    const background = Array.from(document.body.children).filter(
+      (element): element is HTMLElement =>
+        element instanceof HTMLElement && element !== portalNode,
+    );
+    const priorState = background.map((element) => ({
+      element,
+      inert: element.inert,
+      ariaHidden: element.getAttribute("aria-hidden"),
+    }));
+    document.body.style.overflow = "hidden";
+    background.forEach((element) => {
+      element.inert = true;
+      element.setAttribute("aria-hidden", "true");
+    });
+
     const previouslyFocused =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const dialog = dialogRef.current;
@@ -76,17 +106,23 @@ export function Dialog({
     document.addEventListener("keydown", handleKeyDown);
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = bodyOverflow;
+      priorState.forEach(({ element, inert, ariaHidden }) => {
+        element.inert = inert;
+        if (ariaHidden === null) element.removeAttribute("aria-hidden");
+        else element.setAttribute("aria-hidden", ariaHidden);
+      });
       previouslyFocused?.focus();
     };
-  }, [initialFocusRef, onClose, open]);
+  }, [initialFocusRef, onClose, open, portalNode]);
 
-  if (!open) return null;
+  if (!open || !portalNode) return null;
 
   function handleBackdrop(event: MouseEvent<HTMLDivElement>) {
     if (closeOnBackdrop && event.target === event.currentTarget) onClose();
   }
 
-  return (
+  return createPortal(
     <div
       className={`fixed inset-0 z-[70] flex justify-center bg-black/45 p-4 ${backdropClassName}`}
       onMouseDown={handleBackdrop}
@@ -110,6 +146,7 @@ export function Dialog({
         ) : null}
         {children}
       </div>
-    </div>
+    </div>,
+    portalNode,
   );
 }

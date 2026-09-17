@@ -7,6 +7,7 @@ import {
 import { extensionFor } from "@/lib/media-paths";
 import { getMedia as getCanonicalMedia } from "@/lib/idb/draft-store";
 import { backoffMs, classifySyncError } from "./errors";
+import { transitionSyncStatus } from "./lifecycle";
 import { decideMerge, syncStatusToUi } from "./merge";
 import type {
   ActiveDraftBridgeInput,
@@ -184,7 +185,7 @@ export class SyncEngine {
     const session = await this.db.viewingSessions.require(sessionId);
     await this.db.viewingSessions.update(sessionId, {
       userId: options.userId,
-      syncStatus: session.syncStatus === "conflict" ? "conflict" : "pending",
+      syncStatus: transitionSyncStatus(session.syncStatus, "enqueue"),
       lastSyncError: session.syncStatus === "conflict" ? session.lastSyncError : null,
     });
 
@@ -265,7 +266,7 @@ export class SyncEngine {
         // Explicit user retry on conflict = push local (bump client clock). Never silent.
         const bumpedAt = new Date().toISOString();
         await this.db.viewingSessions.update(sessionId, {
-          syncStatus: "pending",
+          syncStatus: transitionSyncStatus(session.syncStatus, "explicit_retry"),
           lastSyncError: null,
           propertyDraft: {
             ...session.propertyDraft,
@@ -360,7 +361,10 @@ export class SyncEngine {
           leaseExpiresAt: null,
         });
         await this.db.viewingSessions.update(job.sessionId, {
-          syncStatus: giveUp ? "failed" : "pending",
+          syncStatus: transitionSyncStatus(
+            "syncing",
+            giveUp ? "terminal_failure" : "retryable_failure",
+          ),
           lastSyncError: classified.message,
         });
         return classified.code === "offline" ? "offline" : "failed";
@@ -379,7 +383,10 @@ export class SyncEngine {
         leaseExpiresAt: null,
       });
       await this.db.viewingSessions.update(job.sessionId, {
-        syncStatus: "failed",
+        syncStatus: transitionSyncStatus(
+          "syncing",
+          giveUp ? "terminal_failure" : "retryable_failure",
+        ),
         lastSyncError: classified.message,
       });
       if (job.entityType === "media") {

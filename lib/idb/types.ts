@@ -5,7 +5,7 @@ import type { ViewingAiSummary } from "@/lib/ai-summary";
 import type { FieldChecklistItem } from "@/lib/field-capture";
 
 export const IDB_NAME = "kanfangji";
-export const IDB_VERSION = 3;
+export const IDB_VERSION = 4;
 
 /** Soft cap for local media blobs (keep uploaded copies for offline preview). */
 export const MEDIA_QUOTA_BYTES = 300 * 1024 * 1024;

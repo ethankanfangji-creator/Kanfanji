@@ -14,8 +14,25 @@ type ExportState =
   | { status: "idle" }
   | { status: "preparing"; completed: number; total: number }
   | { status: "generating" }
+  | { status: "ready" }
   | { status: "success" }
   | { status: "error"; message: string };
+
+const PDF_RENDER_TIMEOUT_MS = 60_000;
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("PDF_RENDER_TIMEOUT")), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 function isIosSafari(): boolean {
   const ua = navigator.userAgent;
@@ -51,6 +68,7 @@ export function PdfExportButton({
 }) {
   const [state, setState] = useState<ExportState>({ status: "idle" });
   const mounted = useRef(true);
+  const pendingFile = useRef<File | null>(null);
 
   useEffect(() => {
     mounted.current = true;
@@ -67,12 +85,39 @@ export function PdfExportButton({
         }`
       : state.status === "generating"
         ? uiLabels.generating
-        : state.status === "error"
-          ? uiLabels.retry
-          : uiLabels.button;
+        : state.status === "ready"
+          ? uiLabels.openFallback
+          : state.status === "error"
+            ? uiLabels.retry
+            : uiLabels.button;
 
   async function exportPdf() {
     const iosSafari = isIosSafari();
+    const preparedFile = pendingFile.current;
+    if (preparedFile) {
+      try {
+        if (
+          typeof navigator.share === "function" &&
+          typeof navigator.canShare === "function" &&
+          navigator.canShare({ files: [preparedFile] })
+        ) {
+          await navigator.share({
+            title: uiLabels.fileShareTitle,
+            files: [preparedFile],
+          });
+        } else {
+          downloadBlob(preparedFile, preparedFile.name);
+        }
+        pendingFile.current = null;
+        if (mounted.current) setState({ status: "success" });
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          pendingFile.current = null;
+          if (mounted.current) setState({ status: "error", message: uiLabels.error });
+        }
+      }
+      return;
+    }
     const fileShareLikelySupported =
       iosSafari &&
       typeof navigator.share === "function" &&
@@ -110,7 +155,11 @@ export function PdfExportButton({
           locale={locale}
         />
       );
-      const blob = await renderer.pdf(document).toBlob();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const blob = await withTimeout(
+        renderer.pdf(document).toBlob(),
+        PDF_RENDER_TIMEOUT_MS,
+      );
       const file = new File([blob], model.fileName, { type: "application/pdf" });
       const canShareFile =
         iosSafari &&
@@ -120,10 +169,9 @@ export function PdfExportButton({
 
       if (canShareFile) {
         popup?.close();
-        await navigator.share({
-          title: uiLabels.fileShareTitle,
-          files: [file],
-        });
+        pendingFile.current = file;
+        if (mounted.current) setState({ status: "ready" });
+        return;
       } else if (popup) {
         const url = URL.createObjectURL(blob);
         popup.location.href = url;
@@ -170,7 +218,7 @@ export function PdfExportButton({
         <p role="alert" className="text-[11px] text-[#991B1B] text-center">
           {state.message}
         </p>
-      ) : state.status === "success" ? (
+      ) : state.status === "ready" || state.status === "success" ? (
         <p role="status" className="text-[11px] text-[#166534] text-center">
           {uiLabels.success}
         </p>

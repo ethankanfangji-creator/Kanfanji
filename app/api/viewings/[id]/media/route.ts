@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { appendViewingMediaPath } from "@/lib/collaboration/server";
+import {
+  assertAllowedKeys,
+  optionalEnum,
+  optionalString,
+  readJsonObject,
+  RequestValidationError,
+  validationErrorBody,
+} from "@/lib/http/validation";
 
 export const runtime = "nodejs";
-
-type MediaColumn = "photo_urls" | "video_urls" | "audio_urls";
 
 export async function POST(
   request: Request,
@@ -19,24 +25,28 @@ export async function POST(
     if (!user) {
       return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
     }
-    const body = (await request.json()) as {
-      column?: MediaColumn;
-      path?: string;
-    };
-    if (
-      !body.column ||
-      !["photo_urls", "video_urls", "audio_urls"].includes(body.column)
-    ) {
+    const body = await readJsonObject(request);
+    assertAllowedKeys(body, ["column", "path"]);
+    const column = optionalEnum(
+      body,
+      "column",
+      ["photo_urls", "video_urls", "audio_urls"] as const,
+    );
+    const path = optionalString(body, "path", { min: 1, max: 1024 });
+    if (!column || !path) {
       return NextResponse.json({ error: "INVALID_MEDIA_COLUMN" }, { status: 400 });
     }
     const result = await appendViewingMediaPath({
       viewingId: id,
       actor: user,
-      column: body.column,
-      path: body.path ?? "",
+      column,
+      path,
     });
     return NextResponse.json(result);
   } catch (error) {
+    if (error instanceof RequestValidationError) {
+      return NextResponse.json(validationErrorBody(error), { status: 400 });
+    }
     const message = error instanceof Error ? error.message : "MEDIA_APPEND_FAILED";
     const status =
       message === "FORBIDDEN"

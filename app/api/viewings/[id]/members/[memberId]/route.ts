@@ -4,7 +4,13 @@ import {
   revokeViewingMember,
   updateViewingMember,
 } from "@/lib/collaboration/server";
-import type { MemberRole } from "@/lib/collaboration";
+import {
+  assertAllowedKeys,
+  optionalEnum,
+  readJsonObject,
+  RequestValidationError,
+  validationErrorBody,
+} from "@/lib/http/validation";
 
 export const runtime = "nodejs";
 
@@ -22,18 +28,23 @@ export async function PATCH(request: Request, { params }: Context) {
     if (!user) {
       return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
     }
-    const body = (await request.json()) as { role?: MemberRole };
-    if (!body.role) {
+    const body = await readJsonObject(request);
+    assertAllowedKeys(body, ["role"]);
+    const role = optionalEnum(body, "role", ["editor", "commenter", "viewer"] as const);
+    if (!role) {
       return NextResponse.json({ error: "INVALID_ROLE" }, { status: 400 });
     }
     const member = await updateViewingMember({
       viewingId: id,
       memberId,
       actor: user,
-      role: body.role,
+      role,
     });
     return NextResponse.json({ member });
   } catch (error) {
+    if (error instanceof RequestValidationError) {
+      return NextResponse.json(validationErrorBody(error), { status: 400 });
+    }
     const message = error instanceof Error ? error.message : "UPDATE_FAILED";
     return NextResponse.json(
       { error: message },

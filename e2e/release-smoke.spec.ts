@@ -1,4 +1,9 @@
 import { expect, test } from "@playwright/test";
+import { isCoreProject } from "./helpers/baseline";
+
+test.beforeEach(async ({}, testInfo) => {
+  test.skip(!isCoreProject(testInfo), "Release smoke runs once per browser engine.");
+});
 
 test("guest local wizard renders with accessible controls", async ({ page }) => {
   await page.goto("/");

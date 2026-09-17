@@ -94,9 +94,22 @@ export function StepShare({
 
       <div className="rounded-[22px] bg-white border border-black/[0.05] shadow-[0_4px_20px_rgba(0,0,0,0.04)] p-4">
         <p className="text-[12px] font-[800] tracking-widest mb-2">{progressLabel}</p>
-        <div className="flex items-center gap-2 text-[13px]">
+        <div
+          className="flex items-center gap-2 text-[13px]"
+          role={
+            sessionUiStatus?.status === "failed" ||
+            sessionUiStatus?.status === "conflict"
+              ? "alert"
+              : "status"
+          }
+          aria-live="polite"
+          aria-atomic="true"
+        >
           {syncingCard ? (
-            <div className="w-4 h-4 border-2 border-black/20 border-t-black rounded-full animate-spin" />
+            <div
+              className="w-4 h-4 border-2 border-black/20 border-t-black rounded-full animate-spin"
+              aria-hidden="true"
+            />
           ) : (
             <span
               className={`w-2.5 h-2.5 rounded-full ${

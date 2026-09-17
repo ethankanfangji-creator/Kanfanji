@@ -88,7 +88,6 @@ export default function ComparePage({
       const url = `${window.location.origin}/c/${token}`;
       setShareUrl(url);
       await navigator.clipboard?.writeText(url);
-      alert(messages.compare.shareCopied);
     } catch (err) {
       setError(err instanceof Error ? err.message : messages.compare.error);
     } finally {
@@ -197,7 +196,12 @@ export default function ComparePage({
         </div>
 
         {shareUrl ? (
-          <div className="mb-4 rounded-xl bg-white border border-black/5 p-3 text-[11px] break-all">
+          <div
+            role="status"
+            aria-live="polite"
+            className="mb-4 rounded-xl bg-white border border-black/5 p-3 text-[11px] break-all"
+          >
+            <span className="sr-only">{messages.compare.shareCopied}</span>
             <p className="font-bold mb-1 inline-flex items-center gap-1">
               <Copy className="w-3.5 h-3.5" /> {labels.shareHint}
             </p>

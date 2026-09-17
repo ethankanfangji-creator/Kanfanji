@@ -1,6 +1,7 @@
 "use client";
 
 import type { SessionUiStatus } from "@/lib/sync";
+import { Banner } from "@/components/ui/primitives";
 
 type SyncUiMessages = {
   savedLocal: string;
@@ -40,15 +41,21 @@ export function SyncStatusBanner({
 
   const tone =
     status.status === "failed" || status.status === "conflict"
-      ? "bg-[#FEF2F2] border-[#FECACA] text-[#991B1B]"
+      ? "danger"
       : status.status === "synced"
-        ? "bg-[#F0FDF4] border-[#BBF7D0] text-[#166534]"
+        ? "success"
         : status.status === "syncing"
-          ? "bg-[#EFF6FF] border-[#BFDBFE] text-[#1D4ED8]"
-          : "bg-[#F8F4EF] border-black/10 text-[#6B7280]";
+          ? "info"
+          : "neutral";
 
   return (
-    <div className={`mb-4 rounded-[18px] border p-3 text-[12px] leading-[1.45] ${tone}`}>
+    <Banner
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      tone={tone}
+      className="mb-4 text-[12px]"
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="font-bold">{label}</p>
@@ -61,12 +68,12 @@ export function SyncStatusBanner({
             type="button"
             onClick={onRetry}
             disabled={busy}
-            className="shrink-0 h-8 px-3 rounded-full bg-black text-white text-[11px] font-bold disabled:opacity-50"
+            className="shrink-0 min-h-11 px-3 rounded-full bg-black text-white text-[12px] font-bold disabled:opacity-50"
           >
             {messages.retry}
           </button>
         ) : null}
       </div>
-    </div>
+    </Banner>
   );
 }

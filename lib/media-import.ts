@@ -5,6 +5,14 @@ export const MEDIA_IMPORT_LIMITS = {
 
 export type ImportedMediaKind = "photo" | "video";
 
+export function takeInputFiles(
+  input: Pick<HTMLInputElement, "files" | "value">,
+): File[] {
+  const files = Array.from(input.files ?? []);
+  input.value = "";
+  return files;
+}
+
 export function validateImportedMedia(file: File, kind: ImportedMediaKind): string | null {
   const expectedPrefix = kind === "photo" ? "image/" : "video/";
   if (!file.type.toLowerCase().startsWith(expectedPrefix)) {

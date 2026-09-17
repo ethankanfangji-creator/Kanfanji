@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import {
   AlertTriangle,
   Camera,
@@ -26,15 +26,21 @@ import { PermissionPreflight } from "@/components/media/PermissionPreflight";
 import { MediaPickerInputs } from "@/components/media/MediaPickerInputs";
 import { AudioNotePlayer } from "@/components/media/AudioNotePlayer";
 import { RecordingMarkerBar } from "@/components/media/RecordingMarkerBar";
+import {
+  selectSupportedAudioMimeType,
+  useMediaCapture,
+} from "@/components/media/useMediaCapture";
 import { FieldChecklistPanel } from "@/components/viewing-wizard/FieldChecklistPanel";
 import { PhotoAnnotator } from "@/components/viewing-wizard/PhotoAnnotator";
 import { StepSetup } from "@/components/viewing-wizard/StepSetup";
 import { StepShare } from "@/components/viewing-wizard/StepShare";
 import { WizardBottomNav, WizardStepper } from "@/components/viewing-wizard/WizardStepper";
+import { useViewingSyncController } from "@/components/viewing-wizard/useViewingSyncController";
 import { DecisionSummaryCard } from "@/components/share-card/DecisionSummaryCard";
 import { SharePrivacyCheck } from "@/components/share-card/SharePrivacyCheck";
 import { PdfExportButton } from "@/components/pdf/PdfExportButton";
 import { Dialog } from "@/components/ui/Dialog";
+import { LoginGateDialog } from "@/components/auth/LoginGateDialog";
 import { useI18n } from "@/components/I18nProvider";
 import {
   buildCardFromViewing,
@@ -89,7 +95,6 @@ import {
 } from "@/lib/field-capture";
 import {
   deleteMedia,
-  claimCanonicalGuestData,
   claimLegacyUnscopedDraft,
   discoverLegacyUnscopedDraft,
   emptyDraft,
@@ -111,20 +116,19 @@ import {
   type AiJob,
 } from "@/lib/draft-db";
 import { createSignedMediaUrl, extensionFor } from "@/lib/media";
-import { validateImportedMedia } from "@/lib/media-import";
+import { takeInputFiles, validateImportedMedia } from "@/lib/media-import";
 import {
-  createBrowserMediaPermissionAdapter,
   type CaptureKind,
   type MediaPermissionStatus,
 } from "@/lib/media-permissions";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 import {
-  claimGuestDrafts,
-  getSyncEngine,
+  auditViewingSessionBridge,
   resetSyncEngineSingleton,
   syncStatusToUi,
   type SessionUiStatus,
 } from "@/lib/sync";
+import { claimGuestViewingData } from "@/lib/auth/claim-guest-data";
 import {
   canEnterStep,
   canGenerateShareCard,
@@ -137,6 +141,10 @@ import {
   toDatetimeLocalValue,
   type WizardStep,
 } from "@/lib/viewing-wizard/readiness";
+import {
+  initialViewingDraftFormState,
+  viewingDraftFormReducer,
+} from "@/lib/viewing-wizard/draft-state";
 import type { User } from "@supabase/supabase-js";
 
 type Question = {
@@ -199,16 +207,48 @@ const FREE_VIEWING_LIMIT = 3;
 export function ClientPage() {
   const router = useRouter();
   const { locale, messages, t } = useI18n();
-  const [wizardStep, setWizardStep] = useState<WizardStep>(1);
-  const [address, setAddress] = useState("");
-  const [viewingAt, setViewingAt] = useState("");
-  const [unitLabel, setUnitLabel] = useState("");
-  const [priceLabel, setPriceLabel] = useState("");
-  const [layoutLabel, setLayoutLabel] = useState("");
-  const [areaLabel, setAreaLabel] = useState("");
-  const [managementFeeLabel, setManagementFeeLabel] = useState("");
-  const [listingUrl, setListingUrl] = useState("");
-  const [setupNotes, setSetupNotes] = useState("");
+  const { adapter: mediaPermissionAdapter } = useMediaCapture();
+  const [draftForm, dispatchDraftForm] = useReducer(
+    viewingDraftFormReducer,
+    initialViewingDraftFormState,
+  );
+  const draftFormTouchedRef = useRef(new Set<keyof typeof initialViewingDraftFormState>());
+  const {
+    wizardStep,
+    address,
+    viewingAt,
+    unitLabel,
+    priceLabel,
+    layoutLabel,
+    areaLabel,
+    managementFeeLabel,
+    listingUrl,
+    setupNotes,
+  } = draftForm;
+  const setWizardStep = (value: WizardStep) =>
+    dispatchDraftForm({ type: "setStep", value });
+  const setDraftField = (
+    field: Exclude<keyof typeof draftForm, "wizardStep">,
+    value: string,
+  ) => {
+    draftFormTouchedRef.current.add(field);
+    dispatchDraftForm({ type: "setField", field, value });
+  };
+  const hydrateDraftForm = useCallback((value: Partial<typeof draftForm>) => {
+    const untouched = { ...value };
+    for (const field of draftFormTouchedRef.current) delete untouched[field];
+    dispatchDraftForm({ type: "hydrate", value: untouched });
+  }, []);
+  const setAddress = (value: string) => setDraftField("address", value);
+  const setViewingAt = (value: string) => setDraftField("viewingAt", value);
+  const setUnitLabel = (value: string) => setDraftField("unitLabel", value);
+  const setPriceLabel = (value: string) => setDraftField("priceLabel", value);
+  const setLayoutLabel = (value: string) => setDraftField("layoutLabel", value);
+  const setAreaLabel = (value: string) => setDraftField("areaLabel", value);
+  const setManagementFeeLabel = (value: string) =>
+    setDraftField("managementFeeLabel", value);
+  const setListingUrl = (value: string) => setDraftField("listingUrl", value);
+  const setSetupNotes = (value: string) => setDraftField("setupNotes", value);
   const [textNoteDraft, setTextNoteDraft] = useState("");
   const [lookupError, setLookupError] = useState(false);
   const [captureError, setCaptureError] = useState(false);
@@ -258,7 +298,6 @@ export function ClientPage() {
   const markerCooldownRef = useRef(0);
   const liveMarkersRef = useRef<AudioMarker[]>([]);
   const captureLockRef = useRef<CaptureKind | null>(null);
-  const permissionAdapterRef = useRef(createBrowserMediaPermissionAdapter());
   const [clips, setClips] = useState<Clip[]>([]);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const photosRef = useRef<Photo[]>([]);
@@ -298,6 +337,10 @@ export function ClientPage() {
   const legacyClaimBlockedRef = useRef(false);
   const [freeCount, setFreeCount] = useState(0);
   const [isPro, setIsPro] = useState(false);
+  const { getEngine: getViewingSyncEngine } = useViewingSyncController({
+    userId: user?.id ?? null,
+    isPro,
+  });
   const clientUpdatedAtRef = useRef(new Date().toISOString());
   const autosaveTimer = useRef<number | null>(null);
   const draftHydratedRef = useRef(false);
@@ -461,7 +504,7 @@ export function ClientPage() {
       try {
         const draft = await getActiveDraft();
         if (draft?.localSessionId) draftSessionIdRef.current = draft.localSessionId;
-        const engine = await getSyncEngine({ isPro, userId: user.id });
+        const engine = await getViewingSyncEngine(user.id);
         const result = await engine.processQueue();
         if (cancelled) return;
         if (draftSessionIdRef.current) {
@@ -499,7 +542,7 @@ export function ClientPage() {
       if (!user) return;
       void (async () => {
         try {
-          const engine = await getSyncEngine({ isPro, userId: user.id });
+          const engine = await getViewingSyncEngine(user.id);
           await engine.processQueue();
           if (draftSessionIdRef.current) await refreshSessionUi(draftSessionIdRef.current);
         } catch (error) {
@@ -861,7 +904,7 @@ export function ClientPage() {
       return;
     }
     try {
-      const engine = await getSyncEngine({ isPro, userId: user?.id ?? null });
+      const engine = await getViewingSyncEngine();
       const ui = await engine.getSessionUiStatus(id);
       setSessionUiStatus(ui ?? syncStatusToUi(user ? "pending" : "local_only"));
     } catch {
@@ -974,7 +1017,7 @@ export function ClientPage() {
     options?: { openCard?: boolean },
     authenticatedUser: User | null = user,
   ) {
-    const engine = await getSyncEngine({ isPro, userId: authenticatedUser?.id ?? null });
+    const engine = await getViewingSyncEngine(authenticatedUser?.id ?? null);
     const sessionId = await ensureLocalSessionId();
     const mediaRows = await listMedia();
     const snap = draftSnapshotRef.current;
@@ -1007,6 +1050,16 @@ export function ClientPage() {
         durationSec: null,
       })),
     });
+    const bridgeAudit = auditViewingSessionBridge({
+      expectedSessionId: sessionId,
+      expectedAddress: snap.address.trim(),
+      expectedMediaIds: mediaRows.map((row) => row.id),
+      session: await engine.getSession(sessionId),
+      media: await engine.listSessionMedia(sessionId),
+    });
+    if (!bridgeAudit.ok) {
+      throw new Error(`本機草稿鏡像驗證失敗：${bridgeAudit.issues.join(", ")}`);
+    }
 
     if (!authenticatedUser) {
       await flushDraftToIdb({ localSessionId: sessionId, syncStatus: "local_only" });
@@ -1087,7 +1140,7 @@ export function ClientPage() {
     setSyncingCard(true);
     setSessionUiStatus(syncStatusToUi("syncing"));
     try {
-      const engine = await getSyncEngine({ isPro, userId: user.id });
+      const engine = await getViewingSyncEngine(user.id);
       await engine.retryFailed(draftSessionIdRef.current);
       const session = await engine.getSession(draftSessionIdRef.current);
       const ui = await engine.getSessionUiStatus(draftSessionIdRef.current);
@@ -1174,7 +1227,47 @@ export function ClientPage() {
         if (draft) {
           clientUpdatedAtRef.current = draft.clientUpdatedAt || new Date().toISOString();
           if (draft.localSessionId) draftSessionIdRef.current = draft.localSessionId;
-          if (draft.address) setAddress(draft.address);
+          hydrateDraftForm({
+            address: draft.address || "",
+            viewingAt:
+              draft.viewingAt ||
+              (typeof draft.propertyDraft?.viewingAt === "string"
+                ? draft.propertyDraft.viewingAt
+                : ""),
+            unitLabel:
+              draft.unitLabel ||
+              (typeof draft.propertyDraft?.unitLabel === "string"
+                ? draft.propertyDraft.unitLabel
+                : ""),
+            priceLabel:
+              draft.priceLabel ||
+              (typeof draft.propertyDraft?.priceLabel === "string"
+                ? draft.propertyDraft.priceLabel
+                : ""),
+            layoutLabel:
+              draft.layoutLabel ||
+              (typeof draft.propertyDraft?.layoutLabel === "string"
+                ? draft.propertyDraft.layoutLabel
+                : ""),
+            areaLabel:
+              typeof draft.propertyDraft?.areaLabel === "string"
+                ? draft.propertyDraft.areaLabel
+                : "",
+            managementFeeLabel:
+              typeof draft.propertyDraft?.managementFeeLabel === "string"
+                ? draft.propertyDraft.managementFeeLabel
+                : "",
+            listingUrl:
+              draft.listingUrl ||
+              (typeof draft.propertyDraft?.listingUrl === "string"
+                ? draft.propertyDraft.listingUrl
+                : ""),
+            setupNotes:
+              draft.setupNotes ||
+              (typeof draft.propertyDraft?.setupNotes === "string"
+                ? draft.propertyDraft.setupNotes
+                : ""),
+          });
           setTags(draft.tags ?? []);
           setMarketCode(draft.market ?? "CA");
           setIdentified(Boolean(draft.identified));
@@ -1199,52 +1292,6 @@ export function ClientPage() {
           if (draft.wizardStep === 1 || draft.wizardStep === 2 || draft.wizardStep === 3) {
             setWizardStep(draft.wizardStep);
           }
-          setViewingAt(
-            draft.viewingAt ||
-              (typeof draft.propertyDraft?.viewingAt === "string"
-                ? draft.propertyDraft.viewingAt
-                : ""),
-          );
-          setUnitLabel(
-            draft.unitLabel ||
-              (typeof draft.propertyDraft?.unitLabel === "string"
-                ? draft.propertyDraft.unitLabel
-                : ""),
-          );
-          setPriceLabel(
-            draft.priceLabel ||
-              (typeof draft.propertyDraft?.priceLabel === "string"
-                ? draft.propertyDraft.priceLabel
-                : ""),
-          );
-          setLayoutLabel(
-            draft.layoutLabel ||
-              (typeof draft.propertyDraft?.layoutLabel === "string"
-                ? draft.propertyDraft.layoutLabel
-                : ""),
-          );
-          setAreaLabel(
-            typeof draft.propertyDraft?.areaLabel === "string"
-              ? draft.propertyDraft.areaLabel
-              : "",
-          );
-          setManagementFeeLabel(
-            typeof draft.propertyDraft?.managementFeeLabel === "string"
-              ? draft.propertyDraft.managementFeeLabel
-              : "",
-          );
-          setListingUrl(
-            draft.listingUrl ||
-              (typeof draft.propertyDraft?.listingUrl === "string"
-                ? draft.propertyDraft.listingUrl
-                : ""),
-          );
-          setSetupNotes(
-            draft.setupNotes ||
-              (typeof draft.propertyDraft?.setupNotes === "string"
-                ? draft.propertyDraft.setupNotes
-                : ""),
-          );
           setFieldChecklist(
             ensureFieldChecklist(draft.fieldChecklist, messages.fieldChecklist.labels),
           );
@@ -1323,6 +1370,7 @@ export function ClientPage() {
     draftReloadGeneration,
     messages.fieldChecklist.labels,
     messages.photoTagLabels,
+    hydrateDraftForm,
   ]);
 
   // Lazy-create object URLs when user reaches capture step (thumbs first for photos).
@@ -1843,7 +1891,7 @@ export function ClientPage() {
       }
       return;
     }
-    permissionAdapterRef.current.release(audioStreamRef.current);
+    mediaPermissionAdapter.release(audioStreamRef.current);
     audioStreamRef.current = null;
     audioRecorderRef.current = null;
     setAudioState("idle");
@@ -1933,7 +1981,7 @@ export function ClientPage() {
   }
 
   async function beginAudioRecording() {
-    const adapter = permissionAdapterRef.current;
+    const adapter = mediaPermissionAdapter;
     if (!adapter.isMediaDevicesSupported() || !adapter.isMediaRecorderSupported()) {
       setPermissionBanner({
         status: "unsupported",
@@ -1972,13 +2020,7 @@ export function ClientPage() {
       const stream = result.stream;
       audioStreamRef.current = stream;
       audioChunksRef.current = [];
-      const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : MediaRecorder.isTypeSupported("audio/webm")
-          ? "audio/webm"
-          : MediaRecorder.isTypeSupported("audio/mp4")
-            ? "audio/mp4"
-            : "";
+      const mime = selectSupportedAudioMimeType(MediaRecorder.isTypeSupported);
       audioMimeRef.current = mime || "audio/webm";
       const recorder = mime
         ? new MediaRecorder(stream, { mimeType: mime })
@@ -2055,7 +2097,7 @@ export function ClientPage() {
       setSyncMessage(messages.permissions.busyElsewhere);
       return;
     }
-    const adapter = permissionAdapterRef.current;
+    const adapter = mediaPermissionAdapter;
     setPreflightKind(kind);
     setPreflightBusy(true);
     if (kind === "audio") {
@@ -2377,7 +2419,7 @@ export function ClientPage() {
     }
   }
 
-  function goToStep(target: WizardStep) {
+  async function goToStep(target: WizardStep) {
     const snap = {
       address,
       viewingAt,
@@ -2397,12 +2439,12 @@ export function ClientPage() {
     if (target === 2 && fieldChecklist.length === 0) {
       const seeded = ensureFieldChecklist([], messages.fieldChecklist.labels);
       setFieldChecklist(seeded);
-      void flushDraftToIdb({ wizardStep: target, fieldChecklist: seeded });
+      await flushDraftToIdb({ wizardStep: target, fieldChecklist: seeded });
       setWizardStep(target);
       return;
     }
+    await flushDraftToIdb({ wizardStep: target });
     setWizardStep(target);
-    void flushDraftToIdb({ wizardStep: target });
   }
 
   function addTextNote() {
@@ -2478,8 +2520,7 @@ export function ClientPage() {
       setUser(currentUser);
 
       if (currentUser) {
-        await claimGuestDrafts(currentUser.id);
-        await claimCanonicalGuestData(currentUser.id);
+        await claimGuestViewingData(currentUser.id);
         const [{ count }, { data: sub }] = await Promise.all([
           supabase
             .from("viewings")
@@ -2584,12 +2625,12 @@ export function ClientPage() {
   }
 
   async function onPhotos(event: React.ChangeEvent<HTMLInputElement>) {
-    const files = event.target.files;
-    event.target.value = "";
+    // Safari exposes a live FileList that is emptied when the input is reset.
+    const files = takeInputFiles(event.currentTarget);
     captureLockRef.current = null;
-    if (!files) return;
+    if (files.length === 0) return;
 
-    const incomingFiles = Array.from(files)
+    const incomingFiles = files
       .filter((file) => {
         const validationError = validateImportedMedia(file, "photo");
         if (validationError) setSyncMessage(mediaImportError(validationError));
@@ -3002,7 +3043,7 @@ export function ClientPage() {
             .filter(Boolean)
             .join("\n"),
       );
-      alert(link ? messages.card.copyLink : messages.card.copy);
+      setSyncMessage(link ? messages.card.copyLink : messages.card.copy);
       return;
     }
 
@@ -3012,10 +3053,10 @@ export function ClientPage() {
     }
     if (link) {
       void navigator.clipboard?.writeText(link);
-      alert(messages.card.copyLink);
+      setSyncMessage(messages.card.copyLink);
       return;
     }
-    alert(messages.card.needSync);
+    setSyncMessage(messages.card.needSync);
   }
 
   function selectedLines(items: DecisionSummarySnapshot["pros"]) {
@@ -3089,8 +3130,8 @@ export function ClientPage() {
   }));
 
   return (
-    <div className="min-h-screen w-full flex justify-center bg-[#FDF6F0] text-[#1A1A1A]">
-      <div className="w-full max-w-[420px] px-4 pt-6 pb-36">
+    <div className="min-h-screen w-full flex justify-center bg-[var(--color-canvas,#FDF6F0)] text-[var(--color-text,#1A1A1A)]">
+      <div className="w-full max-w-[760px] px-4 pt-[max(24px,env(safe-area-inset-top))] pb-36 sm:px-6 lg:px-8">
         {preflightKind ? (
           <PermissionPreflight
             kind={preflightKind}
@@ -3128,8 +3169,8 @@ export function ClientPage() {
           onSave={() => void savePhotoAnnotation()}
           onCancel={() => setAnnotatingPhotoId(null)}
         />
-        <div className="flex items-start justify-between mb-5">
-          <div>
+        <div className="flex flex-col gap-4 mb-5 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
             <h1 className="text-[20px] font-[800] tracking-tight leading-[1.1] flex flex-wrap items-center gap-2">
               <span>
                 {messages.brand.name}
@@ -3153,12 +3194,12 @@ export function ClientPage() {
               </p>
             )}
           </div>
-          <div className="flex flex-col items-end gap-2 mt-1.5 shrink-0">
-            <div className="flex items-center gap-2">
+          <div className="flex flex-col items-start gap-2 sm:items-end sm:mt-1.5">
+            <div className="flex flex-wrap items-center gap-2">
               <LanguageSwitcher />
               <Link
                 href="/viewings"
-                className="h-8 px-3 rounded-full bg-white border border-black/10 text-[11px] font-bold text-[#1A1A1A] inline-flex items-center gap-1.5"
+                className="min-h-11 px-3 rounded-full bg-white border border-black/10 text-[12px] font-bold text-[#1A1A1A] inline-flex items-center gap-1.5"
               >
                 <List className="w-3.5 h-3.5" /> {messages.nav.records}
               </Link>
@@ -3236,9 +3277,15 @@ export function ClientPage() {
           onRetry={() => void retrySyncQueue()}
         />
 
-        <WizardStepper steps={stepStatuses} onSelect={(step) => goToStep(step)} />
+        {draftReady ? (
+          <WizardStepper steps={stepStatuses} onSelect={(step) => void goToStep(step)} />
+        ) : (
+          <p role="status" aria-live="polite" className="py-8 text-center text-sm text-[#6B7280]">
+            {messages.loginGate.processing}
+          </p>
+        )}
 
-        {wizardStep === 1 && (
+        {draftReady && wizardStep === 1 && (
           <StepSetup
             messages={messages}
             address={address}
@@ -3269,7 +3316,7 @@ export function ClientPage() {
           />
         )}
 
-                {wizardStep === 2 && (
+                {draftReady && wizardStep === 2 && (
           <>
         <div className="bg-white rounded-[22px] border border-black/[0.05] shadow-[0_4px_20px_rgba(0,0,0,0.04)] p-4 mb-4">
             <button
@@ -3518,6 +3565,11 @@ export function ClientPage() {
                     type="button"
                     onClick={() => void openCapturePreflight("audio")}
                     disabled={audioState === "processing"}
+                    aria-label={
+                      audioState === "processing"
+                        ? messages.audio.processing
+                        : messages.audio.idle
+                    }
                     className={`w-[88px] h-[88px] rounded-full flex items-center justify-center shadow-[0_8px_24px_rgba(59,130,246,0.35)] active:scale-95 transition-all disabled:opacity-70 ${
                       audioState === "processing" ? "bg-[#6366F1]" : "bg-[#3B82F6]"
                     }`}
@@ -3794,7 +3846,7 @@ export function ClientPage() {
                   type="button"
                   aria-label={messages.photos.editAnnotation}
                   onClick={() => openPhotoAnnotator(photo)}
-                  className="absolute top-1 left-1 h-7 max-w-[70%] truncate px-2 rounded-full bg-black/70 text-white text-[9px] font-bold"
+                  className="absolute top-1 left-1 min-h-11 max-w-[70%] truncate px-3 rounded-full bg-black/75 text-white text-[11px] font-bold"
                 >
                   {messages.photos.editAnnotation}
                 </button>
@@ -3802,7 +3854,7 @@ export function ClientPage() {
                   type="button"
                   aria-label="Remove photo"
                   onClick={() => void removePhoto(photo.id)}
-                  className="absolute top-1 right-1 w-7 h-7 rounded-full bg-black/70 text-white flex items-center justify-center"
+                  className="absolute top-1 right-1 w-11 h-11 rounded-full bg-black/75 text-white flex items-center justify-center"
                 >
                   <X className="w-3 h-3" aria-hidden />
                 </button>
@@ -3897,8 +3949,10 @@ export function ClientPage() {
           </div>
           <div className="mt-5 flex flex-col items-center">
             <button
+              type="button"
               onClick={openNativeCamera}
               disabled={clips.length >= 4}
+              aria-label={messages.video.start}
               className="w-[88px] h-[88px] rounded-full flex flex-col items-center justify-center bg-[#EF4444] shadow-[0_8px_24px_rgba(239,68,68,0.35)] active:scale-95 transition-all disabled:opacity-40"
             >
               <Video className="w-7 h-7 text-white" />
@@ -3958,7 +4012,7 @@ export function ClientPage() {
           </>
         )}
 
-        {wizardStep === 3 && (
+        {draftReady && wizardStep === 3 && (
           <StepShare
             checklist={shareChecklist}
             checklistLabels={{
@@ -4000,7 +4054,7 @@ export function ClientPage() {
             onCopyShareLink={() => {
               if (!shareUrl) return;
               void navigator.clipboard?.writeText(shareUrl);
-              alert(messages.card.copyLink);
+              setSyncMessage(messages.card.copyLink);
             }}
             onShareLinkChanged={({ link, urlPath }) => {
               setShareLink(link);
@@ -4025,7 +4079,7 @@ export function ClientPage() {
           />
         )}
 
-        <WizardBottomNav
+        {draftReady ? <WizardBottomNav
           backLabel={messages.wizard.back}
           nextLabel={
             wizardStep === 3
@@ -4049,7 +4103,7 @@ export function ClientPage() {
                 ? !isStep1Complete({ address, viewingAt })
                 : false
           }
-        />
+        /> : null}
 
         {showAiConsent && (
           <Dialog
@@ -4077,79 +4131,23 @@ export function ClientPage() {
           </Dialog>
         )}
 
-        {showLoginGate && (
-          <Dialog
-            open
-            onClose={() => setShowLoginGate(false)}
-            title={messages.loginGate.title}
-            description={messages.loginGate.body}
-            backdropClassName="z-50 backdrop-blur-[2px] overflow-auto"
-            className="relative"
-          >
-                <button
-                  type="button"
-                  aria-label={messages.card.close}
-                  onClick={() => setShowLoginGate(false)}
-                  className="absolute right-4 top-4 min-w-11 min-h-11 rounded-full bg-[#F5F3F0] flex items-center justify-center"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-
-              <form onSubmit={(event) => void handleLoginForCard(event)} className="mt-4 space-y-3">
-                <label className="block text-[12px] font-bold">
-                  {messages.loginGate.email}
-                  <input
-                    type="email"
-                    required
-                    autoComplete="email"
-                    value={loginEmail}
-                    onChange={(event) => setLoginEmail(event.target.value)}
-                    className="mt-1.5 w-full h-[44px] px-4 rounded-full bg-[#F8F4EF] border border-black/5 text-[14px] outline-none"
-                  />
-                </label>
-                <label className="block text-[12px] font-bold">
-                  {messages.loginGate.password}
-                  <input
-                    type="password"
-                    required
-                    minLength={6}
-                    autoComplete={loginMode === "signin" ? "current-password" : "new-password"}
-                    value={loginPassword}
-                    onChange={(event) => setLoginPassword(event.target.value)}
-                    className="mt-1.5 w-full h-[44px] px-4 rounded-full bg-[#F8F4EF] border border-black/5 text-[14px] outline-none"
-                  />
-                </label>
-                <button
-                  type="submit"
-                  disabled={syncingCard}
-                  className="w-full h-[46px] rounded-full bg-black text-white text-[14px] font-bold disabled:opacity-60"
-                >
-                  {syncingCard
-                    ? messages.loginGate.processing
-                    : loginMode === "signin"
-                      ? messages.loginGate.submitSignIn
-                      : messages.loginGate.submitSignUp}
-                </button>
-              </form>
-
-              {loginError && (
-                <p role="alert" className="mt-3 text-[12px] text-[#991B1B] leading-[1.4]">{loginError}</p>
-              )}
-
-              <button
-                type="button"
-                onClick={() => {
-                  setLoginMode((current) => (current === "signin" ? "signup" : "signin"));
-                  setLoginError("");
-                }}
-                className="mt-4 min-h-11 text-[12px] font-medium text-[#6B7280]"
-              >
-                {loginMode === "signin"
-                  ? messages.loginGate.switchToSignUp
-                  : messages.loginGate.switchToSignIn}
-              </button>
-          </Dialog>
-        )}
+        <LoginGateDialog
+          open={showLoginGate}
+          copy={{ ...messages.loginGate, close: messages.card.close }}
+          email={loginEmail}
+          password={loginPassword}
+          mode={loginMode}
+          error={loginError}
+          busy={syncingCard}
+          onEmailChange={setLoginEmail}
+          onPasswordChange={setLoginPassword}
+          onModeChange={(mode) => {
+            setLoginMode(mode);
+            setLoginError("");
+          }}
+          onSubmit={(event) => void handleLoginForCard(event)}
+          onClose={() => setShowLoginGate(false)}
+        />
 
         {showPaywall && (
           <Dialog

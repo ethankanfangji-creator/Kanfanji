@@ -58,4 +58,19 @@ describe("Dialog", () => {
     const results = await axe.run(container);
     expect(results.violations).toEqual([]);
   });
+
+  it("portals the dialog, locks scrolling, and hides background content", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<Harness />);
+    await user.click(screen.getByRole("button", { name: "Open" }));
+
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(screen.getByRole("dialog").closest("[data-dialog-portal]")).toBeInTheDocument();
+    expect(container).toHaveAttribute("aria-hidden", "true");
+    expect(document.body.style.overflow).toBe("hidden");
+
+    await user.keyboard("{Escape}");
+    expect(container).not.toHaveAttribute("aria-hidden");
+    expect(document.body.style.overflow).toBe("");
+  });
 });

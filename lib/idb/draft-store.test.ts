@@ -9,6 +9,7 @@ import {
   emptyDraft,
   enforceMediaQuota,
   getActiveDraft,
+  getCurrentSessionPointer,
   getMedia,
   listMedia,
   putMedia,
@@ -82,6 +83,19 @@ afterEach(async () => {
 });
 
 describe("typed IndexedDB durability", () => {
+  it("writes and clears the additive current-session pointer without removing the draft", async () => {
+    const saved = await putActiveDraft(
+      emptyDraft({ localSessionId: "session-pointer", address: "Pointer home" }),
+    );
+    expect(saved.ok).toBe(true);
+    expect(await getCurrentSessionPointer()).toBe("session-pointer");
+    expect((await getActiveDraft())?.address).toBe("Pointer home");
+
+    await clearActiveDraft();
+    expect(await getCurrentSessionPointer()).toBeNull();
+    expect(await getActiveDraft()).toBeNull();
+  });
+
   it("upgrades a v1 database additively and keeps its legacy draft discoverable", async () => {
     await seedV1LegacyDraft();
     setPersistenceAccountScope("user-1");

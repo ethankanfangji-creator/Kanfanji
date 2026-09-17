@@ -1,6 +1,17 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { updateViewingWithRevision } from "@/lib/collaboration/server";
+import {
+  assertAllowedKeys,
+  optionalArray,
+  optionalEnum,
+  optionalObject,
+  optionalString,
+  optionalStringArray,
+  readJsonObject,
+  RequestValidationError,
+  validationErrorBody,
+} from "@/lib/http/validation";
 
 export const runtime = "nodejs";
 
@@ -26,7 +37,43 @@ export async function PATCH(
         { status: 428 },
       );
     }
-    const patch = (await request.json()) as Record<string, unknown>;
+    const body = await readJsonObject(request);
+    assertAllowedKeys(body, [
+      "address",
+      "tags",
+      "market",
+      "questions",
+      "notes",
+      "pros",
+      "risks",
+      "property",
+    ]);
+    const patch = {
+      ...(body.address !== undefined
+        ? { address: optionalString(body, "address", { min: 1, max: 500 }) }
+        : {}),
+      ...(body.tags !== undefined
+        ? { tags: optionalStringArray(body, "tags", { maxItems: 50, maxLength: 100 }) }
+        : {}),
+      ...(body.market !== undefined
+        ? { market: optionalEnum(body, "market", ["CA", "TH", "OTHER"] as const) }
+        : {}),
+      ...(body.questions !== undefined
+        ? { questions: optionalArray(body, "questions", { maxItems: 500 }) }
+        : {}),
+      ...(body.notes !== undefined
+        ? { notes: optionalArray(body, "notes", { maxItems: 1000 }) }
+        : {}),
+      ...(body.pros !== undefined
+        ? { pros: optionalStringArray(body, "pros", { maxItems: 200, maxLength: 2000 }) }
+        : {}),
+      ...(body.risks !== undefined
+        ? { risks: optionalStringArray(body, "risks", { maxItems: 200, maxLength: 2000 }) }
+        : {}),
+      ...(body.property !== undefined
+        ? { property: optionalObject(body, "property") }
+        : {}),
+    };
     const result = await updateViewingWithRevision({
       viewingId: id,
       actor: user,
@@ -37,6 +84,9 @@ export async function PATCH(
       headers: { ETag: `"${result.revision}"` },
     });
   } catch (error) {
+    if (error instanceof RequestValidationError) {
+      return NextResponse.json(validationErrorBody(error), { status: 400 });
+    }
     const message = error instanceof Error ? error.message : "UPDATE_FAILED";
     if (message === "REVISION_CONFLICT") {
       const latest = (error as Error & {

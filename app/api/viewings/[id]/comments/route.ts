@@ -4,6 +4,14 @@ import {
   addViewingComment,
   getCollaborationOverview,
 } from "@/lib/collaboration/server";
+import {
+  assertAllowedKeys,
+  optionalObject,
+  optionalString,
+  readJsonObject,
+  RequestValidationError,
+  validationErrorBody,
+} from "@/lib/http/validation";
 
 export const runtime = "nodejs";
 
@@ -40,18 +48,22 @@ export async function POST(request: Request, { params }: Context) {
     if (!user) {
       return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
     }
-    const body = (await request.json()) as {
-      body?: string;
-      anchor?: Record<string, unknown> | null;
-    };
+    const body = await readJsonObject(request);
+    assertAllowedKeys(body, ["body", "anchor"]);
+    const commentBody = optionalString(body, "body", { min: 1, max: 5000 }) ?? "";
+    const anchor =
+      body.anchor === null ? null : optionalObject(body, "anchor");
     const comment = await addViewingComment({
       viewingId: id,
       actor: user,
-      body: body.body ?? "",
-      anchor: body.anchor,
+      body: commentBody,
+      anchor,
     });
     return NextResponse.json({ comment }, { status: 201 });
   } catch (error) {
+    if (error instanceof RequestValidationError) {
+      return NextResponse.json(validationErrorBody(error), { status: 400 });
+    }
     const message = error instanceof Error ? error.message : "COMMENT_FAILED";
     return NextResponse.json(
       { error: message },

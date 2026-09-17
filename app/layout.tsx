@@ -26,7 +26,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="min-h-full">
         <I18nProvider>
           <OfflineAppShell />
-          {children}
+          <main id="main-content">{children}</main>
         </I18nProvider>
       </body>
     </html>

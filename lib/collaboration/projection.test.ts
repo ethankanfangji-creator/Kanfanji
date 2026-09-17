@@ -30,6 +30,22 @@ const row = {
 };
 
 describe("role-aware viewing projection", () => {
+  it.each([
+    ["viewer", false, false, false],
+    ["commenter", true, true, false],
+    ["editor", true, true, false],
+    ["owner", true, true, true],
+  ] as const)(
+    "enforces the %s data capability matrix",
+    (role, canReadNotes, canReadAudio, canReadOwnerFields) => {
+      const dto = projectViewingForRole(row, role);
+      expect(Object.hasOwn(dto, "notes")).toBe(canReadNotes);
+      expect(Object.hasOwn(dto, "audio_urls")).toBe(canReadAudio);
+      expect(Object.hasOwn(dto, "share_token")).toBe(canReadOwnerFields);
+      expect(dto.role).toBe(role);
+    },
+  );
+
   it("gives viewers only the explicit safe allowlist", () => {
     const dto = projectViewingForRole(row, "viewer");
     expect(dto.address).toBe("1 Main");

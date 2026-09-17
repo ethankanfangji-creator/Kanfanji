@@ -1,15 +1,35 @@
 @import "tailwindcss";
 
+:root {
+  --color-canvas: #fdf6f0;
+  --color-surface: #ffffff;
+  --color-text: #1a1a1a;
+  --color-text-muted: #6b7280;
+  --color-focus: #2563eb;
+  --radius-card: 1.375rem;
+  --radius-control: 1rem;
+  --shadow-card: 0 4px 20px rgb(0 0 0 / 4%);
+  --space-page-inline: 1rem;
+}
+
 body {
   margin: 0;
   min-height: 100%;
-  background: #fdf6f0;
-  color: #1a1a1a;
+  background: var(--color-canvas);
+  color: var(--color-text);
 }
 
 :where(a, button, input, select, textarea, [tabindex]):focus-visible {
-  outline: 3px solid #2563eb;
+  outline: 3px solid var(--color-focus);
   outline-offset: 3px;
+}
+
+@media (max-width: 639px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

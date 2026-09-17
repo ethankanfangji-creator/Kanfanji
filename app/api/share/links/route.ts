@@ -8,6 +8,14 @@ import {
 import type { CreateShareLinkRequest } from "@/lib/share-access/types";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { MAX_SHARE_PASSWORD_LENGTH } from "@/lib/share-access/rate-limit";
+import {
+  assertAllowedKeys,
+  optionalEnum,
+  optionalString,
+  readJsonObject,
+  RequestValidationError,
+  validationErrorBody,
+} from "@/lib/http/validation";
 
 export const runtime = "nodejs";
 
@@ -46,10 +54,26 @@ export async function POST(req: Request) {
     if (!user) {
       return NextResponse.json({ error: "請先登入" }, { status: 401 });
     }
-    const body = (await req.json()) as CreateShareLinkRequest;
-    if (!body.viewingId?.trim()) {
-      return NextResponse.json({ error: "缺少 viewingId" }, { status: 400 });
-    }
+    const raw = await readJsonObject(req);
+    assertAllowedKeys(raw, ["viewingId", "expiresAt", "password", "capability"]);
+    const body: CreateShareLinkRequest = {
+      viewingId: optionalString(raw, "viewingId", { min: 1, max: 128 }) ?? "",
+      ...(Object.hasOwn(raw, "expiresAt")
+        ? { expiresAt: optionalString(raw, "expiresAt", { max: 64, nullable: true }) }
+        : {}),
+      ...(Object.hasOwn(raw, "password")
+        ? {
+            password: optionalString(raw, "password", {
+              trim: false,
+              max: MAX_SHARE_PASSWORD_LENGTH,
+              nullable: true,
+            }),
+          }
+        : {}),
+      ...(Object.hasOwn(raw, "capability")
+        ? { capability: optionalEnum(raw, "capability", ["read"] as const) }
+        : {}),
+    };
     if (
       body.password != null &&
       body.password !== "" &&
@@ -68,6 +92,9 @@ export async function POST(req: Request) {
     );
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
+    if (error instanceof RequestValidationError) {
+      return NextResponse.json(validationErrorBody(error), { status: 400 });
+    }
     const message = error instanceof Error ? error.message : "建立分享連結失敗";
     const status = message === "VIEWING_NOT_FOUND" ? 404 : 500;
     return NextResponse.json({ error: message }, { status });

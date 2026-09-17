@@ -8,6 +8,13 @@ type StepMeta = {
   status: StepUiStatus;
 };
 
+const STATUS_LABELS: Record<StepUiStatus, string> = {
+  active: "目前步驟",
+  completed: "已完成",
+  error: "需要處理",
+  empty: "尚未開始",
+};
+
 export function WizardStepper({
   steps,
   onSelect,
@@ -29,6 +36,7 @@ export function WizardStepper({
                 type="button"
                 disabled={!clickable}
                 onClick={() => onSelect(item.step)}
+                aria-current={item.status === "active" ? "step" : undefined}
                 className={`w-full min-h-[52px] rounded-2xl border px-2 py-2 text-left transition active:scale-[0.98] disabled:opacity-50 ${toneClass(item.status)}`}
               >
                 <p className="text-[10px] font-bold tracking-widest opacity-70">
@@ -37,6 +45,9 @@ export function WizardStepper({
                 <p className="text-[12px] font-bold leading-[1.25] mt-0.5 line-clamp-2">
                   {item.label}
                 </p>
+                <span className="mt-1 block text-[10px] font-medium opacity-80">
+                  {STATUS_LABELS[item.status]}
+                </span>
               </button>
             </li>
           );

@@ -4,8 +4,10 @@ import { getMedia } from "@/lib/idb/draft-store";
 import { selectedPhotos, type DecisionSummarySnapshot } from "@/lib/share-card";
 import type { PdfPhotoSource, PreparedPdfPhoto } from "./types";
 
-const MAX_EDGE = 1600;
-const JPEG_QUALITY = 0.82;
+// 1024 px still exceeds 260 DPI at the rendered photo width while keeping
+// iOS Safari below its canvas/PDF memory pressure threshold for five photos.
+const MAX_EDGE = 1024;
+const JPEG_QUALITY = 0.72;
 
 export class PdfImagePreparationError extends Error {
   readonly photoIds: string[];
@@ -28,8 +30,10 @@ function readAsDataUrl(blob: Blob): Promise<string> {
 
 async function normalizedImageDataUrl(blob: Blob): Promise<string> {
   const objectUrl = URL.createObjectURL(blob);
+  let image: HTMLImageElement | null = null;
+  let canvas: HTMLCanvasElement | null = null;
   try {
-    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    image = await new Promise<HTMLImageElement>((resolve, reject) => {
       const element = new Image();
       element.onload = () => resolve(element);
       element.onerror = () => reject(new Error("IMAGE_DECODE_FAILED"));
@@ -38,16 +42,17 @@ async function normalizedImageDataUrl(blob: Blob): Promise<string> {
     const scale = Math.min(1, MAX_EDGE / Math.max(image.naturalWidth, image.naturalHeight));
     const width = Math.max(1, Math.round(image.naturalWidth * scale));
     const height = Math.max(1, Math.round(image.naturalHeight * scale));
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext("2d");
+    const activeCanvas = document.createElement("canvas");
+    canvas = activeCanvas;
+    activeCanvas.width = width;
+    activeCanvas.height = height;
+    const context = activeCanvas.getContext("2d");
     if (!context) throw new Error("CANVAS_UNAVAILABLE");
     context.fillStyle = "#ffffff";
     context.fillRect(0, 0, width, height);
     context.drawImage(image, 0, 0, width, height);
     const output = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob(
+      activeCanvas.toBlob(
         (value) => (value ? resolve(value) : reject(new Error("IMAGE_ENCODE_FAILED"))),
         "image/jpeg",
         JPEG_QUALITY,
@@ -55,6 +60,11 @@ async function normalizedImageDataUrl(blob: Blob): Promise<string> {
     });
     return readAsDataUrl(output);
   } finally {
+    if (image) image.src = "";
+    if (canvas) {
+      canvas.width = 1;
+      canvas.height = 1;
+    }
     URL.revokeObjectURL(objectUrl);
   }
 }

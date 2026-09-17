@@ -2,6 +2,14 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { createViewingInvite } from "@/lib/collaboration/server";
 import type { MemberRole } from "@/lib/collaboration";
+import {
+  assertAllowedKeys,
+  optionalEnum,
+  optionalString,
+  readJsonObject,
+  RequestValidationError,
+  validationErrorBody,
+} from "@/lib/http/validation";
 
 export const runtime = "nodejs";
 
@@ -18,17 +26,22 @@ export async function POST(
     if (!user) {
       return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
     }
-    const body = (await request.json()) as {
-      email?: string;
-      role?: MemberRole;
-      expiresAt?: string | null;
-    };
+    const body = await readJsonObject(request);
+    assertAllowedKeys(body, ["email", "role", "expiresAt"]);
+    const email = optionalString(body, "email", { min: 3, max: 320 }) ?? "";
+    const role =
+      optionalEnum(body, "role", ["editor", "commenter", "viewer"] as const) ??
+      ("viewer" as MemberRole);
+    const expiresAt = optionalString(body, "expiresAt", {
+      max: 64,
+      nullable: true,
+    });
     const result = await createViewingInvite({
       viewingId: id,
       actor: user,
-      email: body.email ?? "",
-      role: body.role ?? "viewer",
-      expiresAt: body.expiresAt,
+      email,
+      role,
+      expiresAt,
     });
     const siteUrl =
       process.env.NEXT_PUBLIC_SITE_URL || new URL(request.url).origin;
@@ -40,6 +53,9 @@ export async function POST(
       { status: 201 },
     );
   } catch (error) {
+    if (error instanceof RequestValidationError) {
+      return NextResponse.json(validationErrorBody(error), { status: 400 });
+    }
     const message = error instanceof Error ? error.message : "INVITE_FAILED";
     const status =
       message === "FORBIDDEN"

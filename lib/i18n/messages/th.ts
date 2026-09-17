@@ -43,6 +43,12 @@ const th: Messages = {
     textNotesAdd: "เพิ่มบันทึก",
     editCard: "แก้ไขการ์ด",
     saveEdits: "เสร็จสิ้น",
+    addressSwitchTitle: "เริ่มบันทึกดูบ้านใหม่ไหม?",
+    addressSwitchBody:
+      "มีบันทึกที่กำลังทำอยู่ ก่อนยืนยันที่อยู่ใหม่ ให้เลือกว่าจะจัดการบันทึกเดิมอย่างไร (จะไม่ลบบันทึกเก่า)",
+    addressSwitchSaveAndNew: "บันทึกปัจจุบันแล้วเริ่มใหม่",
+    addressSwitchDiscardAndNew: "เริ่มใหม่โดยไม่บันทึกปัจจุบัน",
+    addressSwitchCancel: "ยกเลิก",
   },
   setup: {
     title: "สร้างรายการดูบ้านใหม่",
@@ -65,6 +71,19 @@ const th: Messages = {
     identified: "พบแล้ว",
     autofilledHint: "เติมจากที่อยู่แล้ว แก้ไขได้",
     openDataPrefix: "Open Data: ",
+    photoMetaImport: "อ่าน EXIF จากรูป (ไม่บังคับ)",
+    photoMetaHint: "อ่าน metadata ในรูปเท่านั้น ไม่ได้รู้จำที่อยู่จากภาพ",
+    photoMetaReading: "กำลังอ่าน metadata ของรูป…",
+    photoMetaNoGps: "รูปนี้ไม่มี GPS metadata ที่ใช้ได้",
+    photoMetaUnsupported: "อ่าน JPEG EXIF metadata จากไฟล์นี้ไม่ได้",
+    photoMetaError: "อ่าน metadata ของรูปไม่สำเร็จ",
+    photoMetaGpsPrivacyTitle: "ใช้ GPS จากรูปนี้ไหม?",
+    photoMetaGpsPrivacyBody:
+      "รูปนี้มีพิกัด GPS จะส่งเฉพาะพิกัดเพื่อแนะนำที่อยู่ ไม่ได้อัปโหลดรูปไปรู้จำภาพ คุณปฏิเสธได้",
+    photoMetaGpsAccept: "ใช้ GPS แนะนำที่อยู่",
+    photoMetaGpsRefuse: "ปฏิเสธ",
+    photoMetaGpsRefused: "ปฏิเสธการใช้ GPS metadata แล้ว",
+    photoMetaGpsApplied: "แนะนำที่อยู่จาก EXIF GPS แล้ว แก้ไขได้",
   },
   bank: {
     title: "คลังคำถาม QUESTION BANK",

@@ -149,6 +149,13 @@ export type ActiveDraftBridgeInput = {
     durationSec?: number | null;
   }>;
   isPro?: boolean;
+  workflowStatus?:
+    | "draft"
+    | "collecting"
+    | "ready_to_generate"
+    | "generating"
+    | "generated"
+    | "abandoned";
 };
 
 export type SyncedSessionView = Pick<

@@ -87,6 +87,7 @@ describe("UI accessibility foundations", () => {
         onListingUrlChange={vi.fn()}
         setupNotes=""
         onSetupNotesChange={vi.fn()}
+        onApplyExifGps={vi.fn(async () => undefined)}
       />,
     );
 
@@ -103,6 +104,9 @@ describe("UI accessibility foundations", () => {
 
     await user.type(screen.getByLabelText("Unit"), "12A");
     expect(screen.getByLabelText("Unit")).toHaveAttribute("maxlength", "80");
+    expect(
+      screen.getByRole("button", { name: /Read EXIF from photo/i }),
+    ).toBeVisible();
   });
 });
 
@@ -114,6 +118,18 @@ const setupMessages: StepSetupMessages = {
     identified: "Identified",
     autofilledHint: "Auto-filled from address — you can edit",
     openDataPrefix: "Open data: ",
+    photoMetaImport: "Read EXIF from photo (optional)",
+    photoMetaHint: "Reads embedded photo metadata only",
+    photoMetaReading: "Reading photo metadata…",
+    photoMetaNoGps: "No GPS metadata",
+    photoMetaUnsupported: "Unsupported file",
+    photoMetaError: "Metadata read failed",
+    photoMetaGpsPrivacyTitle: "Use GPS from this photo?",
+    photoMetaGpsPrivacyBody: "Coordinates only; photo is not uploaded for recognition.",
+    photoMetaGpsAccept: "Use GPS",
+    photoMetaGpsRefuse: "Refuse",
+    photoMetaGpsRefused: "GPS refused",
+    photoMetaGpsApplied: "Suggested from EXIF GPS",
   },
   setup: {
     title: "Create a new viewing",

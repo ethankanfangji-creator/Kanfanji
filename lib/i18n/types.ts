@@ -41,6 +41,11 @@ export type Messages = {
     textNotesAdd: string;
     editCard: string;
     saveEdits: string;
+    addressSwitchTitle: string;
+    addressSwitchBody: string;
+    addressSwitchSaveAndNew: string;
+    addressSwitchDiscardAndNew: string;
+    addressSwitchCancel: string;
   };
   setup: {
     title: string;
@@ -62,6 +67,18 @@ export type Messages = {
     identified: string;
     autofilledHint: string;
     openDataPrefix: string;
+    photoMetaImport: string;
+    photoMetaHint: string;
+    photoMetaReading: string;
+    photoMetaNoGps: string;
+    photoMetaUnsupported: string;
+    photoMetaError: string;
+    photoMetaGpsPrivacyTitle: string;
+    photoMetaGpsPrivacyBody: string;
+    photoMetaGpsAccept: string;
+    photoMetaGpsRefuse: string;
+    photoMetaGpsRefused: string;
+    photoMetaGpsApplied: string;
   };
   bank: {
     title: string;

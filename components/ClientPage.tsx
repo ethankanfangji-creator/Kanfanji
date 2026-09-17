@@ -103,6 +103,7 @@ import {
   listMedia,
   putActiveDraft,
   putMedia,
+  clearActiveDraft,
   requirePersistence,
   saveBlobAsMedia,
   setPersistenceAccountScope,
@@ -145,6 +146,12 @@ import {
   mergeAddressLookupPropertyDraft,
   resolveLookupDisplayAddress,
 } from "@/lib/viewing-wizard/address-autofill";
+import {
+  deriveWorkflowStatus,
+  normalizeWorkflowStatus,
+  shouldPromptAddressSwitch,
+  type ViewingWorkflowStatus,
+} from "@/lib/viewing-wizard/workflow";
 import {
   initialViewingDraftFormState,
   viewingDraftFormReducer,
@@ -351,6 +358,19 @@ export function ClientPage() {
   const persistGenerationRef = useRef(0);
   const notesRef = useRef<AudioNote[]>([]);
   const draftSessionIdRef = useRef<string | null>(null);
+  const committedAddressRef = useRef("");
+  const [workflowStatus, setWorkflowStatus] = useState<ViewingWorkflowStatus>("draft");
+  const [pendingAddressSwitch, setPendingAddressSwitch] = useState<{
+    nextAddress: string;
+    payload: {
+      market?: "CA" | "TH" | "OTHER";
+      displayAddress?: string;
+      tags?: string[];
+      source?: string;
+      propertyId?: string;
+      details?: Record<string, unknown>;
+    };
+  } | null>(null);
   const mediaUrlsReadyRef = useRef(false);
   const pendingMediaRef = useRef<
     Array<{
@@ -691,16 +711,28 @@ export function ClientPage() {
     aiConsent,
   ]);
 
-  async function ensureLocalSessionId(): Promise<string> {
+  async function resolveExistingLocalSessionId(): Promise<string | null> {
     if (draftSessionIdRef.current) return draftSessionIdRef.current;
     const existing = await getActiveDraft();
     if (existing?.localSessionId) {
       draftSessionIdRef.current = existing.localSessionId;
       return existing.localSessionId;
     }
+    return null;
+  }
+
+  /** Mint a stable local viewing id only after address confirm / explicit new record. */
+  async function createStableLocalSessionId(): Promise<string> {
+    const existing = await resolveExistingLocalSessionId();
+    if (existing) return existing;
     const id = createEntityId();
     draftSessionIdRef.current = id;
     return id;
+  }
+
+  async function ensureLocalSessionId(): Promise<string> {
+    // Sync / AI paths: reuse the confirmed session; create only if field work already began.
+    return createStableLocalSessionId();
   }
 
   async function ensureAiConsent(): Promise<{ accepted: boolean; sessionId: string }> {
@@ -945,6 +977,7 @@ export function ClientPage() {
       liveAudioMarkers: AudioMarker[];
       aiSummary: ViewingAiSummary | null;
       aiConsent: AiConsentDecision | null;
+      workflowStatus: ViewingWorkflowStatus;
     }>,
   ) {
     if (!draftHydratedRef.current) return false;
@@ -972,6 +1005,8 @@ export function ClientPage() {
         }),
         fieldChecklist: snap.fieldChecklist,
         aiSummary: snap.aiSummary,
+        committedAddress: committedAddressRef.current || snap.address,
+        workflowStatus: patch?.workflowStatus ?? workflowStatus,
       };
       const persisted = await putActiveDraft({
         ...existing,
@@ -991,6 +1026,7 @@ export function ClientPage() {
         syncStatus: patch?.syncStatus ?? (snap.viewingId ? "pending" : "local_only"),
         lastError: patch?.lastError ?? null,
         wizardStep: snap.wizardStep,
+        workflowStatus: patch?.workflowStatus ?? workflowStatus,
         viewingAt: snap.viewingAt,
         unitLabel: snap.unitLabel,
         priceLabel: snap.priceLabel,
@@ -1042,6 +1078,7 @@ export function ClientPage() {
       propertyDraft: snap.propertyDraft,
       clientUpdatedAt: clientUpdatedAtRef.current,
       isPro,
+      workflowStatus,
       media: mediaRows.map((row) => ({
         id: row.id,
         kind: row.kind,
@@ -1231,6 +1268,16 @@ export function ClientPage() {
         if (draft) {
           clientUpdatedAtRef.current = draft.clientUpdatedAt || new Date().toISOString();
           if (draft.localSessionId) draftSessionIdRef.current = draft.localSessionId;
+          const committed =
+            typeof draft.propertyDraft?.committedAddress === "string"
+              ? draft.propertyDraft.committedAddress
+              : draft.identified
+                ? draft.address || ""
+                : "";
+          committedAddressRef.current = committed;
+          setWorkflowStatus(
+            normalizeWorkflowStatus(draft.workflowStatus ?? draft.propertyDraft?.workflowStatus),
+          );
           hydrateDraftForm({
             address: draft.address || "",
             viewingAt:
@@ -2204,6 +2251,304 @@ export function ClientPage() {
     await processRecording(file, duration);
   }
 
+  type AddressLookupPayload = {
+    error?: string;
+    market?: "CA" | "TH" | "OTHER";
+    displayAddress?: string;
+    tags?: string[];
+    source?: string;
+    propertyId?: string;
+    details?: Record<string, unknown>;
+  };
+
+  async function persistActiveSessionSnapshot(options: {
+    sessionId: string;
+    address: string;
+    workflowStatus: ViewingWorkflowStatus;
+  }) {
+    const engine = await getViewingSyncEngine(user?.id ?? null);
+    const mediaRows = await listMedia();
+    const snap = draftSnapshotRef.current;
+    await engine.importActiveDraft({
+      sessionId: options.sessionId,
+      userId: user?.id ?? null,
+      remoteViewingId: snap.viewingId,
+      shareToken: snap.shareToken,
+      address: options.address,
+      tags: snap.tags,
+      market: snap.marketCode,
+      identified: snap.identified,
+      questions: snap.questions,
+      notes: snap.notes,
+      pros: snap.pros,
+      risks: snap.risks,
+      propertyDraft: {
+        ...snap.propertyDraft,
+        committedAddress: options.address,
+        workflowStatus: options.workflowStatus,
+      },
+      clientUpdatedAt: clientUpdatedAtRef.current,
+      isPro,
+      workflowStatus: options.workflowStatus,
+      media: mediaRows.map((row) => ({
+        id: row.id,
+        kind: row.kind,
+        label: row.label,
+        mimeType: row.mimeType,
+        size: row.size,
+        blob: row.blob,
+        remotePath: row.remotePath,
+        uploadStatus: row.uploadStatus,
+        durationSec: null,
+      })),
+    });
+  }
+
+  function resetWizardRuntimeState() {
+    setNotes([]);
+    setPhotos([]);
+    setClips([]);
+    setQuestions([]);
+    setPros([]);
+    setRisks([]);
+    setCardDraft(null);
+    setAiSummary(null);
+    setFieldChecklist([]);
+    setLiveMarkers([]);
+    setShareToken(null);
+    setShareUrl("");
+    setViewingId(null);
+    setShareLink(null);
+    setIdentified(false);
+    setLookupError(false);
+    setTags([]);
+    setPropertyDraft({});
+    hydrateDraftForm({
+      viewingAt: "",
+      unitLabel: "",
+      priceLabel: "",
+      layoutLabel: "",
+      areaLabel: "",
+      managementFeeLabel: "",
+      listingUrl: "",
+      setupNotes: "",
+    });
+    setWizardStep(1);
+    pendingMediaRef.current = [];
+    mediaUrlsReadyRef.current = false;
+  }
+
+  async function beginNewViewingFromAddress(options: {
+    payload: AddressLookupPayload;
+    nextAddress: string;
+    fromExifGps?: boolean;
+    abandonPrevious: boolean;
+  }) {
+    const previousId = draftSessionIdRef.current;
+    if (previousId) {
+      if (options.abandonPrevious) {
+        await persistActiveSessionSnapshot({
+          sessionId: previousId,
+          address: committedAddressRef.current || draftSnapshotRef.current.address,
+          workflowStatus: "abandoned",
+        });
+        const engine = await getViewingSyncEngine(user?.id ?? null);
+        await engine.setWorkflowStatus(previousId, "abandoned");
+      } else {
+        const savedStatus = deriveWorkflowStatus({
+          current: workflowStatus === "abandoned" ? "draft" : workflowStatus,
+          hasFieldContent:
+            notes.length > 0 ||
+            photos.length > 0 ||
+            clips.length > 0 ||
+            questions.some((q) => q.checked || Boolean(q.answer?.trim())),
+          canGenerate: canGenerateShareCard({
+            address: committedAddressRef.current || address,
+            viewingAt,
+            notesCount: notes.length,
+            photosCount: photos.length,
+            clipsCount: clips.length,
+            checkedQuestions: questions.filter((q) => q.checked).length,
+            syncStatus: sessionUiStatus?.status ?? null,
+          }),
+        });
+        await persistActiveSessionSnapshot({
+          sessionId: previousId,
+          address: committedAddressRef.current || draftSnapshotRef.current.address,
+          workflowStatus: savedStatus === "abandoned" ? "collecting" : savedStatus,
+        });
+      }
+    }
+
+    draftHydratedRef.current = false;
+    await clearActiveDraft();
+    resetWizardRuntimeState();
+    setAddress(options.nextAddress);
+
+    const newId = createEntityId();
+    draftSessionIdRef.current = newId;
+    setWorkflowStatus("draft");
+    draftHydratedRef.current = true;
+
+    await applyAddressLookupPayload(options.payload, {
+      preferExistingAddress: true,
+      fromExifGps: options.fromExifGps,
+      forceNewSession: true,
+      sessionId: newId,
+      skipSwitchPrompt: true,
+      addressOverride: options.nextAddress,
+    });
+  }
+
+  async function confirmAddressSwitchSaveAndNew() {
+    if (!pendingAddressSwitch) return;
+    const pending = pendingAddressSwitch;
+    setPendingAddressSwitch(null);
+    await beginNewViewingFromAddress({
+      payload: pending.payload,
+      nextAddress: pending.nextAddress,
+      abandonPrevious: false,
+    });
+  }
+
+  async function confirmAddressSwitchDiscardAndNew() {
+    if (!pendingAddressSwitch) return;
+    const pending = pendingAddressSwitch;
+    setPendingAddressSwitch(null);
+    await beginNewViewingFromAddress({
+      payload: pending.payload,
+      nextAddress: pending.nextAddress,
+      abandonPrevious: true,
+    });
+  }
+
+  async function applyAddressLookupPayload(
+    payload: AddressLookupPayload,
+    options: {
+      preferExistingAddress: boolean;
+      fromExifGps?: boolean;
+      forceNewSession?: boolean;
+      sessionId?: string;
+      skipSwitchPrompt?: boolean;
+      addressOverride?: string;
+    },
+  ) {
+    const nextMarket = payload.market ?? "CA";
+    const nextTags = payload.tags?.length ? payload.tags : ["已定位"];
+    const nextQuestions = bankQuestions(locale, nextMarket).map((q) => ({
+      ...q,
+      checked: false,
+    }));
+
+    const addressForResolve = options.addressOverride ?? address;
+    const nextAddress = options.preferExistingAddress
+      ? resolveLookupDisplayAddress(addressForResolve, payload.displayAddress)
+      : resolveLookupDisplayAddress(
+          addressForResolve.trim() ? addressForResolve : (payload.displayAddress ?? ""),
+          payload.displayAddress,
+        );
+
+    const localSessionId =
+      options.sessionId ??
+      draftSessionIdRef.current ??
+      (await resolveExistingLocalSessionId());
+
+    if (
+      !options.skipSwitchPrompt &&
+      !options.forceNewSession &&
+      shouldPromptAddressSwitch({
+        localSessionId,
+        workflowStatus,
+        committedAddress: committedAddressRef.current,
+        nextAddress,
+      })
+    ) {
+      setPendingAddressSwitch({ nextAddress, payload });
+      setIdentified(false);
+      setSyncMessage("");
+      return;
+    }
+
+    const sessionId =
+      options.sessionId ??
+      (localSessionId && !options.forceNewSession
+        ? localSessionId
+        : await createStableLocalSessionId());
+    draftSessionIdRef.current = sessionId;
+    committedAddressRef.current = nextAddress;
+    setAddress(nextAddress);
+    setMarketCode(nextMarket);
+    setTags(nextTags);
+    setQuestions((current) => {
+      if (options.forceNewSession) {
+        return nextQuestions;
+      }
+      const dynamic = current.filter((q) => q.isDynamic);
+      const texts = new Set(dynamic.map((q) => q.text.toLowerCase()));
+      return [...dynamic, ...nextQuestions.filter((q) => !texts.has(q.text.toLowerCase()))];
+    });
+    setIdentified(true);
+    const nextWorkflow: ViewingWorkflowStatus = "draft";
+    setWorkflowStatus(nextWorkflow);
+    const openData = (payload.details?.openData || null) as Record<string, unknown> | null;
+    const zoning = openData?.zoningCode ? String(openData.zoningCode) : "";
+    const propertyId = String(payload.propertyId ?? payload.details?.propertyId ?? "");
+    const nextPropertyDraft = mergeAddressLookupPropertyDraft(
+      options.forceNewSession ? {} : propertyDraft,
+      {
+        source: payload.source,
+        propertyId: payload.propertyId ?? (payload.details?.propertyId as string | undefined),
+        details: {
+          ...(payload.details ?? {}),
+          committedAddress: nextAddress,
+          workflowStatus: nextWorkflow,
+          ...(options.fromExifGps
+            ? {
+                gpsConsent: true,
+                gpsSource: "exif",
+              }
+            : {}),
+        },
+      },
+    );
+    setPropertyDraft(nextPropertyDraft);
+    const persisted = await flushDraftToIdb({
+      address: nextAddress,
+      tags: nextTags,
+      marketCode: nextMarket,
+      identified: true,
+      localSessionId: sessionId,
+      workflowStatus: nextWorkflow,
+      questions: options.forceNewSession
+        ? nextQuestions
+        : [
+            ...questions.filter((q) => q.isDynamic),
+            ...nextQuestions.filter(
+              (q) =>
+                !questions
+                  .filter((item) => item.isDynamic)
+                  .some((d) => d.text.toLowerCase() === q.text.toLowerCase()),
+            ),
+          ],
+      propertyDraft: nextPropertyDraft,
+    });
+    if (!persisted) return;
+    setSyncMessage(
+      `${payload.source ?? "地址查詢"}完成` +
+        (zoning ? ` · Zoning ${zoning}` : "") +
+        (propertyId ? ` · property ${propertyId.slice(0, 8)}` : "") +
+        " · 已寫入本機草稿",
+    );
+  }
+
+  function cancelAddressSwitch() {
+    setPendingAddressSwitch(null);
+    setAddress(committedAddressRef.current);
+    setIdentified(Boolean(committedAddressRef.current));
+    setLookupError(false);
+    setSyncMessage("");
+  }
+
   async function lookupAddress() {
     if (!address.trim()) return;
 
@@ -2218,78 +2563,49 @@ export function ClientPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ address: address.trim() }),
       });
-      const payload = (await response.json()) as {
-        error?: string;
-        market?: "CA" | "TH" | "OTHER";
-        displayAddress?: string;
-        tags?: string[];
-        source?: string;
-        propertyId?: string;
-        details?: Record<string, unknown>;
-      };
+      const payload = (await response.json()) as AddressLookupPayload;
 
       if (!response.ok) {
         throw new Error(payload.error || "地址查詢失敗");
       }
 
-      const nextMarket = payload.market ?? "CA";
-      const nextTags = payload.tags?.length ? payload.tags : ["已定位"];
-      const nextQuestions = bankQuestions(locale, nextMarket).map((q) => ({
-        ...q,
-        checked: false,
-      }));
-
-      const nextAddress = resolveLookupDisplayAddress(
-        address,
-        payload.displayAddress,
-      );
-      setAddress(nextAddress);
-      setMarketCode(nextMarket);
-      setTags(nextTags);
-      setQuestions((current) => {
-        const dynamic = current.filter((q) => q.isDynamic);
-        const texts = new Set(dynamic.map((q) => q.text.toLowerCase()));
-        return [...dynamic, ...nextQuestions.filter((q) => !texts.has(q.text.toLowerCase()))];
-      });
-      setIdentified(true);
-      const openData = (payload.details?.openData || null) as Record<string, unknown> | null;
-      const zoning = openData?.zoningCode ? String(openData.zoningCode) : "";
-      const propertyId = String(
-        payload.propertyId ?? payload.details?.propertyId ?? "",
-      );
-      const nextPropertyDraft = mergeAddressLookupPropertyDraft(propertyDraft, {
-        source: payload.source,
-        propertyId: payload.propertyId ?? (payload.details?.propertyId as string | undefined),
-        details: payload.details,
-      });
-      setPropertyDraft(nextPropertyDraft);
-      const persisted = await flushDraftToIdb({
-        address: nextAddress,
-        tags: nextTags,
-        marketCode: nextMarket,
-        identified: true,
-        questions: [
-          ...questions.filter((q) => q.isDynamic),
-          ...nextQuestions.filter(
-            (q) =>
-              !questions
-                .filter((item) => item.isDynamic)
-                .some((d) => d.text.toLowerCase() === q.text.toLowerCase()),
-          ),
-        ],
-        propertyDraft: nextPropertyDraft,
-      });
-      if (!persisted) return;
-      setSyncMessage(
-        `${payload.source ?? "地址查詢"}完成` +
-          (zoning ? ` · Zoning ${zoning}` : "") +
-          (propertyId ? ` · property ${propertyId.slice(0, 8)}` : "") +
-          " · 已寫入本機草稿",
-      );
+      await applyAddressLookupPayload(payload, { preferExistingAddress: true });
     } catch (error) {
       setIdentified(false);
       setLookupError(true);
       setSyncMessage(error instanceof Error ? error.message : "查詢失敗");
+    } finally {
+      setLookingUp(false);
+    }
+  }
+
+  async function applyExifGpsLookup(gps: { lat: number; lng: number }) {
+    setLookingUp(true);
+    setIdentified(false);
+    setLookupError(false);
+    setSyncMessage("");
+
+    try {
+      const response = await fetch("/api/lookup-address", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lat: gps.lat, lng: gps.lng }),
+      });
+      const payload = (await response.json()) as AddressLookupPayload;
+
+      if (!response.ok) {
+        throw new Error(payload.error || "GPS 查詢失敗");
+      }
+
+      await applyAddressLookupPayload(payload, {
+        preferExistingAddress: true,
+        fromExifGps: true,
+      });
+    } catch (error) {
+      setIdentified(false);
+      setLookupError(true);
+      setSyncMessage(error instanceof Error ? error.message : "查詢失敗");
+      throw error;
     } finally {
       setLookingUp(false);
     }
@@ -2418,9 +2734,14 @@ export function ClientPage() {
     }
     const wasNew = !viewingId;
     try {
+      setWorkflowStatus("generating");
+      await flushDraftToIdb({ workflowStatus: "generating" });
       await syncAndOpenCard();
+      setWorkflowStatus("generated");
+      await flushDraftToIdb({ workflowStatus: "generated" });
       if (wasNew) setFreeCount((n) => n + 1);
     } catch {
+      setWorkflowStatus("ready_to_generate");
       // message already set
     }
   }
@@ -2441,6 +2762,27 @@ export function ClientPage() {
     }
     if (target === 2 && questions.length === 0) {
       setQuestions(bankQuestions(locale, marketCode).map((q) => ({ ...q, checked: false })));
+    }
+    if (target >= 2) {
+      void createStableLocalSessionId().then((sessionId) => {
+        if (!committedAddressRef.current && address.trim()) {
+          committedAddressRef.current = address.trim();
+        }
+        const nextStatus = deriveWorkflowStatus({
+          current: workflowStatus,
+          hasFieldContent:
+            notes.length > 0 ||
+            photos.length > 0 ||
+            clips.length > 0 ||
+            questions.some((q) => q.checked),
+          canGenerate: false,
+        });
+        setWorkflowStatus(nextStatus === "draft" && target >= 2 ? "collecting" : nextStatus);
+        void flushDraftToIdb({
+          localSessionId: sessionId,
+          workflowStatus: nextStatus === "draft" && target >= 2 ? "collecting" : nextStatus,
+        });
+      });
     }
     if (target === 2 && fieldChecklist.length === 0) {
       const seeded = ensureFieldChecklist([], messages.fieldChecklist.labels);
@@ -3319,6 +3661,8 @@ export function ClientPage() {
             onListingUrlChange={setListingUrl}
             setupNotes={setupNotes}
             onSetupNotesChange={setSetupNotes}
+            onApplyExifGps={applyExifGpsLookup}
+            applyingExifGps={lookingUp}
           />
         )}
 
@@ -4136,6 +4480,37 @@ export function ClientPage() {
               </div>
           </Dialog>
         )}
+
+        <Dialog
+          open={pendingAddressSwitch != null}
+          onClose={cancelAddressSwitch}
+          title={messages.wizard.addressSwitchTitle}
+          description={messages.wizard.addressSwitchBody}
+        >
+          <div className="mt-[var(--space-4)] flex flex-col gap-[var(--space-2)]">
+            <button
+              type="button"
+              className="ui-button ui-button--primary w-full"
+              onClick={() => void confirmAddressSwitchSaveAndNew()}
+            >
+              {messages.wizard.addressSwitchSaveAndNew}
+            </button>
+            <button
+              type="button"
+              className="ui-button ui-button--secondary w-full"
+              onClick={() => void confirmAddressSwitchDiscardAndNew()}
+            >
+              {messages.wizard.addressSwitchDiscardAndNew}
+            </button>
+            <button
+              type="button"
+              className="ui-button ui-button--secondary w-full"
+              onClick={cancelAddressSwitch}
+            >
+              {messages.wizard.addressSwitchCancel}
+            </button>
+          </div>
+        </Dialog>
 
         <LoginGateDialog
           open={showLoginGate}

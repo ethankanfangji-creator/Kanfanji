@@ -76,6 +76,7 @@ export class SyncEngine {
         },
         pros: input.pros,
         risks: input.risks,
+        workflowStatus: input.workflowStatus ?? existing.workflowStatus ?? "draft",
         syncStatus:
           existing.syncStatus === "synced" || existing.syncStatus === "conflict"
             ? "pending"
@@ -105,6 +106,7 @@ export class SyncEngine {
         },
         pros: input.pros,
         risks: input.risks,
+        workflowStatus: input.workflowStatus ?? "draft",
         syncStatus: "pending",
       });
     }
@@ -231,6 +233,15 @@ export class SyncEngine {
 
   async getSession(sessionId: string): Promise<ViewingSession | null> {
     return this.db.viewingSessions.get(sessionId);
+  }
+
+  async setWorkflowStatus(
+    sessionId: string,
+    workflowStatus: NonNullable<ViewingSession["workflowStatus"]>,
+  ): Promise<ViewingSession | null> {
+    const existing = await this.db.viewingSessions.get(sessionId);
+    if (!existing) return null;
+    return this.db.viewingSessions.update(sessionId, { workflowStatus });
   }
 
   async listSessionMedia(sessionId: string) {

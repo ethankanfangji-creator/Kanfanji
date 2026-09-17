@@ -73,6 +73,17 @@ export type ViewingDraftRecord = {
   updatedAt: string;
   /** Wizard step 1–3; optional for older drafts. */
   wizardStep?: 1 | 2 | 3;
+  /**
+   * Product lifecycle for the active viewing.
+   * Optional for older drafts — normalize to "draft" when missing.
+   */
+  workflowStatus?:
+    | "draft"
+    | "collecting"
+    | "ready_to_generate"
+    | "generating"
+    | "generated"
+    | "abandoned";
   /** ISO datetime of the viewing appointment. */
   viewingAt?: string;
   unitLabel?: string;

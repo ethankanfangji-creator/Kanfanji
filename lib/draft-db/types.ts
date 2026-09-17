@@ -58,6 +58,17 @@ export type ViewingSession = SyncableFields & {
   pros: string[];
   risks: string[];
   lastSyncError: string | null;
+  /**
+   * Product lifecycle (orthogonal to syncStatus).
+   * Older rows without this field are treated as "draft" at read time.
+   */
+  workflowStatus?:
+    | "draft"
+    | "collecting"
+    | "ready_to_generate"
+    | "generating"
+    | "generated"
+    | "abandoned";
 };
 
 export type Note = SyncableFields & {
@@ -145,6 +156,7 @@ export type CreateViewingSessionInput = {
   risks?: string[];
   syncStatus?: SyncStatus;
   lastSyncError?: string | null;
+  workflowStatus?: ViewingSession["workflowStatus"];
 };
 
 export type UpdateViewingSessionInput = Partial<

@@ -34,6 +34,7 @@ function buildSession(input: CreateViewingSessionInput, defaultScope?: string): 
     risks: input.risks ?? [],
     lastSyncError: input.lastSyncError ?? null,
     syncStatus: input.syncStatus ?? "local_only",
+    workflowStatus: input.workflowStatus ?? "draft",
     createdAt: timestamp,
     updatedAt: timestamp,
     deletedAt: null,

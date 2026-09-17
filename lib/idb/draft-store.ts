@@ -211,6 +211,7 @@ export function emptyDraft(partial?: Partial<ViewingDraftRecord>): ViewingDraftR
     createdAt: now,
     updatedAt: now,
     wizardStep: 1,
+    workflowStatus: "draft",
     viewingAt: "",
     unitLabel: "",
     priceLabel: "",

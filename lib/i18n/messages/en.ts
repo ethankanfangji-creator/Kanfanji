@@ -43,6 +43,12 @@ const en: Messages = {
     textNotesAdd: "Add note",
     editCard: "Edit card",
     saveEdits: "Done editing",
+    addressSwitchTitle: "Start a new viewing record?",
+    addressSwitchBody:
+      "You already have an in-progress viewing. Choose how to handle it before confirming the new address (the old record is not deleted).",
+    addressSwitchSaveAndNew: "Save current and start new",
+    addressSwitchDiscardAndNew: "Start new without saving current",
+    addressSwitchCancel: "Cancel",
   },
   setup: {
     title: "Create a new viewing",
@@ -65,6 +71,19 @@ const en: Messages = {
     identified: "Matched",
     autofilledHint: "Auto-filled from address — you can edit",
     openDataPrefix: "Open Data: ",
+    photoMetaImport: "Read EXIF from photo (optional)",
+    photoMetaHint: "Reads embedded photo metadata only — does not recognize address from the image",
+    photoMetaReading: "Reading photo metadata…",
+    photoMetaNoGps: "This photo has no usable GPS metadata",
+    photoMetaUnsupported: "Cannot read JPEG EXIF metadata from this file",
+    photoMetaError: "Failed to read photo metadata",
+    photoMetaGpsPrivacyTitle: "Use GPS from this photo?",
+    photoMetaGpsPrivacyBody:
+      "This photo includes GPS coordinates. Only the coordinates would be sent to suggest an address — the photo is not uploaded for image recognition. You can refuse.",
+    photoMetaGpsAccept: "Use GPS to suggest address",
+    photoMetaGpsRefuse: "Refuse",
+    photoMetaGpsRefused: "GPS metadata use refused",
+    photoMetaGpsApplied: "Address suggested from photo EXIF GPS — you can edit",
   },
   bank: {
     title: "QUESTION BANK",

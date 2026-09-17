@@ -43,6 +43,12 @@ const zhHans: Messages = {
     textNotesAdd: "加入笔记",
     editCard: "编辑卡片",
     saveEdits: "完成编辑",
+    addressSwitchTitle: "要开始新的看房记录吗？",
+    addressSwitchBody:
+      "目前已有进行中的看房记录。确认新地址前，请选择如何处理现有记录（不会删除旧记录）。",
+    addressSwitchSaveAndNew: "保存当前记录并开始新的",
+    addressSwitchDiscardAndNew: "开始新的，不保存当前记录",
+    addressSwitchCancel: "取消",
   },
   setup: {
     title: "建立新的看房记录",
@@ -65,6 +71,19 @@ const zhHans: Messages = {
     identified: "已识别",
     autofilledHint: "已从地址自动填入，可修改",
     openDataPrefix: "Open Data：",
+    photoMetaImport: "从照片读取 EXIF（选用）",
+    photoMetaHint: "仅读取照片内嵌 metadata，不会以影像识别地址",
+    photoMetaReading: "正在读取照片 metadata…",
+    photoMetaNoGps: "此照片没有可用的 GPS metadata",
+    photoMetaUnsupported: "此文件无法读取 JPEG EXIF metadata",
+    photoMetaError: "读取照片 metadata 失败",
+    photoMetaGpsPrivacyTitle: "使用照片中的 GPS？",
+    photoMetaGpsPrivacyBody:
+      "这张照片含 GPS 位置。只会传送坐标以建议地址，不会上传照片做影像识别。您可拒绝。",
+    photoMetaGpsAccept: "使用 GPS 建议地址",
+    photoMetaGpsRefuse: "拒绝",
+    photoMetaGpsRefused: "已拒绝使用 GPS metadata",
+    photoMetaGpsApplied: "已按照片 EXIF GPS 建议地址，可修改",
   },
   bank: {
     title: "智能问题清单 QUESTION BANK",

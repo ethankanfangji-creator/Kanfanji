@@ -1,6 +1,10 @@
 "use client";
 
-import { Check, MapPin, Search, Zap } from "lucide-react";
+import { useRef, useState } from "react";
+import { Check, ImagePlus, MapPin, Search, Zap } from "lucide-react";
+import { Dialog } from "@/components/ui/Dialog";
+import { defaultPhotoExifReader } from "@/lib/photo-metadata/exif-reader";
+import type { GpsCoordinates } from "@/lib/photo-metadata/types";
 
 export type StepSetupMessages = {
   address: {
@@ -10,6 +14,18 @@ export type StepSetupMessages = {
     identified: string;
     autofilledHint: string;
     openDataPrefix: string;
+    photoMetaImport: string;
+    photoMetaHint: string;
+    photoMetaReading: string;
+    photoMetaNoGps: string;
+    photoMetaUnsupported: string;
+    photoMetaError: string;
+    photoMetaGpsPrivacyTitle: string;
+    photoMetaGpsPrivacyBody: string;
+    photoMetaGpsAccept: string;
+    photoMetaGpsRefuse: string;
+    photoMetaGpsRefused: string;
+    photoMetaGpsApplied: string;
   };
   setup: {
     title: string;
@@ -55,6 +71,8 @@ export function StepSetup({
   onListingUrlChange,
   setupNotes,
   onSetupNotesChange,
+  onApplyExifGps,
+  applyingExifGps = false,
 }: {
   messages: StepSetupMessages;
   address: string;
@@ -82,10 +100,60 @@ export function StepSetup({
   onListingUrlChange: (value: string) => void;
   setupNotes: string;
   onSetupNotesChange: (value: string) => void;
+  onApplyExifGps: (gps: GpsCoordinates) => Promise<void>;
+  applyingExifGps?: boolean;
 }) {
   const openData = propertyDraft.openData as
     | { zoningCode?: string; city?: string; zoningLabel?: string; pid?: string }
     | undefined;
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const [photoMetaStatus, setPhotoMetaStatus] = useState<string>("");
+  const [readingPhotoMeta, setReadingPhotoMeta] = useState(false);
+  const [pendingGps, setPendingGps] = useState<GpsCoordinates | null>(null);
+
+  async function handlePhotoMetaFile(file: File | undefined) {
+    if (!file) return;
+    setPhotoMetaStatus("");
+    setReadingPhotoMeta(true);
+    try {
+      const result = await defaultPhotoExifReader.read(file);
+      if (result.status === "ok" && result.metadata.gps) {
+        setPendingGps(result.metadata.gps);
+        return;
+      }
+      if (result.status === "no_gps") {
+        setPhotoMetaStatus(messages.address.photoMetaNoGps);
+        return;
+      }
+      if (result.status === "unsupported") {
+        setPhotoMetaStatus(messages.address.photoMetaUnsupported);
+        return;
+      }
+      setPhotoMetaStatus(messages.address.photoMetaError);
+    } catch {
+      setPhotoMetaStatus(messages.address.photoMetaError);
+    } finally {
+      setReadingPhotoMeta(false);
+      if (photoInputRef.current) photoInputRef.current.value = "";
+    }
+  }
+
+  async function acceptGps() {
+    if (!pendingGps) return;
+    const gps = pendingGps;
+    setPendingGps(null);
+    try {
+      await onApplyExifGps(gps);
+      setPhotoMetaStatus(messages.address.photoMetaGpsApplied);
+    } catch {
+      setPhotoMetaStatus(messages.address.photoMetaError);
+    }
+  }
+
+  function refuseGps() {
+    setPendingGps(null);
+    setPhotoMetaStatus(messages.address.photoMetaGpsRefused);
+  }
 
   return (
     <form
@@ -129,7 +197,7 @@ export function StepSetup({
           <button
             type="button"
             onClick={onLookup}
-            disabled={lookingUp}
+            disabled={lookingUp || applyingExifGps}
             className="ui-button ui-button--primary shrink-0"
             aria-label="Lookup address"
             aria-busy={lookingUp}
@@ -147,6 +215,40 @@ export function StepSetup({
         <p className="mt-[var(--space-2)] text-[var(--font-size-xs)] text-[var(--color-text-muted)]">
           {messages.setup.lookupOptional}
         </p>
+
+        <div className="mt-[var(--space-4)] border-t border-[var(--color-border)] pt-[var(--space-4)]">
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/jpeg,image/jpg"
+            className="sr-only"
+            onChange={(event) => void handlePhotoMetaFile(event.target.files?.[0])}
+          />
+          <button
+            type="button"
+            className="ui-button ui-button--secondary w-full min-h-[var(--touch-target)]"
+            disabled={readingPhotoMeta || lookingUp || applyingExifGps}
+            aria-busy={readingPhotoMeta || applyingExifGps}
+            onClick={() => photoInputRef.current?.click()}
+          >
+            <ImagePlus aria-hidden="true" className="h-4 w-4" />
+            {messages.address.photoMetaImport}
+          </button>
+          <p className="mt-[var(--space-2)] text-[var(--font-size-xs)] text-[var(--color-text-muted)]">
+            {messages.address.photoMetaHint}
+          </p>
+          {readingPhotoMeta || applyingExifGps ? (
+            <p role="status" className="mt-[var(--space-2)] text-[var(--font-size-xs)] text-[var(--color-text-muted)]">
+              {applyingExifGps ? messages.address.lookingUp : messages.address.photoMetaReading}
+            </p>
+          ) : null}
+          {photoMetaStatus ? (
+            <p role="status" className="mt-[var(--space-2)] text-[var(--font-size-xs)] text-[var(--color-text-muted)]">
+              {photoMetaStatus}
+            </p>
+          ) : null}
+        </div>
+
         {lookingUp ? (
           <div
             role="status"
@@ -308,6 +410,26 @@ export function StepSetup({
           </label>
         </div>
       </div>
+
+      <Dialog
+        open={pendingGps != null}
+        onClose={refuseGps}
+        title={messages.address.photoMetaGpsPrivacyTitle}
+        description={messages.address.photoMetaGpsPrivacyBody}
+      >
+        <div className="mt-[var(--space-4)] flex flex-col gap-[var(--space-2)] sm:flex-row sm:justify-end">
+          <button type="button" className="ui-button ui-button--secondary" onClick={refuseGps}>
+            {messages.address.photoMetaGpsRefuse}
+          </button>
+          <button
+            type="button"
+            className="ui-button ui-button--primary"
+            onClick={() => void acceptGps()}
+          >
+            {messages.address.photoMetaGpsAccept}
+          </button>
+        </div>
+      </Dialog>
     </form>
   );
 }

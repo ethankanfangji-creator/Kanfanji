@@ -149,8 +149,11 @@ import {
   viewingDraftFormReducer,
 } from "@/lib/viewing-wizard/draft-state";
 import {
+  deriveFieldChecklistFromQuestions,
+  ensureDefaultFieldQuestions,
   mergeChecklistIntoQuestions,
-  syncQuestionAnswerToChecklist,
+  presentWizardQuestions,
+  type QuestionAnswerPreview,
   type WizardQuestion,
 } from "@/lib/viewing-wizard/questions";
 import type { User } from "@supabase/supabase-js";
@@ -266,6 +269,8 @@ export function ClientPage() {
   const [preflightKind, setPreflightKind] = useState<CaptureKind | null>(null);
   const [preflightStatus, setPreflightStatus] = useState<MediaPermissionStatus | null>(null);
   const [preflightBusy, setPreflightBusy] = useState(false);
+  const [pendingAnswerQuestionId, setPendingAnswerQuestionId] = useState<number | null>(null);
+  const pendingAnswerQuestionIdRef = useRef<number | null>(null);
   const [permissionBanner, setPermissionBanner] = useState<{
     status: MediaPermissionStatus;
     message: string;
@@ -402,7 +407,6 @@ export function ClientPage() {
   });
 
   const configured = isSupabaseConfigured();
-  const market = marketCode === "TH" ? "TH" : "CA";
   const userIdForLegacyClaim = user?.id;
 
   useEffect(() => {
@@ -1311,12 +1315,20 @@ export function ClientPage() {
             draft.fieldChecklist,
             messages.fieldChecklist.labels,
           );
-          setFieldChecklist(hydratedChecklist);
-          if (draft.questions?.length) {
-            setQuestions(mergeChecklistIntoQuestions(draft.questions, hydratedChecklist));
-          } else if (hydratedChecklist.length) {
-            setQuestions(mergeChecklistIntoQuestions([], hydratedChecklist));
-          }
+          const mergedQuestions = mergeChecklistIntoQuestions(
+            draft.questions ?? [],
+            hydratedChecklist,
+          );
+          const nextQuestions = ensureDefaultFieldQuestions(
+            mergedQuestions,
+            messages.fieldChecklist.labels,
+          );
+          const derivedChecklist = deriveFieldChecklistFromQuestions(
+            nextQuestions,
+            messages.fieldChecklist.labels,
+          );
+          setQuestions(nextQuestions);
+          setFieldChecklist(derivedChecklist);
           if (draft.notes?.length) {
             setNotes(
               draft.notes.map((note) => ({
@@ -1600,10 +1612,80 @@ export function ClientPage() {
 
   function activeQuestionBank() {
     if (questions.length > 0) return questions;
-    return bankQuestions(locale, marketCode).map((q) => ({
-      ...q,
-      checked: false,
-    }));
+    return ensureDefaultFieldQuestions([], messages.fieldChecklist.labels);
+  }
+
+  function scrollToQuestionCard(questionId: number) {
+    requestAnimationFrame(() => {
+      document
+        .querySelector(`[data-question-id="${questionId}"]`)
+        ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
+  }
+
+  function clearPendingAnswerQuestion() {
+    pendingAnswerQuestionIdRef.current = null;
+    setPendingAnswerQuestionId(null);
+  }
+
+  function beginAnswerCapture(questionId: number, kind: CaptureKind) {
+    pendingAnswerQuestionIdRef.current = questionId;
+    setPendingAnswerQuestionId(questionId);
+    void openCapturePreflight(kind);
+  }
+
+  function applyQuestionAnswer(
+    questionId: number,
+    answer: string,
+    preview?: QuestionAnswerPreview,
+  ) {
+    const labels = messages.fieldChecklist.labels;
+    setQuestions((current) => {
+      const next = current.map((item) =>
+        item.id === questionId
+          ? {
+              ...item,
+              answer: answer || undefined,
+              checked: Boolean(answer),
+              analysisStatus: undefined,
+              answerPreview: preview
+                ? {
+                    ...item.answerPreview,
+                    ...preview,
+                    noteSummary: preview.noteSummary ?? answer,
+                  }
+                : {
+                    ...item.answerPreview,
+                    noteSummary: answer || item.answerPreview?.noteSummary,
+                  },
+            }
+          : item,
+      );
+      const derived = deriveFieldChecklistFromQuestions(next, labels);
+      setFieldChecklist(derived);
+      void flushDraftToIdb({ questions: next, fieldChecklist: derived });
+      return next;
+    });
+    scrollToQuestionCard(questionId);
+  }
+
+  function attachMediaThumbToQuestion(questionId: number, thumbUrl: string) {
+    setQuestions((current) => {
+      const next = current.map((item) => {
+        if (item.id !== questionId) return item;
+        const existing = item.answerPreview?.mediaThumbs ?? [];
+        if (existing.includes(thumbUrl)) return item;
+        return {
+          ...item,
+          answerPreview: {
+            ...item.answerPreview,
+            mediaThumbs: [...existing, thumbUrl].slice(0, 3),
+          },
+        };
+      });
+      void flushDraftToIdb({ questions: next });
+      return next;
+    });
   }
 
   async function processRecording(
@@ -1619,10 +1701,20 @@ export function ClientPage() {
       setAudioState("idle");
       setAudioSeconds(0);
       captureLockRef.current = null;
+      clearPendingAnswerQuestion();
       return;
     }
     setAudioState("processing");
     setSyncMessage(messages.aiBoundary.processing);
+
+    const pendingId = pendingAnswerQuestionIdRef.current;
+    if (pendingId != null) {
+      setQuestions((current) =>
+        current.map((item) =>
+          item.id === pendingId ? { ...item, analysisStatus: "analyzing" as const } : item,
+        ),
+      );
+    }
 
     const bank = activeQuestionBank();
     if (questions.length === 0) {
@@ -1820,11 +1912,33 @@ export function ClientPage() {
         const base = current.length > 0 ? current : bank;
         const updated = base.map((q) => {
           const hit = payload.answers?.find((item) => item.id === q.id);
-          if (!hit) return q;
+          if (!hit) {
+            if (pendingId != null && q.id === pendingId && !q.checked && !q.answer?.trim()) {
+              return {
+                ...q,
+                checked: true,
+                answer: messages.bank.captureAudioSummary,
+                analysisStatus: undefined,
+                answerPreview: {
+                  ...q.answerPreview,
+                  noteSummary: messages.bank.captureAudioSummary,
+                },
+              };
+            }
+            if (pendingId != null && q.id === pendingId) {
+              return { ...q, analysisStatus: undefined };
+            }
+            return q;
+          }
           return {
             ...q,
             checked: hit.status === "answered",
             answer: hit.answer,
+            analysisStatus: undefined,
+            answerPreview: {
+              ...q.answerPreview,
+              noteSummary: hit.answer || q.answerPreview?.noteSummary,
+            },
           };
         });
 
@@ -1852,6 +1966,19 @@ export function ClientPage() {
         return nextQuestions;
       });
 
+      if (pendingId != null) {
+        clearPendingAnswerQuestion();
+        scrollToQuestionCard(pendingId);
+      }
+
+      if (nextQuestions.length) {
+        const derived = deriveFieldChecklistFromQuestions(
+          nextQuestions,
+          messages.fieldChecklist.labels,
+        );
+        setFieldChecklist(derived);
+      }
+
       const nextPros = claimsToLegacyStrings(summary.pros, 5);
       const nextRisks = claimsToLegacyStrings(summary.risks, 5);
       if (nextPros.length) setPros(nextPros);
@@ -1865,6 +1992,14 @@ export function ClientPage() {
       const persisted = await flushDraftToIdb({
         notes: nextNotes,
         questions: nextQuestions.length ? nextQuestions : questions,
+        ...(nextQuestions.length
+          ? {
+              fieldChecklist: deriveFieldChecklistFromQuestions(
+                nextQuestions,
+                messages.fieldChecklist.labels,
+              ),
+            }
+          : {}),
         pros: nextPros.length ? nextPros : pros,
         risks: nextRisks.length ? nextRisks : risks,
         aiSummary: summary,
@@ -1914,6 +2049,17 @@ export function ClientPage() {
       setAudioSeconds(0);
       captureLockRef.current = null;
       setLiveMarkers([]);
+      if (pendingId != null) {
+        setQuestions((current) =>
+          current.map((item) =>
+            item.id === pendingId && item.analysisStatus === "analyzing"
+              ? { ...item, analysisStatus: undefined }
+              : item,
+          ),
+        );
+        clearPendingAnswerQuestion();
+        scrollToQuestionCard(pendingId);
+      }
       if (!leaseLost) void flushDraftToIdb({ liveAudioMarkers: [] });
     }
   }
@@ -2729,9 +2875,6 @@ export function ClientPage() {
       setWizardStep(1);
       return;
     }
-    if (target === 2 && questions.length === 0) {
-      setQuestions(bankQuestions(locale, marketCode).map((q) => ({ ...q, checked: false })));
-    }
     if (target >= 2) {
       void createStableLocalSessionId().then((sessionId) => {
         if (!committedAddressRef.current && address.trim()) {
@@ -2754,16 +2897,16 @@ export function ClientPage() {
       });
     }
     if (target === 2) {
-      const seeded = ensureFieldChecklist(fieldChecklist, messages.fieldChecklist.labels);
-      setFieldChecklist(seeded);
-      setQuestions((current) => {
-        const base =
-          current.length > 0
-            ? current
-            : bankQuestions(locale, marketCode).map((q) => ({ ...q, checked: false }));
-        return mergeChecklistIntoQuestions(base, seeded);
+      const labels = messages.fieldChecklist.labels;
+      const nextQuestions = ensureDefaultFieldQuestions(questions, labels);
+      const derived = deriveFieldChecklistFromQuestions(nextQuestions, labels);
+      setQuestions(nextQuestions);
+      setFieldChecklist(derived);
+      await flushDraftToIdb({
+        wizardStep: target,
+        questions: nextQuestions,
+        fieldChecklist: derived,
       });
-      await flushDraftToIdb({ wizardStep: target, fieldChecklist: seeded });
       setWizardStep(target);
       return;
     }
@@ -2923,6 +3066,13 @@ export function ClientPage() {
     };
     setClips((current) => [...current, clip]);
     await flushDraftToIdb();
+    const pendingId = pendingAnswerQuestionIdRef.current;
+    if (pendingId != null) {
+      clearPendingAnswerQuestion();
+      applyQuestionAnswer(pendingId, messages.bank.captureVideoSummary, {
+        noteSummary: messages.bank.captureVideoSummary,
+      });
+    }
     setSyncMessage(
       durationSec
         ? `影片已存本機（${durationSec}秒）· 登入後會自動同步`
@@ -3002,6 +3152,14 @@ export function ClientPage() {
         : "照片原圖已存本機 · 正在產生縮圖",
     );
 
+    const pendingId = pendingAnswerQuestionIdRef.current;
+    if (pendingId != null) {
+      clearPendingAnswerQuestion();
+      applyQuestionAnswer(pendingId, messages.bank.capturePhotoSummary, {
+        noteSummary: messages.bank.capturePhotoSummary,
+      });
+    }
+
     const schedule =
       typeof requestIdleCallback === "function"
         ? (cb: () => void) => requestIdleCallback(() => cb(), { timeout: 1200 })
@@ -3018,12 +3176,14 @@ export function ClientPage() {
                 item.id === photo.id ? { ...item, thumbUrl: url, url } : item,
               ),
             );
+            if (pendingId != null) attachMediaThumbToQuestion(pendingId, url);
             return;
           }
           const thumbUrl = URL.createObjectURL(thumb.blob);
           setPhotos((current) =>
             current.map((item) => (item.id === photo.id ? { ...item, thumbUrl } : item)),
           );
+          if (pendingId != null) attachMediaThumbToQuestion(pendingId, thumbUrl);
           if (photo.mediaId) {
             await updateMediaFields(photo.mediaId, {
               thumbBlob: thumb.blob,
@@ -3034,11 +3194,13 @@ export function ClientPage() {
       });
     }
 
-    const first = incoming[0];
-    if (first) {
-      setAnnotatingPhotoId(first.id);
-      setAnnotateTagId(first.tagId);
-      setAnnotateNote(first.note);
+    if (pendingId == null) {
+      const first = incoming[0];
+      if (first) {
+        setAnnotatingPhotoId(first.id);
+        setAnnotateTagId(first.tagId);
+        setAnnotateNote(first.note);
+      }
     }
 
     void (async () => {
@@ -3465,6 +3627,7 @@ export function ClientPage() {
             onCancel={() => {
               setPreflightKind(null);
               setPreflightBusy(false);
+              clearPendingAnswerQuestion();
             }}
             onImport={onPreflightImport}
           />
@@ -3645,32 +3808,53 @@ export function ClientPage() {
           <>
         <QuestionList
           messages={{
-            title: messages.bank.title,
-            photoAi: messages.bank.photoAi,
-            followUp: messages.bank.followUp,
-            checklistSection: messages.bank.checklistSection,
+            fieldTitle: messages.bank.fieldTitle,
+            progressLabel: messages.bank.progressLabel,
+            sectionUnanswered: messages.bank.sectionUnanswered,
+            sectionAnswered: messages.bank.sectionAnswered,
+            emptyUnanswered: messages.bank.emptyUnanswered,
+            emptyAnswered: messages.bank.emptyAnswered,
             tip: messages.bank.tip,
             tipExample: messages.bank.tipExample,
-            matched: messages.bank.matched,
-            countLabel: messages.bank.countLabel,
             card: {
-              photoBadge: messages.bank.photoBadge,
-              followBadge: messages.bank.followBadge,
-              checklistBadge: messages.bank.checklistBadge,
-              tagLabel: messages.bank.tagLabel,
-              byDialogue: messages.card.byDialogue,
-              answered: messages.bank.answered,
+              answerCta: messages.bank.answerCta,
+              editCta: messages.bank.editCta,
+              statusUnanswered: messages.bank.statusUnanswered,
+              statusProcessing: messages.bank.statusProcessing,
+              statusAnswered: messages.bank.statusAnswered,
+              statusAnalyzing: messages.bank.statusAnalyzing,
+              statusAnalysisFailed: messages.bank.statusAnalysisFailed,
+              noteSummaryLabel: messages.bank.noteSummaryLabel,
+              aiSummaryLabel: messages.bank.aiSummaryLabel,
             },
-            answer: {
-              title: messages.bank.answerTitle,
-              placeholder: messages.bank.answerPlaceholder,
-              save: messages.bank.answerSave,
-              clear: messages.bank.answerClear,
-              empty: messages.bank.answerEmpty,
+            methodSheet: {
+              title: messages.bank.methodTitle,
+              description: messages.bank.methodDescription,
+              audio: messages.bank.methodAudio,
+              photo: messages.bank.methodPhoto,
+              video: messages.bank.methodVideo,
+              note: messages.bank.methodNote,
+              close: messages.bank.methodClose,
+              noteTitle: messages.bank.methodNoteTitle,
+              notePlaceholder: messages.bank.methodNotePlaceholder,
+              noteSave: messages.bank.methodNoteSave,
+              noteCancel: messages.bank.methodNoteCancel,
             },
           }}
-          marketLabel={market}
-          questions={questions}
+          questions={presentWizardQuestions(questions, {
+            notes,
+            photos: photos.map((photo) => ({
+              tag: photo.tag,
+              tagId: photo.tagId,
+              thumbUrl: photo.thumbUrl,
+              url: photo.url,
+            })),
+            labels: {
+              tagLabel: messages.bank.tagLabel,
+              byDialogue: messages.card.byDialogue,
+              checklistHint: messages.bank.checklistHint,
+            },
+          })}
           tipDetail={
             notes.length > 0
               ? t(messages.bank.matched, {
@@ -3679,42 +3863,13 @@ export function ClientPage() {
                 })
               : undefined
           }
-          onToggle={(id) => {
-            setQuestions((current) => {
-              const next = current.map((item) =>
-                item.id === id ? { ...item, checked: !item.checked } : item,
-              );
-              const toggled = next.find((item) => item.id === id);
-              if (toggled) {
-                setFieldChecklist((checklist) =>
-                  syncQuestionAnswerToChecklist(checklist, toggled),
-                );
-              }
-              return next;
-            });
+          processingQuestionId={pendingAnswerQuestionId}
+          onSelectMethod={(id, method) => {
+            beginAnswerCapture(id, method);
           }}
           onSaveAnswer={(id, answer) => {
-            setQuestions((current) => {
-              const next = current.map((item) =>
-                item.id === id
-                  ? {
-                      ...item,
-                      answer: answer || undefined,
-                      checked: answer ? true : item.checked,
-                    }
-                  : item,
-              );
-              const saved = next.find((item) => item.id === id);
-              if (saved) {
-                setFieldChecklist((checklist) => {
-                  const synced = syncQuestionAnswerToChecklist(checklist, saved);
-                  void flushDraftToIdb({ questions: next, fieldChecklist: synced });
-                  return synced;
-                });
-              } else {
-                void flushDraftToIdb({ questions: next });
-              }
-              return next;
+            applyQuestionAnswer(id, answer, {
+              noteSummary: answer || undefined,
             });
           }}
         />
@@ -4065,7 +4220,10 @@ export function ClientPage() {
             videoGalleryRef={videoGalleryInput}
             onPhotos={(event) => void onPhotos(event)}
             onVideo={(event) => void onVideoFiles(event)}
-            onCaptureCancel={releaseCaptureLock}
+            onCaptureCancel={() => {
+              releaseCaptureLock();
+              clearPendingAnswerQuestion();
+            }}
           />
           <div className="mt-3 flex gap-2 bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl p-2.5">
             <span className="text-[12px]">💡</span>

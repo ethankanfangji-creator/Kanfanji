@@ -1,114 +1,131 @@
 "use client";
 
-import { Check } from "lucide-react";
-import type { WizardQuestion } from "@/lib/viewing-wizard/questions";
+import type {
+  QuestionAnswerStatus,
+  WizardQuestion,
+} from "@/lib/viewing-wizard/questions";
+import { resolveQuestionStatus } from "@/lib/viewing-wizard/questions";
 
 export type QuestionCardLabels = {
-  photoBadge: string;
-  followBadge: string;
-  checklistBadge: string;
-  tagLabel: string;
-  byDialogue: string;
-  answered: string;
+  answerCta: string;
+  editCta: string;
+  statusUnanswered: string;
+  statusProcessing: string;
+  statusAnswered: string;
+  statusAnalyzing: string;
+  statusAnalysisFailed: string;
+  noteSummaryLabel: string;
+  aiSummaryLabel: string;
 };
+
+function statusLabel(status: QuestionAnswerStatus, labels: QuestionCardLabels): string {
+  switch (status) {
+    case "processing":
+      return labels.statusProcessing;
+    case "answered":
+      return labels.statusAnswered;
+    case "analyzing":
+      return labels.statusAnalyzing;
+    case "analysis_failed":
+      return labels.statusAnalysisFailed;
+    default:
+      return labels.statusUnanswered;
+  }
+}
+
+function statusTone(status: QuestionAnswerStatus): string {
+  switch (status) {
+    case "answered":
+      return "bg-[var(--color-success-bg)] text-[var(--color-success)] border-[var(--color-success-border)]";
+    case "processing":
+      return "bg-[var(--color-info-bg)] text-[var(--color-info)] border-[var(--color-info-border)]";
+    case "analyzing":
+      return "bg-[var(--color-info-bg)] text-[var(--color-info)] border-[var(--color-info-border)]";
+    case "analysis_failed":
+      return "bg-[var(--color-danger-bg)] text-[var(--color-danger)] border-[var(--color-danger-border)]";
+    default:
+      return "bg-[var(--color-surface-muted)] text-[var(--color-text-muted)] border-[var(--color-border)]";
+  }
+}
 
 export function QuestionCard({
   question,
   selected,
+  activeId,
   labels,
-  onSelect,
-  onToggle,
+  onAnswer,
 }: {
   question: WizardQuestion;
   selected: boolean;
+  activeId?: number | null;
   labels: QuestionCardLabels;
-  onSelect: (id: number) => void;
-  onToggle: (id: number) => void;
+  onAnswer: (id: number) => void;
 }) {
-  const isPhoto = question.isDynamic && question.source === "photo";
-  const isFollowUp = Boolean(question.isFollowUp);
-  const isChecklist = question.source === "checklist";
-
-  const tone = question.checked
-    ? isPhoto
-      ? "bg-[#065F46] text-white border-[#065F46]"
-      : isFollowUp
-        ? "bg-[#4C1D95] text-white border-[#4C1D95]"
-        : "bg-[var(--color-text)] text-white border-[var(--color-text)]"
-    : isPhoto
-      ? "bg-[#ECFDF5] border-[#A7F3D0] hover:bg-[#D1FAE5]"
-      : isFollowUp
-        ? "bg-[#F5F3FF] border-[#DDD6FE] hover:bg-[#EDE9FE]"
-        : isChecklist
-          ? "bg-[var(--color-surface-muted)] border-[var(--color-border)] hover:bg-[var(--color-surface)]"
-          : "bg-[var(--color-surface-muted)] border-[var(--color-border)] hover:bg-[var(--color-surface)]";
+  const status = resolveQuestionStatus(question, { activeId });
+  const hint = question.hint || question.description;
+  const preview = question.answerPreview;
+  const cta = status === "answered" || status === "analysis_failed" ? labels.editCta : labels.answerCta;
 
   return (
-    <div
-      className={`w-full rounded-[var(--radius-md)] border p-[var(--space-3)] text-left transition ${tone} ${
+    <article
+      data-question-id={question.id}
+      className={`w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-[var(--space-4)] text-left shadow-[var(--shadow-card)] ${
         selected ? "ring-2 ring-[var(--color-focus)]/30" : ""
       }`}
     >
-      <div className="flex items-start gap-[var(--space-2)]">
-        <button
-          type="button"
-          role="checkbox"
-          aria-checked={question.checked}
-          aria-label={question.text}
-          onClick={() => onToggle(question.id)}
-          className={`mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--radius-control)] border transition ${
-            question.checked
-              ? "border-white/30 bg-white/15 text-white"
-              : "border-[var(--color-border)] bg-[var(--color-surface)] text-transparent"
-          }`}
+      <div className="flex flex-wrap items-start justify-between gap-[var(--space-2)]">
+        <h3 className="min-w-0 flex-1 text-[var(--font-size-sm)] font-bold leading-[1.35] text-[var(--color-text)]">
+          {question.text}
+        </h3>
+        <span
+          className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-bold ${statusTone(status)}`}
         >
-          <Check className="h-5 w-5" aria-hidden />
-        </button>
-        <button
-          type="button"
-          className="min-w-0 flex-1 text-left"
-          onClick={() => onSelect(question.id)}
-          aria-pressed={selected}
-        >
-          <span className="flex items-start gap-1.5 text-[var(--font-size-sm)] font-bold leading-[1.35]">
-            {!question.checked && isPhoto ? (
-              <span className="mt-0.5 shrink-0 rounded-full bg-[#059669] px-1.5 py-0.5 text-[9px] font-bold text-white">
-                {labels.photoBadge}
-              </span>
-            ) : null}
-            {!question.checked && isFollowUp ? (
-              <span className="mt-0.5 shrink-0 rounded-full bg-[#7C3AED] px-1.5 py-0.5 text-[9px] font-bold text-white">
-                {labels.followBadge}
-              </span>
-            ) : null}
-            {!question.checked && isChecklist ? (
-              <span className="mt-0.5 shrink-0 rounded-full bg-[var(--color-text-muted)] px-1.5 py-0.5 text-[9px] font-bold text-white">
-                {labels.checklistBadge}
-              </span>
-            ) : null}
-            {question.text}
-          </span>
-          {question.basedOn && !isChecklist ? (
-            <span
-              className={`mt-1.5 block text-[var(--font-size-xs)] leading-[1.4] ${
-                question.checked ? "text-white/70" : "text-[var(--color-text-muted)]"
-              }`}
-            >
-              {isPhoto ? labels.tagLabel : labels.byDialogue}
-              {question.basedOn}
-            </span>
-          ) : null}
-          {question.answer ? (
-            <span
-              className={`mt-1.5 block text-[var(--font-size-xs)] ${
-                question.checked ? "text-white/80" : "text-[var(--color-text-muted)]"
-              }`}
-            >
-              {labels.answered}: {question.answer}
-            </span>
-          ) : null}
-        </button>
+          {statusLabel(status, labels)}
+        </span>
       </div>
-    </div>
+
+      {hint ? (
+        <p className="mt-[var(--space-2)] text-[var(--font-size-xs)] leading-[1.45] text-[var(--color-text-muted)]">
+          {hint}
+        </p>
+      ) : null}
+
+      {preview?.mediaThumbs && preview.mediaThumbs.length > 0 ? (
+        <div className="mt-[var(--space-3)] flex flex-wrap gap-[var(--space-2)]">
+          {preview.mediaThumbs.map((src) => (
+            // eslint-disable-next-line @next/next/no-img-element -- local blob / remote thumbs for answer preview
+            <img
+              key={src}
+              src={src}
+              alt=""
+              className="h-14 w-14 rounded-[var(--radius-control)] object-cover border border-[var(--color-border)]"
+            />
+          ))}
+        </div>
+      ) : null}
+
+      {preview?.noteSummary ? (
+        <p className="mt-[var(--space-3)] rounded-[var(--radius-control)] bg-[var(--color-surface-muted)] px-[var(--space-3)] py-[var(--space-2)] text-[var(--font-size-xs)] leading-[1.45] text-[var(--color-text)]">
+          <span className="font-bold text-[var(--color-text-muted)]">{labels.noteSummaryLabel} </span>
+          {preview.noteSummary}
+        </p>
+      ) : null}
+
+      {preview?.aiSummary ? (
+        <p className="mt-[var(--space-2)] rounded-[var(--radius-control)] border border-[var(--color-info-border)] bg-[var(--color-info-bg)] px-[var(--space-3)] py-[var(--space-2)] text-[var(--font-size-xs)] leading-[1.45] text-[var(--color-info)]">
+          <span className="font-bold">{labels.aiSummaryLabel} </span>
+          {preview.aiSummary}
+        </p>
+      ) : null}
+
+      <button
+        type="button"
+        className="ui-button ui-button--primary mt-[var(--space-4)] min-h-[var(--touch-target)] w-full"
+        onClick={() => onAnswer(question.id)}
+        aria-pressed={selected}
+      >
+        {cta}
+      </button>
+    </article>
   );
 }

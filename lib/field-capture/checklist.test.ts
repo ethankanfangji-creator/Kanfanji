@@ -48,8 +48,10 @@ describe("field checklist", () => {
     expect(ensureFieldChecklist(custom, labels)).toBe(custom);
   });
 
-  it("createPresetChecklist uses labels", () => {
-    const items = createPresetChecklist({ ...labels, water_leak: "漏水或水痕" });
-    expect(items[0]?.text).toBe("漏水或水痕");
+  it("createPresetChecklist uses labels in default field order", () => {
+    const items = createPresetChecklist({ ...labels, light_air: "採光與通風" });
+    expect(items[0]?.key).toBe("light_air");
+    expect(items[0]?.text).toBe("採光與通風");
+    expect(items.map((item) => item.key)).toEqual([...FIELD_CHECKLIST_IDS]);
   });
 });

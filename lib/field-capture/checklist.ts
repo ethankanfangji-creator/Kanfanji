@@ -1,10 +1,12 @@
-/** Stable on-site inspection checklist ids — labels from i18n. */
+/** Stable on-site inspection checklist ids — labels from i18n.
+ * Order matches Step 2 default field questions.
+ */
 export const FIELD_CHECKLIST_IDS = [
+  "light_air",
+  "noise",
   "water_leak",
   "wall_crack",
   "window_fog",
-  "light_air",
-  "noise",
   "electrical_panel",
   "water_heater",
   "plumbing",

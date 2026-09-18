@@ -28,10 +28,14 @@ describe("design tokens and UI primitives", () => {
       "--z-modal: 1000",
       "--z-toast: 1100",
       "--touch-target: 44px",
+      "--touch-target-comfortable: 48px",
       "--page-max-width: 960px",
     ]) {
       expect(css).toContain(token);
     }
+    expect(css).toContain(".answer-method-sheet-backdrop");
+    expect(css).toContain("env(safe-area-inset-bottom");
+    expect(css).toContain("backdrop-filter: blur(8px)");
     expect(css).toContain(".setup-form-grid");
     expect(css).toContain("repeat(2, minmax(0, 1fr))");
     expect(css).toContain(".page-container");

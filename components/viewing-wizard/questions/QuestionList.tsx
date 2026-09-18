@@ -1,163 +1,168 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
 import {
-  partitionQuestions,
+  getQuestionProgress,
+  partitionByAnswered,
   type WizardQuestion,
 } from "@/lib/viewing-wizard/questions";
-import { AnswerSheet, type AnswerSheetLabels } from "./AnswerSheet";
+import {
+  AnswerMethodSheet,
+  type AnswerMethod,
+  type AnswerMethodSheetLabels,
+} from "./AnswerMethodSheet";
 import { QuestionCard, type QuestionCardLabels } from "./QuestionCard";
 
 export type QuestionListMessages = {
-  title: string;
-  photoAi: string;
-  followUp: string;
-  checklistSection: string;
+  fieldTitle: string;
+  progressLabel: string;
+  sectionUnanswered: string;
+  sectionAnswered: string;
+  emptyUnanswered: string;
+  emptyAnswered: string;
   tip: string;
   tipExample: string;
-  matched: string;
-  countLabel: string;
   card: QuestionCardLabels;
-  answer: AnswerSheetLabels;
+  methodSheet: AnswerMethodSheetLabels;
 };
 
 export function QuestionList({
   messages,
-  marketLabel,
   questions,
   tipDetail,
-  onToggle,
+  processingQuestionId = null,
   onSaveAnswer,
+  onSelectMethod,
 }: {
   messages: QuestionListMessages;
-  marketLabel: string;
   questions: WizardQuestion[];
   tipDetail?: string;
-  onToggle: (id: number) => void;
+  processingQuestionId?: number | null;
   onSaveAnswer: (id: number, answer: string) => void;
+  onSelectMethod: (id: number, method: Exclude<AnswerMethod, "note">) => void;
 }) {
-  const [collapsed, setCollapsed] = useState(false);
   const [activeId, setActiveId] = useState<number | null>(null);
-  const parts = useMemo(() => partitionQuestions(questions), [questions]);
+  const progress = useMemo(() => getQuestionProgress(questions), [questions]);
+  const sections = useMemo(() => partitionByAnswered(questions), [questions]);
   const active = questions.find((question) => question.id === activeId) ?? null;
+  const percent = Math.round(progress.ratio * 100);
+  const statusActiveId = processingQuestionId ?? activeId;
 
   return (
-    <section className="ui-card mb-[var(--space-4)] min-w-0">
-      <button
-        type="button"
-        aria-expanded={!collapsed}
-        className="flex min-h-[var(--touch-target)] w-full items-center justify-between text-left"
-        onClick={() => setCollapsed((value) => !value)}
-      >
-        <div className="flex min-w-0 flex-wrap items-center gap-[var(--space-2)]">
-          <h2 className="text-[var(--font-size-xs)] font-extrabold tracking-widest text-[var(--color-text)]">
-            {messages.title} — {marketLabel}
+    <section className="ui-card mb-[var(--space-4)] min-w-0" aria-labelledby="step2-field-answer-title">
+      <header className="space-y-[var(--space-3)]">
+        <div className="flex flex-wrap items-end justify-between gap-[var(--space-2)]">
+          <h2
+            id="step2-field-answer-title"
+            className="text-[var(--font-size-lg)] font-extrabold tracking-tight text-[var(--color-text)]"
+          >
+            {messages.fieldTitle}
           </h2>
-          <span className="rounded-full bg-[var(--color-info-bg)] px-2 py-0.5 text-[10px] font-bold text-[var(--color-info)]">
-            {messages.countLabel.replace("{count}", String(questions.length))}
-          </span>
+          <p className="text-[var(--font-size-sm)] font-semibold text-[var(--color-text-muted)]" role="status">
+            {messages.progressLabel
+              .replace("{completed}", String(progress.completed))
+              .replace("{total}", String(progress.total))}
+          </p>
         </div>
-        <span className="flex h-11 w-11 items-center justify-center rounded-full bg-[var(--color-surface-muted)]">
-          {collapsed ? (
-            <ChevronDown className="h-4 w-4" aria-hidden />
-          ) : (
-            <ChevronUp className="h-4 w-4" aria-hidden />
-          )}
-        </span>
-      </button>
-
-      {!collapsed ? (
-        <div className="mt-[var(--space-4)] space-y-[var(--space-4)]">
-          <AnswerSheet
-            question={active}
-            labels={messages.answer}
-            onSave={(id, answer) => {
-              onSaveAnswer(id, answer);
-              setActiveId(id);
-            }}
+        <div
+          className="h-2 w-full overflow-hidden rounded-full bg-[var(--color-surface-muted)]"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={progress.total || 100}
+          aria-valuenow={progress.completed}
+          aria-label={messages.progressLabel
+            .replace("{completed}", String(progress.completed))
+            .replace("{total}", String(progress.total))}
+        >
+          <div
+            className="h-full rounded-full bg-[var(--color-text)] transition-[width] duration-300"
+            style={{ width: `${percent}%` }}
           />
-
-          {parts.photo.length > 0 ? (
-            <div className="space-y-[var(--space-2)]">
-              <p className="text-[var(--font-size-xs)] font-bold tracking-wide text-[#047857]">
-                {messages.photoAi}
-              </p>
-              {parts.photo.map((question) => (
-                <QuestionCard
-                  key={question.id}
-                  question={question}
-                  selected={activeId === question.id}
-                  labels={messages.card}
-                  onSelect={setActiveId}
-                  onToggle={onToggle}
-                />
-              ))}
-            </div>
-          ) : null}
-
-          {parts.bank.length > 0 ? (
-            <div className="space-y-[var(--space-2)]">
-              {parts.bank.map((question) => (
-                <QuestionCard
-                  key={question.id}
-                  question={question}
-                  selected={activeId === question.id}
-                  labels={messages.card}
-                  onSelect={setActiveId}
-                  onToggle={onToggle}
-                />
-              ))}
-            </div>
-          ) : null}
-
-          {parts.checklist.length > 0 ? (
-            <div className="space-y-[var(--space-2)]">
-              <p className="text-[var(--font-size-xs)] font-bold tracking-wide text-[var(--color-text-muted)]">
-                {messages.checklistSection}
-              </p>
-              {parts.checklist.map((question) => (
-                <QuestionCard
-                  key={question.id}
-                  question={question}
-                  selected={activeId === question.id}
-                  labels={messages.card}
-                  onSelect={setActiveId}
-                  onToggle={onToggle}
-                />
-              ))}
-            </div>
-          ) : null}
-
-          {parts.followUp.length > 0 ? (
-            <div className="space-y-[var(--space-2)]">
-              <p className="text-[var(--font-size-xs)] font-bold tracking-wide text-[#7C3AED]">
-                {messages.followUp}
-              </p>
-              {parts.followUp.map((question) => (
-                <QuestionCard
-                  key={question.id}
-                  question={question}
-                  selected={activeId === question.id}
-                  labels={messages.card}
-                  onSelect={setActiveId}
-                  onToggle={onToggle}
-                />
-              ))}
-            </div>
-          ) : null}
-
-          <div className="flex items-start gap-[var(--space-2)] rounded-[var(--radius-md)] border border-[var(--color-info-border)] bg-[var(--color-info-bg)] p-[var(--space-3)]">
-            <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--color-info)] text-[10px] font-bold text-white">
-              AI
-            </div>
-            <p className="text-[var(--font-size-xs)] leading-[1.45] text-[var(--color-text-muted)]">
-              {messages.tip}
-              {tipDetail ?? messages.tipExample}
-            </p>
-          </div>
         </div>
-      ) : null}
+      </header>
+
+      <div className="mt-[var(--space-4)] space-y-[var(--space-4)]">
+        <section aria-labelledby="step2-unanswered-heading" className="space-y-[var(--space-3)]">
+          <h3
+            id="step2-unanswered-heading"
+            className="text-[var(--font-size-xs)] font-extrabold tracking-widest text-[var(--color-text)]"
+          >
+            {messages.sectionUnanswered}
+          </h3>
+          {sections.unanswered.length === 0 ? (
+            <p className="text-[var(--font-size-sm)] text-[var(--color-text-muted)]">
+              {messages.emptyUnanswered}
+            </p>
+          ) : (
+            <div className="space-y-[var(--space-3)]">
+              {sections.unanswered.map((question) => (
+                <QuestionCard
+                  key={question.id}
+                  question={question}
+                  selected={activeId === question.id}
+                  activeId={statusActiveId}
+                  labels={messages.card}
+                  onAnswer={setActiveId}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section aria-labelledby="step2-answered-heading" className="space-y-[var(--space-3)]">
+          <h3
+            id="step2-answered-heading"
+            className="text-[var(--font-size-xs)] font-extrabold tracking-widest text-[var(--color-text)]"
+          >
+            {messages.sectionAnswered}
+          </h3>
+          {sections.answered.length === 0 ? (
+            <p className="text-[var(--font-size-sm)] text-[var(--color-text-muted)]">
+              {messages.emptyAnswered}
+            </p>
+          ) : (
+            <div className="space-y-[var(--space-3)]">
+              {sections.answered.map((question) => (
+                <QuestionCard
+                  key={question.id}
+                  question={question}
+                  selected={activeId === question.id}
+                  activeId={statusActiveId}
+                  labels={messages.card}
+                  onAnswer={setActiveId}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+
+        <div className="flex items-start gap-[var(--space-2)] rounded-[var(--radius-md)] border border-[var(--color-info-border)] bg-[var(--color-info-bg)] p-[var(--space-3)]">
+          <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--color-info)] text-[10px] font-bold text-white">
+            AI
+          </div>
+          <p className="text-[var(--font-size-xs)] leading-[1.45] text-[var(--color-text-muted)]">
+            {messages.tip}
+            {tipDetail ?? messages.tipExample}
+          </p>
+        </div>
+      </div>
+
+      <AnswerMethodSheet
+        open={activeId != null}
+        question={active}
+        labels={messages.methodSheet}
+        onClose={() => setActiveId(null)}
+        onSelectMethod={(method) => {
+          if (activeId == null) return;
+          const id = activeId;
+          setActiveId(null);
+          onSelectMethod(id, method);
+        }}
+        onSaveNote={(id, answer) => {
+          onSaveAnswer(id, answer);
+          setActiveId(null);
+        }}
+      />
     </section>
   );
 }

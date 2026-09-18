@@ -76,6 +76,7 @@
   --page-max-width: 960px;
   --page-max-width-narrow: 420px;
   --touch-target: 44px;
+  --touch-target-comfortable: 48px;
 }
 
 body {
@@ -294,6 +295,78 @@ body {
   :root {
     --space-page-inline: var(--space-4);
   }
+}
+
+.answer-method-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgb(0 0 0 / 50%);
+  padding: var(--space-3);
+  padding-bottom: max(var(--space-3), env(safe-area-inset-bottom, 0px));
+}
+
+@supports ((-webkit-backdrop-filter: blur(8px)) or (backdrop-filter: blur(8px))) {
+  .answer-method-sheet-backdrop {
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+  }
+}
+
+.answer-method-sheet-panel {
+  width: min(100%, var(--page-max-width-narrow));
+  max-height: min(88vh, 640px);
+  overflow: auto;
+  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-md) var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-modal);
+  padding: var(--space-5);
+  padding-bottom: max(var(--space-5), env(safe-area-inset-bottom, 0px));
+  outline: none;
+}
+
+@media (min-width: 640px) {
+  .answer-method-sheet-backdrop {
+    align-items: center;
+    padding: var(--space-4);
+  }
+
+  .answer-method-sheet-panel {
+    border-radius: var(--radius-lg);
+    padding-bottom: var(--space-5);
+  }
+}
+
+.answer-method-sheet-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--touch-target-comfortable);
+  padding-inline: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-muted);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  text-align: left;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    transform 120ms ease;
+}
+
+.answer-method-sheet-option:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface);
+}
+
+.answer-method-sheet-option:active {
+  transform: scale(0.98);
 }
 
 @media (prefers-reduced-motion: reduce) {

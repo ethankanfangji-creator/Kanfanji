@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
-import { getStripe, isActiveSubscriptionStatus } from "@/lib/stripe";
+import { isActiveSubscriptionStatus } from "@/lib/billing-status";
+import { getStripe } from "@/lib/stripe";
+import { throwOnSupabaseError } from "@/lib/supabase-write";
 import { createAdminClient } from "@/utils/supabase/admin";
 
 export const runtime = "nodejs";
@@ -12,7 +14,7 @@ async function syncSubscription(
   plan: string | null,
 ) {
   const admin = createAdminClient();
-  await admin.from("subscriptions").upsert(
+  const { error: upsertError } = await admin.from("subscriptions").upsert(
     {
       user_id: userId,
       stripe_customer_id: customerId,
@@ -22,11 +24,13 @@ async function syncSubscription(
     },
     { onConflict: "user_id" },
   );
+  throwOnSupabaseError(upsertError, "subscriptions upsert");
 
-  // Keep recent viewings' is_pro flag in sync for reporting
-  if (isActiveSubscriptionStatus(status)) {
-    await admin.from("viewings").update({ is_pro: true }).eq("user_id", userId);
-  }
+  const { error: viewingError } = await admin
+    .from("viewings")
+    .update({ is_pro: isActiveSubscriptionStatus(status) })
+    .eq("user_id", userId);
+  throwOnSupabaseError(viewingError, "viewings is_pro sync");
 }
 
 async function resolveUserId(subscription: Stripe.Subscription, customerId?: string | null) {
@@ -35,11 +39,12 @@ async function resolveUserId(subscription: Stripe.Subscription, customerId?: str
 
   if (!customerId) return null;
   const admin = createAdminClient();
-  const { data } = await admin
+  const { data, error } = await admin
     .from("subscriptions")
     .select("user_id")
     .eq("stripe_customer_id", customerId)
     .maybeSingle();
+  throwOnSupabaseError(error, "subscriptions lookup");
   return data?.user_id ?? null;
 }
 
@@ -98,9 +103,8 @@ export async function POST(request: Request) {
       default:
         break;
     }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "webhook 處理失敗";
-    return NextResponse.json({ error: message }, { status: 500 });
+  } catch {
+    return NextResponse.json({ error: "webhook 處理失敗" }, { status: 500 });
   }
 
   return NextResponse.json({ received: true });

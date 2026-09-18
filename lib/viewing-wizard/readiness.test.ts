@@ -58,21 +58,27 @@ describe("viewing wizard readiness", () => {
     expect(getStepStatus(1, 1, { ...snap, lookupError: true })).toBe("error");
   });
 
-  it("share checklist lists missing required items", () => {
+  it("share checklist lists minimal required items and optional auth tip", () => {
     const items = getShareChecklist(base);
     expect(items.find((i) => i.id === "address")?.ok).toBe(false);
-    expect(items.find((i) => i.id === "viewingAt")?.ok).toBe(false);
     expect(items.find((i) => i.id === "fieldContent")?.ok).toBe(false);
+    expect(items.find((i) => i.id === "authSync")).toMatchObject({
+      ok: false,
+      required: false,
+    });
+    expect(items.map((i) => i.id)).not.toContain("viewingAt");
     expect(canGenerateShareCard(base)).toBe(false);
 
     const ready = {
       ...base,
       address: "A",
-      viewingAt: "2026-09-15T10:00:00.000Z",
       photosCount: 1,
     };
     expect(canGenerateShareCard(ready)).toBe(true);
     expect(canGenerateShareCard({ ...ready, syncStatus: "failed" })).toBe(false);
+    expect(
+      getShareChecklist({ ...ready, authenticated: true }).find((i) => i.id === "authSync")?.ok,
+    ).toBe(true);
   });
 
   it("gates entering later steps", () => {

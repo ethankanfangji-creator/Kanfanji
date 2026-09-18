@@ -4,8 +4,8 @@ export type StepUiStatus = "empty" | "active" | "completed" | "error";
 
 export type ShareChecklistItemId =
   | "address"
-  | "viewingAt"
   | "fieldContent"
+  | "authSync"
   | "syncOk";
 
 export type ShareChecklistItem = {
@@ -28,6 +28,8 @@ export type WizardSnapshot = {
   syncStatus?: string | null;
   lookupError?: boolean;
   captureError?: boolean;
+  /** When true, auth/sync rule checklist row is marked satisfied. */
+  authenticated?: boolean;
 };
 
 export function hasAddress(address: string): boolean {
@@ -109,14 +111,15 @@ export function getShareChecklist(snap: WizardSnapshot): ShareChecklistItem[] {
       required: true,
     },
     {
-      id: "viewingAt",
-      ok: hasViewingAt(snap.viewingAt),
-      required: true,
-    },
-    {
       id: "fieldContent",
       ok: hasFieldContent(snap),
       required: true,
+    },
+    {
+      // Informational: guest can still tap generate and hit the login gate.
+      id: "authSync",
+      ok: Boolean(snap.authenticated),
+      required: false,
     },
     {
       id: "syncOk",

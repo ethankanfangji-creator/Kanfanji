@@ -30,10 +30,14 @@ export type Messages = {
     step3: string;
     back: string;
     next: string;
+    backToEdit: string;
+    saveDraft: string;
+    draftSaved: string;
     checklistTitle: string;
     checkAddress: string;
     checkViewingAt: string;
     checkFieldContent: string;
+    checkAuthSync: string;
     checkSyncOk: string;
     progress: string;
     textNotesTitle: string;
@@ -223,9 +227,18 @@ export type Messages = {
   share: {
     button: string;
     uploading: string;
+    retry: string;
     readyLoggedIn: string;
     readyGuest: string;
     needMore: string;
+    previewTitle: string;
+    previewEmpty: string;
+    previewOpen: string;
+    generateFailed: string;
+    stageOrganize: string;
+    stageAnalyze: string;
+    stageSummary: string;
+    stageBuild: string;
   };
   shareAccess: {
     title: string;

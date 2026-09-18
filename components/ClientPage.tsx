@@ -137,6 +137,7 @@ import {
   toDatetimeLocalValue,
   type WizardStep,
 } from "@/lib/viewing-wizard/readiness";
+import type { GenerateStageId } from "@/lib/viewing-wizard/generate-stages";
 import {
   mergeAddressLookupPropertyDraft,
   resolveLookupDisplayAddress,
@@ -320,6 +321,8 @@ export function ClientPage() {
   const [showPaywall, setShowPaywall] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [syncingCard, setSyncingCard] = useState(false);
+  const [generateStage, setGenerateStage] = useState<GenerateStageId | null>(null);
+  const [generateFailed, setGenerateFailed] = useState(false);
   const [viewingId, setViewingId] = useState<string | null>(null);
   const [shareToken, setShareToken] = useState<string | null>(null);
   const [shareUrl, setShareUrl] = useState("");
@@ -2810,12 +2813,16 @@ export function ClientPage() {
 
   async function syncAndOpenCard(authenticatedUser: User | null = user) {
     setSyncingCard(true);
-    setSyncMessage("正在上傳看房資料...");
+    setGenerateFailed(false);
+    setGenerateStage("organize");
+    setSyncMessage(messages.share.stageOrganize);
     try {
       // Build share snapshot before sync so cloud property jsonb carries decisionSummary.
       // On failure, source pros/risks/aiSummary and in-memory cardDraft remain intact.
       const next = rebuildCardDraft(cardDraft);
       setCardDraft(next);
+      setGenerateStage("analyze");
+      setSyncMessage(messages.share.stageAnalyze);
       const publicSnap = toPublicDecisionSummary(next);
       const nextPropertyDraft = {
         ...propertyDraft,
@@ -2828,7 +2835,11 @@ export function ClientPage() {
         ...draftSnapshotRef.current,
         propertyDraft: nextPropertyDraft,
       };
+      setGenerateStage("summary");
+      setSyncMessage(messages.share.stageSummary);
       const synced = await syncViaQueue({ openCard: true }, authenticatedUser);
+      setGenerateStage("build");
+      setSyncMessage(messages.share.stageBuild);
       const remoteId =
         (synced && "remoteViewingId" in synced && synced.remoteViewingId) ||
         viewingId ||
@@ -2874,13 +2885,18 @@ export function ClientPage() {
           // share access ensure is best-effort after sync
         }
       }
+      openDecisionCard();
     } catch (error) {
-      setSyncMessage(error instanceof Error ? error.message : "上傳失敗");
-      // Still allow local preview — original field data is untouched.
+      setGenerateFailed(true);
+      setSyncMessage(
+        error instanceof Error ? error.message : messages.share.generateFailed,
+      );
+      // Keep original field/media data; allow local preview of last card draft.
       openDecisionCard();
       throw error;
     } finally {
       setSyncingCard(false);
+      setGenerateStage(null);
     }
   }
 
@@ -2909,10 +2925,11 @@ export function ClientPage() {
       clipsCount: clips.length,
       checkedQuestions: questions.filter((q) => q.checked).length,
       syncStatus: sessionUiStatus?.status ?? null,
+      authenticated: Boolean(user),
     });
     if (!ready) {
       setWizardStep(3);
-      setSyncMessage("請先完成下方條件清單");
+      setSyncMessage(messages.share.needMore);
       return;
     }
     if (!configured) {
@@ -2931,6 +2948,7 @@ export function ClientPage() {
     }
     const wasNew = !viewingId;
     try {
+      setGenerateFailed(false);
       setWorkflowStatus("generating");
       await flushDraftToIdb({ workflowStatus: "generating" });
       await syncAndOpenCard();
@@ -2938,9 +2956,16 @@ export function ClientPage() {
       await flushDraftToIdb({ workflowStatus: "generated" });
       if (wasNew) setFreeCount((n) => n + 1);
     } catch {
+      setGenerateFailed(true);
       setWorkflowStatus("ready_to_generate");
-      // message already set
+      await flushDraftToIdb({ workflowStatus: "ready_to_generate" });
+      // Field notes/media remain in IDB and React state — do not clear them.
     }
+  }
+
+  async function saveDraftExplicit() {
+    const ok = await flushDraftToIdb({ wizardStep });
+    setSyncMessage(ok === false ? messages.sync.failed : messages.wizard.draftSaved);
   }
 
   async function goToStep(target: WizardStep) {
@@ -3691,9 +3716,23 @@ export function ClientPage() {
     syncStatus: sessionUiStatus?.status ?? null,
     lookupError,
     captureError,
+    authenticated: Boolean(user),
   };
   const shareChecklist = getShareChecklist(wizardSnap);
   const canShare = canGenerateShareCard(wizardSnap);
+  const previewSummary = cardDraft
+    ? [
+        cardDraft.address || address,
+        cardDraft.pros?.filter((item) => item.selected && item.text.trim()).length
+          ? `${cardDraft.pros.filter((item) => item.selected && item.text.trim()).length} pros`
+          : null,
+        cardDraft.risks?.filter((item) => item.selected && item.text.trim()).length
+          ? `${cardDraft.risks.filter((item) => item.selected && item.text.trim()).length} risks`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : null;
   const stepStatuses = ([1, 2, 3] as WizardStep[]).map((step) => ({
     step,
     label:
@@ -4423,8 +4462,8 @@ export function ClientPage() {
             checklist={shareChecklist}
             checklistLabels={{
               address: messages.wizard.checkAddress,
-              viewingAt: messages.wizard.checkViewingAt,
               fieldContent: messages.wizard.checkFieldContent,
+              authSync: messages.wizard.checkAuthSync,
               syncOk: messages.wizard.checkSyncOk,
             }}
             checklistTitle={messages.wizard.checklistTitle}
@@ -4434,7 +4473,14 @@ export function ClientPage() {
             syncMessage={syncMessage}
             syncLabels={messages.sync}
             canGenerate={canShare}
-            generateLabel={syncingCard ? messages.share.uploading : messages.share.button}
+            generateTitle={messages.share.button}
+            generateLabel={
+              generateFailed
+                ? messages.share.retry
+                : syncingCard
+                  ? messages.share.uploading
+                  : messages.share.button
+            }
             generateHint={
               canShare
                 ? user
@@ -4442,6 +4488,20 @@ export function ClientPage() {
                   : messages.share.readyGuest
                 : messages.share.needMore
             }
+            generateFailed={generateFailed}
+            generateFailedLabel={messages.share.generateFailed}
+            generateStage={generateStage}
+            stageLabels={{
+              organize: messages.share.stageOrganize,
+              analyze: messages.share.stageAnalyze,
+              summary: messages.share.stageSummary,
+              build: messages.share.stageBuild,
+            }}
+            previewTitle={messages.share.previewTitle}
+            previewEmpty={messages.share.previewEmpty}
+            previewOpenLabel={messages.share.previewOpen}
+            previewSummary={previewSummary}
+            onOpenPreview={cardDraft ? () => openDecisionCard() : undefined}
             onGenerate={() => void handleGenerateCard()}
             shareAccessLabels={messages.shareAccess}
             shareUrl={shareUrl}
@@ -4485,31 +4545,28 @@ export function ClientPage() {
           />
         )}
 
-        {draftReady ? <WizardBottomNav
-          backLabel={messages.wizard.back}
-          nextLabel={
-            wizardStep === 3
-              ? syncingCard
-                ? messages.share.uploading
-                : messages.share.button
-              : messages.wizard.next
-          }
-          onBack={wizardStep > 1 ? () => goToStep((wizardStep - 1) as WizardStep) : undefined}
-          onNext={() => {
-            if (wizardStep === 3) {
-              void handleGenerateCard();
-              return;
-            }
-            goToStep((wizardStep + 1) as WizardStep);
-          }}
-          nextDisabled={
-            wizardStep === 3
-              ? !canShare || syncingCard
-              : wizardStep === 1
-                ? !isStep1Complete({ address, viewingAt })
-                : false
-          }
-        /> : null}
+        {draftReady ? (
+          wizardStep === 3 ? (
+            <WizardBottomNav
+              backLabel={messages.wizard.backToEdit}
+              nextLabel={messages.wizard.saveDraft}
+              nextPrimary={false}
+              onBack={() => void goToStep(2)}
+              onNext={() => void saveDraftExplicit()}
+              nextDisabled={syncingCard}
+            />
+          ) : (
+            <WizardBottomNav
+              backLabel={messages.wizard.back}
+              nextLabel={messages.wizard.next}
+              onBack={wizardStep > 1 ? () => void goToStep((wizardStep - 1) as WizardStep) : undefined}
+              onNext={() => void goToStep((wizardStep + 1) as WizardStep)}
+              nextDisabled={
+                wizardStep === 1 ? !isStep1Complete({ address, viewingAt }) : false
+              }
+            />
+          )
+        ) : null}
 
         {showAiConsent && (
           <Dialog

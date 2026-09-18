@@ -287,7 +287,7 @@ export type Messages = {
     privacyConfirm: string;
     privacyCancel: string;
   };
-  pdfExport: {
+  cardImageExport: {
     button: string;
     preparingImages: string;
     generating: string;
@@ -297,7 +297,6 @@ export type Messages = {
     imageError: string;
     openFallback: string;
     fileShareTitle: string;
-    page: string;
   };
   aiSummary: {
     title: string;

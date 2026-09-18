@@ -2,19 +2,17 @@
 
 import { getMedia } from "@/lib/idb/draft-store";
 import { selectedPhotos, type DecisionSummarySnapshot } from "@/lib/share-card";
-import type { PdfPhotoSource, PreparedPdfPhoto } from "./types";
+import type { CardImagePhotoSource, PreparedCardImagePhoto } from "./types";
 
-// 1024 px still exceeds 260 DPI at the rendered photo width while keeping
-// iOS Safari below its canvas/PDF memory pressure threshold for five photos.
-const MAX_EDGE = 1024;
-const JPEG_QUALITY = 0.72;
+const MAX_EDGE = 900;
+const JPEG_QUALITY = 0.75;
 
-export class PdfImagePreparationError extends Error {
+export class CardImagePreparationError extends Error {
   readonly photoIds: string[];
 
   constructor(photoIds: string[]) {
-    super("PDF_IMAGE_PREPARATION_FAILED");
-    this.name = "PdfImagePreparationError";
+    super("CARD_IMAGE_PREPARATION_FAILED");
+    this.name = "CardImagePreparationError";
     this.photoIds = photoIds;
   }
 }
@@ -28,7 +26,10 @@ function readAsDataUrl(blob: Blob): Promise<string> {
   });
 }
 
-async function normalizedImageDataUrl(blob: Blob): Promise<string> {
+async function normalizedPreparedPhoto(
+  blob: Blob,
+  meta: { id: string; tag: string; note: string },
+): Promise<PreparedCardImagePhoto> {
   const objectUrl = URL.createObjectURL(blob);
   let image: HTMLImageElement | null = null;
   let canvas: HTMLCanvasElement | null = null;
@@ -58,7 +59,14 @@ async function normalizedImageDataUrl(blob: Blob): Promise<string> {
         JPEG_QUALITY,
       );
     });
-    return readAsDataUrl(output);
+    return {
+      id: meta.id,
+      tag: meta.tag,
+      note: meta.note,
+      dataUrl: await readAsDataUrl(output),
+      width,
+      height,
+    };
   } finally {
     if (image) image.src = "";
     if (canvas) {
@@ -71,7 +79,7 @@ async function normalizedImageDataUrl(blob: Blob): Promise<string> {
 
 async function resolvePhotoBlob(
   photoId: string,
-  source: PdfPhotoSource | undefined,
+  source: CardImagePhotoSource | undefined,
   fallbackUrl: string,
 ): Promise<Blob> {
   if (source?.mediaId) {
@@ -85,33 +93,33 @@ async function resolvePhotoBlob(
   return response.blob();
 }
 
-export async function preparePdfPhotos(
+export async function prepareCardImagePhotos(
   snapshot: DecisionSummarySnapshot,
-  sources: PdfPhotoSource[],
+  sources: CardImagePhotoSource[],
   onProgress?: (completed: number, total: number) => void,
-): Promise<PreparedPdfPhoto[]> {
+): Promise<PreparedCardImagePhoto[]> {
   const selected = selectedPhotos(snapshot.photos);
   const byId = new Map(sources.map((source) => [source.id, source]));
-  const prepared: PreparedPdfPhoto[] = [];
+  const prepared: PreparedCardImagePhoto[] = [];
   const failed: string[] = [];
 
   for (let index = 0; index < selected.length; index += 1) {
     const photo = selected[index];
     try {
       const blob = await resolvePhotoBlob(photo.id, byId.get(photo.id), photo.url);
-      prepared.push({
-        id: photo.id,
-        tag: photo.tag,
-        note: photo.note,
-        dataUrl: await normalizedImageDataUrl(blob),
-      });
+      prepared.push(
+        await normalizedPreparedPhoto(blob, {
+          id: photo.id,
+          tag: photo.tag,
+          note: photo.note,
+        }),
+      );
     } catch {
       failed.push(photo.id);
     }
     onProgress?.(index + 1, selected.length);
   }
 
-  if (failed.length > 0) throw new PdfImagePreparationError(failed);
+  if (failed.length > 0) throw new CardImagePreparationError(failed);
   return prepared;
 }
-

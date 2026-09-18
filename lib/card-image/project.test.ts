@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DecisionSummarySnapshot } from "@/lib/share-card";
-import { buildPdfSummary, pdfFileName } from "./project";
+import { buildCardImageModel, cardImageFileName } from "./project";
 
 const snapshot: DecisionSummarySnapshot = {
   version: 1,
@@ -42,20 +42,24 @@ const snapshot: DecisionSummarySnapshot = {
   generatedAt: "2026-09-15T19:00:00.000Z",
 };
 
-describe("PDF summary projection", () => {
+describe("card image projection", () => {
   it("keeps only explicitly selected share-card content", () => {
-    const result = buildPdfSummary(snapshot, [
+    const result = buildCardImageModel(snapshot, [
       {
         id: "photo-1",
         tag: "Kitchen",
         note: "Selected annotation",
         dataUrl: "data:image/jpeg;base64,AA==",
+        width: 100,
+        height: 80,
       },
       {
         id: "photo-2",
         tag: "Bedroom",
         note: "Private annotation",
         dataUrl: "data:image/jpeg;base64,AA==",
+        width: 100,
+        height: 80,
       },
     ]);
 
@@ -67,8 +71,7 @@ describe("PDF summary projection", () => {
     expect(JSON.stringify(result)).not.toContain("Private");
   });
 
-  it("creates a filesystem-safe PDF filename", () => {
-    expect(pdfFileName(snapshot)).toBe("12 34 Test Street-2026-09-15.pdf");
+  it("creates a filesystem-safe JPEG filename", () => {
+    expect(cardImageFileName(snapshot)).toBe("12 34 Test Street-2026-09-15.jpg");
   });
 });
-

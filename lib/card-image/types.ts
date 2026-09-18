@@ -1,25 +1,27 @@
 import type { DecisionSummarySnapshot } from "@/lib/share-card";
 
-export type PdfPhotoSource = {
+export type CardImagePhotoSource = {
   id: string;
   url?: string;
   mediaId?: string;
 };
 
-export type PreparedPdfPhoto = {
+export type PreparedCardImagePhoto = {
   id: string;
   tag: string;
   note: string;
   dataUrl: string;
+  width: number;
+  height: number;
 };
 
-export type PdfSummaryModel = {
+export type CardImageModel = {
   snapshot: DecisionSummarySnapshot;
-  photos: PreparedPdfPhoto[];
+  photos: PreparedCardImagePhoto[];
   fileName: string;
 };
 
-export type PdfDocumentLabels = {
+export type CardImageDocumentLabels = {
   title: string;
   viewingAt: string;
   basics: string;
@@ -41,10 +43,9 @@ export type PdfDocumentLabels = {
   actionItems: string;
   emptySection: string;
   generatedAt: string;
-  page: string;
 };
 
-export type PdfExportUiLabels = {
+export type CardImageExportUiLabels = {
   button: string;
   preparingImages: string;
   generating: string;
@@ -55,4 +56,3 @@ export type PdfExportUiLabels = {
   openFallback: string;
   fileShareTitle: string;
 };
-

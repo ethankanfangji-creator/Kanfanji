@@ -3,7 +3,7 @@ import {
   toPublicDecisionSummary,
   type DecisionSummarySnapshot,
 } from "@/lib/share-card";
-import type { PdfSummaryModel, PreparedPdfPhoto } from "./types";
+import type { CardImageModel, PreparedCardImagePhoto } from "./types";
 
 function safeFilePart(input: string): string {
   const normalized = input
@@ -15,20 +15,20 @@ function safeFilePart(input: string): string {
   return normalized || "viewing-summary";
 }
 
-export function pdfFileName(snapshot: DecisionSummarySnapshot): string {
+export function cardImageFileName(snapshot: DecisionSummarySnapshot): string {
   const date = snapshot.viewingAt
     ? new Date(snapshot.viewingAt)
     : new Date(snapshot.generatedAt);
   const datePart = Number.isNaN(date.getTime())
     ? ""
     : date.toISOString().slice(0, 10);
-  return `${safeFilePart(snapshot.address)}${datePart ? `-${datePart}` : ""}.pdf`;
+  return `${safeFilePart(snapshot.address)}${datePart ? `-${datePart}` : ""}.jpg`;
 }
 
-export function buildPdfSummary(
+export function buildCardImageModel(
   source: DecisionSummarySnapshot,
-  preparedPhotos: PreparedPdfPhoto[],
-): PdfSummaryModel {
+  preparedPhotos: PreparedCardImagePhoto[],
+): CardImageModel {
   const snapshot = toPublicDecisionSummary(source);
   const selectedIds = new Set(
     selectedPhotos(snapshot.photos).map((photo) => photo.id),
@@ -37,11 +37,11 @@ export function buildPdfSummary(
   return {
     snapshot,
     photos,
-    fileName: pdfFileName(snapshot),
+    fileName: cardImageFileName(snapshot),
   };
 }
 
-export function formatPdfDate(input: string, locale: string): string {
+export function formatCardImageDate(input: string, locale: string): string {
   if (!input.trim()) return "";
   const date = new Date(input);
   if (Number.isNaN(date.getTime())) return input;
@@ -53,4 +53,3 @@ export function formatPdfDate(input: string, locale: string): string {
     minute: "2-digit",
   }).format(date);
 }
-

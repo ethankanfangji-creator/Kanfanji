@@ -38,7 +38,7 @@ import { WizardBottomNav, WizardStepper } from "@/components/viewing-wizard/Wiza
 import { useViewingSyncController } from "@/components/viewing-wizard/useViewingSyncController";
 import { DecisionSummaryCard } from "@/components/share-card/DecisionSummaryCard";
 import { SharePrivacyCheck } from "@/components/share-card/SharePrivacyCheck";
-import { PdfExportButton } from "@/components/pdf/PdfExportButton";
+import { CardImageExportButton } from "@/components/share-card/CardImageExportButton";
 import { Dialog } from "@/components/ui/Dialog";
 import { LoginGateDialog } from "@/components/auth/LoginGateDialog";
 import { useI18n } from "@/components/I18nProvider";
@@ -4665,7 +4665,7 @@ export function ClientPage() {
                           <Share2 className="w-4 h-4" /> {messages.card.shareLink}
                         </button>
                       </div>
-                      <PdfExportButton
+                      <CardImageExportButton
                         snapshot={cardDraft}
                         photoSources={photos.map((photo) => ({
                           id: String(photo.id),
@@ -4695,9 +4695,8 @@ export function ClientPage() {
                           actionItems: messages.card.actionItems,
                           emptySection: messages.card.emptySection,
                           generatedAt: messages.card.generatedAt,
-                          page: messages.pdfExport.page,
                         }}
-                        uiLabels={messages.pdfExport}
+                        uiLabels={messages.cardImageExport}
                       />
                       <button
                         type="button"

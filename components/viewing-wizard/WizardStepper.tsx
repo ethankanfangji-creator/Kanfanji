@@ -86,14 +86,14 @@ export function WizardBottomNav({
   nextPrimary?: boolean;
 }) {
   return (
-    <div className="fixed bottom-0 inset-x-0 z-40 flex justify-center pointer-events-none">
-      <div className="w-full max-w-[420px] px-4 pb-[max(12px,env(safe-area-inset-bottom))] pt-2 pointer-events-auto bg-gradient-to-t from-[#FDF6F0] via-[#FDF6F0]/95 to-transparent">
-        <div className="flex gap-2">
+    <div className="fixed bottom-0 inset-x-0 z-40 flex justify-center pointer-events-none overflow-x-hidden">
+      <div className="box-border w-full max-w-[min(420px,100%)] px-4 pb-[max(12px,env(safe-area-inset-bottom))] pt-2 pointer-events-auto bg-gradient-to-t from-[#FDF6F0] via-[#FDF6F0]/95 to-transparent">
+        <div className="flex min-w-0 gap-2">
           {onBack ? (
             <button
               type="button"
               onClick={onBack}
-              className="h-12 flex-1 rounded-full bg-white border border-black/10 text-[14px] font-bold active:scale-[0.98]"
+              className="h-12 min-w-0 flex-1 rounded-full bg-white border border-black/10 text-[14px] font-bold active:scale-[0.98]"
             >
               {backLabel ?? "Back"}
             </button>
@@ -102,7 +102,7 @@ export function WizardBottomNav({
             type="button"
             onClick={onNext}
             disabled={nextDisabled}
-            className={`h-12 flex-[1.4] rounded-full text-[14px] font-bold inline-flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-45 ${
+            className={`h-12 min-w-0 flex-[1.4] rounded-full text-[14px] font-bold inline-flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-45 ${
               nextPrimary !== false
                 ? "bg-black text-white"
                 : "bg-white border border-black/10 text-[#1A1A1A]"

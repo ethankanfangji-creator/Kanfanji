@@ -216,12 +216,14 @@ export function StepSetup({
           {messages.setup.lookupOptional}
         </p>
 
-        <div className="mt-[var(--space-4)] border-t border-[var(--color-border)] pt-[var(--space-4)]">
+        <div className="relative mt-[var(--space-4)] border-t border-[var(--color-border)] pt-[var(--space-4)]">
           <input
             ref={photoInputRef}
             type="file"
             accept="image/jpeg,image/jpg"
-            className="sr-only"
+            tabIndex={-1}
+            aria-hidden="true"
+            className="pointer-events-none absolute left-0 top-0 h-px w-px max-w-px overflow-hidden opacity-0"
             onChange={(event) => void handlePhotoMetaFile(event.target.files?.[0])}
           />
           <button

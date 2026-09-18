@@ -6,9 +6,6 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import {
   AlertTriangle,
   Camera,
-  Check,
-  ChevronDown,
-  ChevronUp,
   Copy,
   FileText,
   List,
@@ -25,13 +22,12 @@ import { MediaPermissionBanner } from "@/components/media/MediaPermissionBanner"
 import { PermissionPreflight } from "@/components/media/PermissionPreflight";
 import { MediaPickerInputs } from "@/components/media/MediaPickerInputs";
 import { AudioNotePlayer } from "@/components/media/AudioNotePlayer";
-import { RecordingMarkerBar } from "@/components/media/RecordingMarkerBar";
 import {
   selectSupportedAudioMimeType,
   useMediaCapture,
 } from "@/components/media/useMediaCapture";
-import { FieldChecklistPanel } from "@/components/viewing-wizard/FieldChecklistPanel";
 import { PhotoAnnotator } from "@/components/viewing-wizard/PhotoAnnotator";
+import { QuestionList } from "@/components/viewing-wizard/questions";
 import { StepSetup } from "@/components/viewing-wizard/StepSetup";
 import { StepShare } from "@/components/viewing-wizard/StepShare";
 import { WizardBottomNav, WizardStepper } from "@/components/viewing-wizard/WizardStepper";
@@ -56,13 +52,10 @@ import type { ShareLinkRecord } from "@/lib/share-access/types";
 import { bankQuestions } from "@/lib/i18n";
 import {
   attachMediaToMarkers,
-  canAddMarkerNow,
-  createAudioMarker,
   removeAudioMarker,
   serializeMarkersForAi,
   updateAudioMarker,
   type AudioMarker,
-  type AudioMarkerTagId,
 } from "@/lib/audio-markers";
 import {
   claimsToLegacyStrings,
@@ -85,7 +78,6 @@ import {
 } from "@/lib/ai-boundary/job-commit";
 import { AiSummaryPanel } from "@/components/media/AiSummaryPanel";
 import {
-  createCustomChecklistItem,
   createImageThumbnail,
   ensureFieldChecklist,
   normalizePhotoTagId,
@@ -156,19 +148,14 @@ import {
   initialViewingDraftFormState,
   viewingDraftFormReducer,
 } from "@/lib/viewing-wizard/draft-state";
+import {
+  mergeChecklistIntoQuestions,
+  syncQuestionAnswerToChecklist,
+  type WizardQuestion,
+} from "@/lib/viewing-wizard/questions";
 import type { User } from "@supabase/supabase-js";
 
-type Question = {
-  id: number;
-  text: string;
-  checked: boolean;
-  answer?: string;
-  isFollowUp?: boolean;
-  basedOn?: string;
-  isDynamic?: boolean;
-  source?: "photo" | "audio" | "opendata" | string;
-  aiJobId?: string;
-};
+type Question = WizardQuestion;
 
 type AudioNote = {
   id: number;
@@ -293,7 +280,6 @@ export function ClientPage() {
   const [tags, setTags] = useState<string[]>([]);
   const [marketCode, setMarketCode] = useState<"CA" | "TH" | "OTHER">("CA");
   const [questions, setQuestions] = useState<Question[]>([]);
-  const [bankCollapsed, setBankCollapsed] = useState(false);
   const [audioState, setAudioState] = useState<"idle" | "recording" | "processing">("idle");
   const [audioSeconds, setAudioSeconds] = useState(0);
   const [notes, setNotes] = useState<AudioNote[]>([]);
@@ -306,7 +292,6 @@ export function ClientPage() {
   const audioStartedAtRef = useRef(0);
   const audioDiscardRef = useRef(false);
   const audioMimeRef = useRef("audio/webm");
-  const markerCooldownRef = useRef(0);
   const liveMarkersRef = useRef<AudioMarker[]>([]);
   const captureLockRef = useRef<CaptureKind | null>(null);
   const [clips, setClips] = useState<Clip[]>([]);
@@ -1322,7 +1307,16 @@ export function ClientPage() {
           setTags(draft.tags ?? []);
           setMarketCode(draft.market ?? "CA");
           setIdentified(Boolean(draft.identified));
-          if (draft.questions?.length) setQuestions(draft.questions);
+          const hydratedChecklist = ensureFieldChecklist(
+            draft.fieldChecklist,
+            messages.fieldChecklist.labels,
+          );
+          setFieldChecklist(hydratedChecklist);
+          if (draft.questions?.length) {
+            setQuestions(mergeChecklistIntoQuestions(draft.questions, hydratedChecklist));
+          } else if (hydratedChecklist.length) {
+            setQuestions(mergeChecklistIntoQuestions([], hydratedChecklist));
+          }
           if (draft.notes?.length) {
             setNotes(
               draft.notes.map((note) => ({
@@ -1343,9 +1337,6 @@ export function ClientPage() {
           if (draft.wizardStep === 1 || draft.wizardStep === 2 || draft.wizardStep === 3) {
             setWizardStep(draft.wizardStep);
           }
-          setFieldChecklist(
-            ensureFieldChecklist(draft.fieldChecklist, messages.fieldChecklist.labels),
-          );
           if (draft.liveAudioMarkers?.length) {
             setLiveMarkers(draft.liveAudioMarkers);
           }
@@ -1986,27 +1977,6 @@ export function ClientPage() {
   }
 
 
-  function addLiveMarker(tagId: AudioMarkerTagId) {
-    if (audioState !== "recording") return;
-    const now = Date.now();
-    if (!canAddMarkerNow(markerCooldownRef.current, now)) {
-      setSyncMessage(messages.audio.markerCooldown);
-      return;
-    }
-    markerCooldownRef.current = now;
-    const marker = createAudioMarker({
-      timeSec: Math.max(0, (now - audioStartedAtRef.current) / 1000),
-      tagId,
-      viewingSessionId: draftSessionIdRef.current,
-    });
-    setLiveMarkers((current) => {
-      const next = [...current, marker];
-      liveMarkersRef.current = next;
-      void flushDraftToIdb({ liveAudioMarkers: next });
-      return next;
-    });
-  }
-
   function updateNoteMarkers(noteId: number, nextMarkers: AudioMarker[]) {
     const existing = notesRef.current.find((item) => item.id === noteId);
     setNotes((current) => {
@@ -2066,7 +2036,6 @@ export function ClientPage() {
       audioDiscardRef.current = false;
       setLiveMarkers([]);
       liveMarkersRef.current = [];
-      markerCooldownRef.current = 0;
       void flushDraftToIdb({ liveAudioMarkers: [] });
       const stream = result.stream;
       audioStreamRef.current = stream;
@@ -2784,9 +2753,16 @@ export function ClientPage() {
         });
       });
     }
-    if (target === 2 && fieldChecklist.length === 0) {
-      const seeded = ensureFieldChecklist([], messages.fieldChecklist.labels);
+    if (target === 2) {
+      const seeded = ensureFieldChecklist(fieldChecklist, messages.fieldChecklist.labels);
       setFieldChecklist(seeded);
+      setQuestions((current) => {
+        const base =
+          current.length > 0
+            ? current
+            : bankQuestions(locale, marketCode).map((q) => ({ ...q, checked: false }));
+        return mergeChecklistIntoQuestions(base, seeded);
+      });
       await flushDraftToIdb({ wizardStep: target, fieldChecklist: seeded });
       setWizardStep(target);
       return;
@@ -3211,7 +3187,6 @@ export function ClientPage() {
         } finally {
           appliedDb.close();
         }
-        setBankCollapsed(false);
         setSyncMessage(
           persistenceFailed
             ? `照片 AI 已生成 ${generated.length} 題必問 · 部分照片仍只在目前頁面`
@@ -3668,185 +3643,81 @@ export function ClientPage() {
 
                 {draftReady && wizardStep === 2 && (
           <>
-        <div className="bg-white rounded-[22px] border border-black/[0.05] shadow-[0_4px_20px_rgba(0,0,0,0.04)] p-4 mb-4">
-            <button
-              type="button"
-              aria-expanded={!bankCollapsed}
-              className="flex min-h-11 w-full items-center justify-between text-left"
-              onClick={() => setBankCollapsed((value) => !value)}
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-[12px] font-[800] tracking-widest">
-                  {messages.bank.title} - {market}
-                </span>
-                <span className="px-2 py-0.5 rounded-full bg-[#DBEAFE] text-[10px] font-bold text-[#2563EB]">
-                  {questions.length}題
-                </span>
-              </div>
-              <span className="min-w-11 min-h-11 rounded-full bg-[#F5F3F0] flex items-center justify-center">
-                {bankCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
-              </span>
-            </button>
-            {!bankCollapsed && (
-              <>
-                <div className="mt-3 space-y-2">
-                  {questions.some((q) => q.isDynamic && q.source === "photo") && (
-                    <div className="space-y-2">
-                      <p className="text-[11px] font-bold tracking-wide text-[#047857]">
-                        {messages.bank.photoAi}
-                      </p>
-                      {questions
-                        .filter((q) => q.isDynamic && q.source === "photo")
-                        .map((question) => (
-                          <button
-                            key={question.id}
-                            onClick={() =>
-                              setQuestions((current) =>
-                                current.map((item) =>
-                                  item.id === question.id
-                                    ? { ...item, checked: !item.checked }
-                                    : item,
-                                ),
-                              )
-                            }
-                            className={`w-full rounded-xl border p-3 text-left transition ${
-                              question.checked
-                                ? "bg-[#065F46] text-white border-[#065F46]"
-                                : "bg-[#ECFDF5] border-[#A7F3D0] hover:bg-[#D1FAE5]"
-                            }`}
-                          >
-                            <span className="flex items-start gap-1.5 text-[12px] font-bold">
-                              {question.checked ? (
-                                <Check className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                              ) : (
-                                <span className="mt-0.5 px-1.5 py-0.5 rounded-full bg-[#059669] text-white text-[9px] font-bold shrink-0">
-                                  {messages.bank.photoBadge}
-                                </span>
-                              )}
-                              {question.text}
-                            </span>
-                            {question.basedOn && (
-                              <span
-                                className={`block mt-1.5 text-[10px] leading-[1.4] ${
-                                  question.checked ? "text-white/70" : "text-[#047857]/70"
-                                }`}
-                              >
-                                {messages.bank.tagLabel}{question.basedOn}
-                              </span>
-                            )}
-                          </button>
-                        ))}
-                    </div>
-                  )}
-
-                  <div className="flex flex-wrap gap-2">
-                    {questions
-                      .filter(
-                        (question) =>
-                          !question.isFollowUp &&
-                          !(question.isDynamic && question.source === "photo"),
-                      )
-                      .map((question) => (
-                        <button
-                          key={question.id}
-                          onClick={() =>
-                            setQuestions((current) =>
-                              current.map((item) =>
-                                item.id === question.id
-                                  ? { ...item, checked: !item.checked }
-                                  : item,
-                              ),
-                            )
-                          }
-                          className={`px-3 py-2 rounded-full text-[12px] font-medium border transition text-left ${
-                            question.checked
-                              ? "bg-black text-white border-black"
-                              : "bg-[#FAF7F3] border-black/5 hover:bg-[#F3F0EB]"
-                          }`}
-                        >
-                          <span className="flex items-center gap-1.5">
-                            {question.checked && <Check className="w-3 h-3" />}
-                            {question.text}
-                          </span>
-                        </button>
-                      ))}
-                  </div>
-
-                  {questions.some((q) => q.isFollowUp) && (
-                    <div className="pt-1 space-y-2">
-                      <p className="text-[11px] font-bold tracking-wide text-[#7C3AED]">
-                        {messages.bank.followUp}
-                      </p>
-                      {questions
-                        .filter((question) => question.isFollowUp)
-                        .map((question) => (
-                          <button
-                            key={question.id}
-                            onClick={() =>
-                              setQuestions((current) =>
-                                current.map((item) =>
-                                  item.id === question.id
-                                    ? { ...item, checked: !item.checked }
-                                    : item,
-                                ),
-                              )
-                            }
-                            className={`w-full rounded-xl border p-3 text-left transition ${
-                              question.checked
-                                ? "bg-[#4C1D95] text-white border-[#4C1D95]"
-                                : "bg-[#F5F3FF] border-[#DDD6FE] hover:bg-[#EDE9FE]"
-                            }`}
-                          >
-                            <span className="flex items-start gap-1.5 text-[12px] font-bold">
-                              {question.checked ? (
-                                <Check className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                              ) : (
-                                <span className="mt-0.5 px-1.5 py-0.5 rounded-full bg-[#7C3AED] text-white text-[9px] font-bold shrink-0">
-                                  {messages.bank.followBadge}
-                                </span>
-                              )}
-                              {question.text}
-                            </span>
-                            {question.basedOn && (
-                              <span
-                                className={`block mt-1.5 text-[10px] leading-[1.4] ${
-                                  question.checked ? "text-white/70" : "text-[#6D28D9]/70"
-                                }`}
-                              >
-                                {messages.card.byDialogue}{question.basedOn}
-                              </span>
-                            )}
-                            {question.answer && (
-                              <span
-                                className={`block mt-1 text-[11px] ${
-                                  question.checked ? "text-white/80" : "text-[#6B7280]"
-                                }`}
-                              >
-                                A: {question.answer}
-                              </span>
-                            )}
-                          </button>
-                        ))}
-                    </div>
-                  )}
-                </div>
-                <div className="mt-3 flex gap-2 items-start bg-[#F8F7FF] border border-[#E9E5FF] rounded-xl p-2.5">
-                  <div className="w-5 h-5 rounded-full bg-[#6366F1] text-white flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">
-                    AI
-                  </div>
-                  <p className="text-[11px] text-[#6B7280] leading-[1.4]">
-                    {messages.bank.tip}
-                    {notes.length > 0
-                      ? t(messages.bank.matched, {
-                          matched: notes.reduce((sum, note) => sum + note.matched.length, 0),
-                          followUps: questions.filter((q) => q.isFollowUp).length,
-                        })
-                      : messages.bank.tipExample}
-                  </p>
-                </div>
-              </>
-            )}
-          </div>
+        <QuestionList
+          messages={{
+            title: messages.bank.title,
+            photoAi: messages.bank.photoAi,
+            followUp: messages.bank.followUp,
+            checklistSection: messages.bank.checklistSection,
+            tip: messages.bank.tip,
+            tipExample: messages.bank.tipExample,
+            matched: messages.bank.matched,
+            countLabel: messages.bank.countLabel,
+            card: {
+              photoBadge: messages.bank.photoBadge,
+              followBadge: messages.bank.followBadge,
+              checklistBadge: messages.bank.checklistBadge,
+              tagLabel: messages.bank.tagLabel,
+              byDialogue: messages.card.byDialogue,
+              answered: messages.bank.answered,
+            },
+            answer: {
+              title: messages.bank.answerTitle,
+              placeholder: messages.bank.answerPlaceholder,
+              save: messages.bank.answerSave,
+              clear: messages.bank.answerClear,
+              empty: messages.bank.answerEmpty,
+            },
+          }}
+          marketLabel={market}
+          questions={questions}
+          tipDetail={
+            notes.length > 0
+              ? t(messages.bank.matched, {
+                  matched: notes.reduce((sum, note) => sum + note.matched.length, 0),
+                  followUps: questions.filter((q) => q.isFollowUp).length,
+                })
+              : undefined
+          }
+          onToggle={(id) => {
+            setQuestions((current) => {
+              const next = current.map((item) =>
+                item.id === id ? { ...item, checked: !item.checked } : item,
+              );
+              const toggled = next.find((item) => item.id === id);
+              if (toggled) {
+                setFieldChecklist((checklist) =>
+                  syncQuestionAnswerToChecklist(checklist, toggled),
+                );
+              }
+              return next;
+            });
+          }}
+          onSaveAnswer={(id, answer) => {
+            setQuestions((current) => {
+              const next = current.map((item) =>
+                item.id === id
+                  ? {
+                      ...item,
+                      answer: answer || undefined,
+                      checked: answer ? true : item.checked,
+                    }
+                  : item,
+              );
+              const saved = next.find((item) => item.id === id);
+              if (saved) {
+                setFieldChecklist((checklist) => {
+                  const synced = syncQuestionAnswerToChecklist(checklist, saved);
+                  void flushDraftToIdb({ questions: next, fieldChecklist: synced });
+                  return synced;
+                });
+              } else {
+                void flushDraftToIdb({ questions: next });
+              }
+              return next;
+            });
+          }}
+        />
 
         <div className="bg-white rounded-[24px] border border-black/[0.05] shadow-[0_4px_20px_rgba(0,0,0,0.04)] p-5 mb-4">
           <span className="text-[12px] font-[800] tracking-widest">{messages.wizard.textNotesTitle}</span>
@@ -3975,46 +3846,7 @@ export function ClientPage() {
                 onDismiss={() => setPermissionBanner(null)}
               />
             ) : null}
-            {audioState === "recording" ? (
-              <RecordingMarkerBar
-                title={messages.audio.markerTitle}
-                hint={messages.audio.markerHint}
-                labels={messages.audio.markerTags}
-                onAdd={addLiveMarker}
-              />
-            ) : null}
-            {liveMarkers.length > 0 && audioState === "recording" ? (
-              <ul className="mt-3 w-full space-y-1.5" aria-label={messages.audio.markerListTitle}>
-                {liveMarkers.map((marker) => (
-                  <li
-                    key={marker.id}
-                    className="flex items-center justify-between gap-2 rounded-xl bg-[#EFF6FF] border border-[#BFDBFE] px-3 py-2 text-[12px]"
-                  >
-                    <span className="font-mono font-bold text-[#1D4ED8]">
-                      {String(Math.floor(marker.timeSec / 60)).padStart(2, "0")}:
-                      {String(Math.floor(marker.timeSec) % 60).padStart(2, "0")}
-                    </span>
-                    <span className="flex-1 font-semibold text-[#1E3A8A]">
-                      {messages.audio.markerTags[marker.tagId]}
-                    </span>
-                    <button
-                      type="button"
-                      className="min-h-11 px-3 rounded-full text-[#991B1B] font-bold"
-                      onClick={() => {
-                        setLiveMarkers((current) => {
-                          const next = removeAudioMarker(current, marker.id);
-                          liveMarkersRef.current = next;
-                          void flushDraftToIdb({ liveAudioMarkers: next });
-                          return next;
-                        });
-                      }}
-                    >
-                      {messages.audio.markerDelete}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
+            {/* Live recording markers remain in data model / playback; standalone capture UI is hidden. */}
           </div>
           {notes.length > 0 && (
             <div className="mt-5 space-y-2">
@@ -4112,42 +3944,7 @@ export function ClientPage() {
           ) : null}
         </div>
 
-        <FieldChecklistPanel
-          title={messages.fieldChecklist.title}
-          addLabel={messages.fieldChecklist.add}
-          addPlaceholder={messages.fieldChecklist.addPlaceholder}
-          notePlaceholder={messages.fieldChecklist.notePlaceholder}
-          items={fieldChecklist}
-          onToggle={(id) => {
-            setFieldChecklist((current) => {
-              const next = current.map((item) =>
-                item.id === id ? { ...item, checked: !item.checked } : item,
-              );
-              void flushDraftToIdb({ fieldChecklist: next });
-              return next;
-            });
-          }}
-          onNoteChange={(id, note) => {
-            setFieldChecklist((current) => {
-              const next = current.map((item) => (item.id === id ? { ...item, note } : item));
-              void flushDraftToIdb({ fieldChecklist: next });
-              return next;
-            });
-          }}
-          onAddCustom={(text) => {
-            setFieldChecklist((current) => {
-              const next = [
-                ...current,
-                createCustomChecklistItem(
-                  text,
-                  current.reduce((max, item) => Math.max(max, item.sortOrder), 0) + 1,
-                ),
-              ];
-              void flushDraftToIdb({ fieldChecklist: next });
-              return next;
-            });
-          }}
-        />
+        {/* Field checklist rows stay in draft/IDB; UI is folded into QuestionList. */}
 
         <div className="bg-white rounded-[24px] border border-black/[0.05] shadow-[0_4px_20px_rgba(0,0,0,0.04)] p-5 mb-4">
           <div className="flex items-center justify-between">

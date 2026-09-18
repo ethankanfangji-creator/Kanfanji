@@ -90,6 +90,15 @@ export type Messages = {
     tip: string;
     tipExample: string;
     matched: string;
+    checklistSection: string;
+    checklistBadge: string;
+    countLabel: string;
+    answered: string;
+    answerTitle: string;
+    answerPlaceholder: string;
+    answerSave: string;
+    answerClear: string;
+    answerEmpty: string;
   };
   audio: {
     title: string;

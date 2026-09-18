@@ -111,6 +111,9 @@ import {
 import { createSignedMediaUrl, extensionFor } from "@/lib/media";
 import { takeInputFiles, validateImportedMedia } from "@/lib/media-import";
 import {
+  decideCaptureStart,
+  hasCaptureExplained,
+  markCaptureExplained,
   type CaptureKind,
   type MediaPermissionStatus,
 } from "@/lib/media-permissions";
@@ -297,6 +300,7 @@ export function ClientPage() {
   const audioStartedAtRef = useRef(0);
   const audioDiscardRef = useRef(false);
   const audioMimeRef = useRef("audio/webm");
+  const audioInterruptedRef = useRef(false);
   const liveMarkersRef = useRef<AudioMarker[]>([]);
   const captureLockRef = useRef<CaptureKind | null>(null);
   const [clips, setClips] = useState<Clip[]>([]);
@@ -1631,7 +1635,36 @@ export function ClientPage() {
   function beginAnswerCapture(questionId: number, kind: CaptureKind) {
     pendingAnswerQuestionIdRef.current = questionId;
     setPendingAnswerQuestionId(questionId);
-    void openCapturePreflight(kind);
+    void openCaptureFlow(kind);
+  }
+
+  function focusTextNoteFallback() {
+    setPermissionBanner(null);
+    requestAnimationFrame(() => {
+      document.getElementById("step2-text-notes")?.scrollIntoView({
+        block: "nearest",
+        behavior: "smooth",
+      });
+      const field = document.querySelector<HTMLTextAreaElement>(
+        "#step2-text-notes textarea",
+      );
+      field?.focus();
+    });
+  }
+
+  function openNativePicker(kind: "photo" | "video") {
+    captureLockRef.current = kind;
+    const releaseAfterPickerCloses = () => {
+      window.setTimeout(() => {
+        if (captureLockRef.current === kind) captureLockRef.current = null;
+      }, 0);
+    };
+    window.addEventListener("focus", releaseAfterPickerCloses, { once: true });
+    if (kind === "video") {
+      videoCaptureInput.current?.click();
+      return;
+    }
+    photoCaptureInput.current?.click();
   }
 
   function applyQuestionAnswer(
@@ -2066,6 +2099,7 @@ export function ClientPage() {
 
   function finishAudioRecorder(options: { discard: boolean; interrupted?: boolean }) {
     audioDiscardRef.current = options.discard;
+    audioInterruptedRef.current = Boolean(options.interrupted);
     const recorder = audioRecorderRef.current;
     if (recorder && recorder.state !== "inactive") {
       try {
@@ -2157,11 +2191,22 @@ export function ClientPage() {
       setPreflightStatus("unsupported");
       return;
     }
+    if (audioState === "recording" || audioState === "processing") {
+      setSyncMessage(messages.permissions.busyElsewhere);
+      return;
+    }
+    if (audioRecorderRef.current && audioRecorderRef.current.state !== "inactive") {
+      setSyncMessage(messages.permissions.busyElsewhere);
+      return;
+    }
     if (captureLockRef.current && captureLockRef.current !== "audio") {
       setSyncMessage(messages.permissions.busyElsewhere);
       return;
     }
 
+    // Claim the lock before awaiting getUserMedia so a second tap cannot start
+    // another MediaRecorder while the first request is in flight.
+    captureLockRef.current = "audio";
     setPreflightBusy(true);
     const prior = await adapter.query("microphone");
     setPreflightStatus(prior);
@@ -2169,6 +2214,7 @@ export function ClientPage() {
     setPreflightBusy(false);
 
     if (!result.ok) {
+      captureLockRef.current = null;
       setPreflightStatus(result.status);
       setPermissionBanner({
         status: result.status,
@@ -2178,8 +2224,8 @@ export function ClientPage() {
     }
 
     try {
-      captureLockRef.current = "audio";
       audioDiscardRef.current = false;
+      audioInterruptedRef.current = false;
       setLiveMarkers([]);
       liveMarkersRef.current = [];
       void flushDraftToIdb({ liveAudioMarkers: [] });
@@ -2203,6 +2249,8 @@ export function ClientPage() {
       };
       recorder.onstop = () => {
         const discard = audioDiscardRef.current;
+        const interrupted = audioInterruptedRef.current;
+        audioInterruptedRef.current = false;
         adapter.release(stream);
         audioStreamRef.current = null;
         audioRecorderRef.current = null;
@@ -2223,7 +2271,7 @@ export function ClientPage() {
           1,
           Math.round((Date.now() - audioStartedAtRef.current) / 1000),
         );
-        void persistAndProcessAudioBlob(blob, duration);
+        void persistAndProcessAudioBlob(blob, duration, interrupted);
       };
       for (const track of stream.getTracks()) {
         track.addEventListener("ended", () => {
@@ -2239,6 +2287,7 @@ export function ClientPage() {
       audioRecorderRef.current = recorder;
       audioStartedAtRef.current = Date.now();
       recorder.start(1000);
+      markCaptureExplained("audio");
       setAudioSeconds(0);
       setAudioState("recording");
       setPreflightKind(null);
@@ -2254,7 +2303,7 @@ export function ClientPage() {
     }
   }
 
-  async function openCapturePreflight(kind: CaptureKind) {
+  async function openCaptureFlow(kind: CaptureKind) {
     if (audioState === "recording" || audioState === "processing") {
       setSyncMessage(messages.permissions.busyElsewhere);
       return;
@@ -2263,49 +2312,82 @@ export function ClientPage() {
       setSyncMessage(messages.permissions.busyElsewhere);
       return;
     }
+
+    // Photos: native file picker only — never show an in-app permission dialog.
+    if (kind === "photo") {
+      openNativePicker("photo");
+      return;
+    }
+
     const adapter = mediaPermissionAdapter;
-    setPreflightKind(kind);
     setPreflightBusy(true);
+
+    let status: MediaPermissionStatus = "prompt";
     if (kind === "audio") {
       if (!adapter.isMediaDevicesSupported() || !adapter.isMediaRecorderSupported()) {
-        setPreflightStatus("unsupported");
+        status = "unsupported";
       } else {
-        setPreflightStatus(await adapter.query("microphone"));
+        status = await adapter.query("microphone");
       }
-    } else if (kind === "video") {
-      if (!adapter.isMediaDevicesSupported()) {
-        setPreflightStatus("unsupported");
-      } else {
-        setPreflightStatus(await adapter.query("camera"));
-      }
+    } else if (!adapter.isMediaDevicesSupported()) {
+      // Video still uses the OS camera via <input capture>; lack of
+      // mediaDevices only blocks query, not the picker itself.
+      status = "prompt";
     } else {
-      setPreflightStatus(adapter.isMediaDevicesSupported() ? "prompt" : "unsupported");
+      status = await adapter.query("camera");
     }
     setPreflightBusy(false);
+
+    const decision = decideCaptureStart({
+      kind,
+      status,
+      explained: hasCaptureExplained(kind),
+    });
+
+    if (decision.action === "show-reauth") {
+      setPreflightKind(null);
+      setPreflightStatus(decision.status);
+      setPermissionBanner({
+        status: decision.status,
+        message: messages.permissions.status[decision.status],
+      });
+      return;
+    }
+
+    if (decision.action === "show-preflight") {
+      setPreflightKind(kind);
+      setPreflightStatus(decision.status);
+      return;
+    }
+
+    // start-direct
+    setPreflightKind(null);
+    setPermissionBanner(null);
+    if (kind === "audio") {
+      await beginAudioRecording();
+      return;
+    }
+    markCaptureExplained("video");
+    openNativePicker("video");
   }
 
   async function onPreflightContinue() {
     if (!preflightKind) return;
-    if (preflightKind === "audio") {
+    const kind = preflightKind;
+    if (kind === "audio" || kind === "video") {
+      markCaptureExplained(kind);
+    }
+    if (kind === "audio") {
       await beginAudioRecording();
       return;
     }
-    const kind = preflightKind;
     setPreflightKind(null);
     setPermissionBanner(null);
-    const releaseAfterPickerCloses = () => {
-      window.setTimeout(() => {
-        if (captureLockRef.current === kind) captureLockRef.current = null;
-      }, 0);
-    };
-    window.addEventListener("focus", releaseAfterPickerCloses, { once: true });
     if (kind === "video") {
-      captureLockRef.current = "video";
-      videoCaptureInput.current?.click();
+      openNativePicker("video");
       return;
     }
-    captureLockRef.current = "photo";
-    photoCaptureInput.current?.click();
+    openNativePicker("photo");
   }
 
   function onPreflightImport() {
@@ -3020,6 +3102,15 @@ export function ClientPage() {
     }
   }
 
+  const closeLoginGate = useCallback(() => {
+    setShowLoginGate(false);
+  }, []);
+
+  const handleLoginModeChange = useCallback((mode: "signin" | "signup") => {
+    setLoginMode(mode);
+    setLoginError("");
+  }, []);
+
   function readVideoDuration(file: Blob): Promise<number | undefined> {
     return new Promise((resolve) => {
       const url = URL.createObjectURL(file);
@@ -3082,7 +3173,7 @@ export function ClientPage() {
 
   function openNativeCamera() {
     if (clips.length >= 4) return;
-    void openCapturePreflight("video");
+    void openCaptureFlow("video");
   }
 
   async function onVideoFiles(event: React.ChangeEvent<HTMLInputElement>) {
@@ -3630,6 +3721,11 @@ export function ClientPage() {
               clearPendingAnswerQuestion();
             }}
             onImport={onPreflightImport}
+            onTextNote={() => {
+              setPreflightKind(null);
+              setPreflightBusy(false);
+              focusTextNoteFallback();
+            }}
           />
         ) : null}
         <PhotoAnnotator
@@ -3874,7 +3970,10 @@ export function ClientPage() {
           }}
         />
 
-        <div className="bg-white rounded-[24px] border border-black/[0.05] shadow-[0_4px_20px_rgba(0,0,0,0.04)] p-5 mb-4">
+        <div
+          id="step2-text-notes"
+          className="bg-white rounded-[24px] border border-black/[0.05] shadow-[0_4px_20px_rgba(0,0,0,0.04)] p-5 mb-4"
+        >
           <span className="text-[12px] font-[800] tracking-widest">{messages.wizard.textNotesTitle}</span>
           <textarea
             value={textNoteDraft}
@@ -3939,7 +4038,7 @@ export function ClientPage() {
                 <>
                   <button
                     type="button"
-                    onClick={() => void openCapturePreflight("audio")}
+                    onClick={() => void openCaptureFlow("audio")}
                     disabled={audioState === "processing"}
                     aria-label={
                       audioState === "processing"
@@ -3998,6 +4097,8 @@ export function ClientPage() {
                   setPermissionBanner(null);
                   audioImportInput.current?.click();
                 }}
+                textNoteLabel={messages.permissions.textNoteInstead}
+                onTextNote={focusTextNoteFallback}
                 onDismiss={() => setPermissionBanner(null)}
               />
             ) : null}
@@ -4165,7 +4266,7 @@ export function ClientPage() {
             {photos.length < 5 && (
               <button
                 type="button"
-                onClick={() => void openCapturePreflight("photo")}
+                onClick={() => void openCaptureFlow("photo")}
                 className="aspect-[4/3] min-h-11 rounded-xl border-2 border-dashed border-black/10 bg-[#FAF7F3] flex flex-col items-center justify-center gap-1 hover:bg-[#F5F3F0] transition"
               >
                 <Camera className="w-6 h-6 text-[#9CA3AF]" />
@@ -4477,12 +4578,9 @@ export function ClientPage() {
           busy={syncingCard}
           onEmailChange={setLoginEmail}
           onPasswordChange={setLoginPassword}
-          onModeChange={(mode) => {
-            setLoginMode(mode);
-            setLoginError("");
-          }}
-          onSubmit={(event) => void handleLoginForCard(event)}
-          onClose={() => setShowLoginGate(false)}
+          onModeChange={handleLoginModeChange}
+          onSubmit={handleLoginForCard}
+          onClose={closeLoginGate}
         />
 
         {showPaywall && (

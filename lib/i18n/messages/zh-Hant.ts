@@ -199,8 +199,9 @@ const zhHant: Messages = {
     continue: "繼續並允許",
     cancel: "先不要",
     importInstead: "改為手動匯入檔案",
+    textNoteInstead: "改寫文字筆記",
     settingsHint:
-      "請到瀏覽器／系統設定 → 網站權限，開啟麥克風或相機後重新整理，或改用匯入。",
+      "請到瀏覽器／系統設定 → 網站權限，開啟麥克風或相機後重新整理，或改用匯入／文字筆記。",
     busyElsewhere: "另一個錄製進行中，請先停止或取消",
     savedOnStop: "錄音已立即存到本機",
     interruptedSaved: "錄製被中斷，已安全存到本機",
@@ -278,6 +279,10 @@ const zhHant: Messages = {
     processing: "處理中...",
     switchToSignUp: "還沒有帳號？註冊",
     switchToSignIn: "已有帳號？登入",
+    showPassword: "顯示密碼",
+    hidePassword: "隱藏密碼",
+    emailInvalid: "請輸入有效的 Email",
+    passwordTooShort: "密碼至少 6 碼",
   },
   paywall: {
     title: "已用完 3 間免費額度",

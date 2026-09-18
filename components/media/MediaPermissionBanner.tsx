@@ -8,6 +8,8 @@ export function MediaPermissionBanner({
   settingsHint,
   importLabel,
   onImport,
+  textNoteLabel,
+  onTextNote,
   onDismiss,
 }: {
   status: MediaPermissionStatus;
@@ -15,6 +17,8 @@ export function MediaPermissionBanner({
   settingsHint: string;
   importLabel?: string;
   onImport?: () => void;
+  textNoteLabel?: string;
+  onTextNote?: () => void;
   onDismiss?: () => void;
 }) {
   const showSettings =
@@ -24,7 +28,10 @@ export function MediaPermissionBanner({
     status === "in-use";
 
   return (
-    <div className="mt-3 rounded-xl border border-[#FECACA] bg-[#FEF2F2] p-3 text-[12px] text-[#991B1B] leading-[1.45]">
+    <div
+      role="alert"
+      className="mt-3 rounded-xl border border-[#FECACA] bg-[#FEF2F2] p-3 text-[12px] text-[#991B1B] leading-[1.45]"
+    >
       <p className="font-bold">{message}</p>
       {showSettings ? <p className="mt-1.5 opacity-90">{settingsHint}</p> : null}
       <div className="mt-2.5 flex flex-wrap gap-2">
@@ -35,6 +42,15 @@ export function MediaPermissionBanner({
             className="h-9 px-3 rounded-full bg-white border border-[#FECACA] text-[11px] font-bold"
           >
             {importLabel}
+          </button>
+        ) : null}
+        {onTextNote && textNoteLabel ? (
+          <button
+            type="button"
+            onClick={onTextNote}
+            className="h-9 px-3 rounded-full bg-white border border-[#FECACA] text-[11px] font-bold"
+          >
+            {textNoteLabel}
           </button>
         ) : null}
         {onDismiss ? (

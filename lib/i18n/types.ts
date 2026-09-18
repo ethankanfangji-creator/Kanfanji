@@ -188,6 +188,7 @@ export type Messages = {
     continue: string;
     cancel: string;
     importInstead: string;
+    textNoteInstead: string;
     settingsHint: string;
     busyElsewhere: string;
     savedOnStop: string;
@@ -266,6 +267,10 @@ export type Messages = {
     processing: string;
     switchToSignUp: string;
     switchToSignIn: string;
+    showPassword: string;
+    hidePassword: string;
+    emailInvalid: string;
+    passwordTooShort: string;
   };
   paywall: {
     title: string;

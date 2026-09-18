@@ -199,8 +199,9 @@ const en: Messages = {
     continue: "Continue & allow",
     cancel: "Not now",
     importInstead: "Import a file instead",
+    textNoteInstead: "Write a text note instead",
     settingsHint:
-      "Open browser/system Settings → Site permissions, enable mic/camera, then retry — or import a file.",
+      "Open browser/system Settings → Site permissions, enable mic/camera, then retry — or import a file / write a note.",
     busyElsewhere: "Another capture is in progress — stop or cancel it first",
     savedOnStop: "Recording saved to this device",
     interruptedSaved: "Capture interrupted — safely saved on device",
@@ -278,6 +279,10 @@ const en: Messages = {
     processing: "Working...",
     switchToSignUp: "No account? Sign up",
     switchToSignIn: "Have an account? Sign in",
+    showPassword: "Show password",
+    hidePassword: "Hide password",
+    emailInvalid: "Enter a valid email",
+    passwordTooShort: "Password must be at least 6 characters",
   },
   paywall: {
     title: "Free limit reached (3 homes)",

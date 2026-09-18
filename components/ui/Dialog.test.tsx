@@ -51,6 +51,44 @@ describe("Dialog", () => {
     expect(opener).toHaveFocus();
   });
 
+  it("does not steal focus from inputs when parent re-renders with a new onClose", async () => {
+    const user = userEvent.setup();
+
+    function TypingHarness() {
+      const [open, setOpen] = useState(true);
+      const [value, setValue] = useState("");
+      return (
+        <Dialog
+          open={open}
+          onClose={() => setOpen(false)}
+          title="Login"
+          description="Type email"
+        >
+          <label htmlFor="email">
+            Email
+            <input
+              id="email"
+              name="email"
+              autoComplete="email"
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+            />
+          </label>
+          <button type="button">Secondary</button>
+        </Dialog>
+      );
+    }
+
+    render(<TypingHarness />);
+    const email = screen.getByLabelText("Email");
+    await user.click(email);
+    const node = email;
+    await user.type(email, "hello@kanfangji.com");
+    expect(screen.getByLabelText("Email")).toBe(node);
+    expect(node).toHaveFocus();
+    expect(node).toHaveValue("hello@kanfangji.com");
+  });
+
   it("has no basic axe violations", async () => {
     const user = userEvent.setup();
     const { container } = render(<Harness />);

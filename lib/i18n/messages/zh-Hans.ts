@@ -199,8 +199,9 @@ const zhHans: Messages = {
     continue: "继续并允许",
     cancel: "先不要",
     importInstead: "改为手动导入文件",
+    textNoteInstead: "改写文字笔记",
     settingsHint:
-      "请到浏览器／系统设置 → 网站权限，开启麦克风或相机后刷新，或改用导入。",
+      "请到浏览器／系统设置 → 网站权限，开启麦克风或相机后刷新，或改用导入／文字笔记。",
     busyElsewhere: "另一个录制进行中，请先停止或取消",
     savedOnStop: "录音已立即存到本机",
     interruptedSaved: "录制被中断，已安全存到本机",
@@ -278,6 +279,10 @@ const zhHans: Messages = {
     processing: "处理中...",
     switchToSignUp: "还没有账号？注册",
     switchToSignIn: "已有账号？登录",
+    showPassword: "显示密码",
+    hidePassword: "隐藏密码",
+    emailInvalid: "请输入有效的 Email",
+    passwordTooShort: "密码至少 6 位",
   },
   paywall: {
     title: "已用完 3 套免费额度",

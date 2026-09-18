@@ -39,6 +39,9 @@ export function Dialog({
   const titleId = `${generatedId}-title`;
   const descriptionId = description ? `${generatedId}-description` : undefined;
   const dialogRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  const closeOnBackdropRef = useRef(closeOnBackdrop);
+  const initialFocusRefStable = useRef(initialFocusRef);
   const [portalNode] = useState<HTMLDivElement | null>(() => {
     if (typeof document === "undefined") return null;
     const node = document.createElement("div");
@@ -47,11 +50,26 @@ export function Dialog({
   });
 
   useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    closeOnBackdropRef.current = closeOnBackdrop;
+  }, [closeOnBackdrop]);
+
+  useEffect(() => {
+    initialFocusRefStable.current = initialFocusRef;
+  }, [initialFocusRef]);
+
+  useEffect(() => {
     if (!portalNode) return;
     document.body.appendChild(portalNode);
     return () => portalNode.remove();
   }, [portalNode]);
 
+  // Focus trap + inert background. Depends only on `open` / portal identity so
+  // unstable parent callbacks (e.g. inline onClose) do not remount focus or
+  // steal caret from inputs while the dialog stays open.
   useEffect(() => {
     if (!open || !portalNode) return;
     const bodyOverflow = document.body.style.overflow;
@@ -73,14 +91,16 @@ export function Dialog({
     const previouslyFocused =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const dialog = dialogRef.current;
-    const initial =
-      initialFocusRef?.current ?? dialog?.querySelector<HTMLElement>(FOCUSABLE) ?? dialog;
-    initial?.focus();
+    const focusTarget =
+      initialFocusRefStable.current?.current ??
+      dialog?.querySelector<HTMLElement>(FOCUSABLE) ??
+      dialog;
+    focusTarget?.focus();
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== "Tab" || !dialog) return;
@@ -114,12 +134,14 @@ export function Dialog({
       });
       previouslyFocused?.focus();
     };
-  }, [initialFocusRef, onClose, open, portalNode]);
+  }, [open, portalNode]);
 
   if (!open || !portalNode) return null;
 
   function handleBackdrop(event: MouseEvent<HTMLDivElement>) {
-    if (closeOnBackdrop && event.target === event.currentTarget) onClose();
+    if (closeOnBackdropRef.current && event.target === event.currentTarget) {
+      onCloseRef.current();
+    }
   }
 
   return createPortal(

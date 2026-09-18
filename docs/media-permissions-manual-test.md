@@ -5,11 +5,13 @@ Cross-browser checks for mic / camera / photo / video. Prefer real devices for i
 ## Shared rules (all browsers)
 
 - [ ] Cold start the app — **no** mic/camera prompt appears until a capture control is tapped.
-- [ ] Tapping Record / Photo / Video shows a **preflight** sheet: purpose + IndexedDB / sync note, before the OS prompt.
-- [ ] Only one capture path can run at a time (audio vs photo/video picker).
+- [ ] **Audio / video:** first tap in a session may show a short explain sheet; Continue hands off to the **native** OS/browser permission prompt (or opens the video file picker).
+- [ ] **After mic is granted** (or the explain was already shown), later Record taps **start recording directly** — no custom permission dialog every time.
+- [ ] **Photos** use the native file picker (`accept="image/*" capture="environment"`) with **no** in-app permission dialog.
+- [ ] Only one capture path can run at a time (audio vs photo/video picker); double-tapping Record must not start two MediaRecorders.
 - [ ] After **Stop**, the file is in IndexedDB immediately (reload within seconds still shows media / pending process).
 - [ ] **Cancel** discards the in-progress recording (no new note / no orphan intended clip).
-- [ ] Denied / blocked states show settings guidance **and** “import file instead”.
+- [ ] Denied / blocked / revoked mic states show settings guidance **and** import **and** text-note alternatives.
 - [ ] Import audio / pick gallery photo-video works without granting live mic/camera.
 
 ## Security and data boundaries
@@ -50,9 +52,10 @@ Security regression checks:
 ## Desktop Chrome / Edge
 
 - [ ] Mic: Allow → record → stop → timer accurate → transcript pipeline runs.
-- [ ] Mic: Block → preflight/banner shows denied/blocked → import still works.
+- [ ] Mic: Block → banner shows denied/blocked → import **and** text-note still work.
 - [ ] Revoke mic mid-recording (site settings) → recording stops; blob saved if any data existed.
-- [ ] Camera file input for video/photo: preflight then OS picker; cancel picker does not lock UI.
+- [ ] Camera file input for video: one-shot explain (first time) then OS picker; cancel picker does not lock UI.
+- [ ] Photo Add: opens native picker immediately (no in-app permission sheet).
 
 ## Android Chrome
 
@@ -71,7 +74,7 @@ Security regression checks:
 - [ ] Leave Safari mid-recording (app switcher) → on return, either saved pending audio or clear idle (no stuck “recording” UI).
 - [ ] Reload mid/after stop → pending audio resumes Whisper if blob was saved.
 - [ ] Video: system camera; stopping early still imports clip into the list and IDB.
-- [ ] Photo: no surprise permission on page load; only after Add photo Continue.
+- [ ] Photo: no surprise permission on page load; Add photo opens native picker with no in-app dialog.
 - [ ] HTTPS or localhost only — confirm SecurityError / blocked copy if opened on insecure LAN IP without trust.
 
 ## Unsupported / in-use

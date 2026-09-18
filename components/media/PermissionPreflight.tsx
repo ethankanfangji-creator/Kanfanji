@@ -14,6 +14,7 @@ export type PermissionCopy = {
   continue: string;
   cancel: string;
   importInstead: string;
+  textNoteInstead?: string;
   settingsHint: string;
   status: Record<MediaPermissionStatus, string>;
 };
@@ -26,6 +27,7 @@ export function PermissionPreflight({
   onContinue,
   onCancel,
   onImport,
+  onTextNote,
 }: {
   kind: CaptureKind;
   copy: PermissionCopy;
@@ -34,6 +36,7 @@ export function PermissionPreflight({
   onContinue: () => void;
   onCancel: () => void;
   onImport?: () => void;
+  onTextNote?: () => void;
 }) {
   const title =
     kind === "audio" ? copy.titleMic : kind === "video" ? copy.titleCamera : copy.titlePhoto;
@@ -92,6 +95,16 @@ export function PermissionPreflight({
               className="min-h-12 rounded-full bg-[#F8FAFF] border border-[#DBEAFE] text-[#2563EB] text-[14px] font-bold active:scale-[0.98] disabled:opacity-50"
             >
               {copy.importInstead}
+            </button>
+          ) : null}
+          {blocking && onTextNote && copy.textNoteInstead ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onTextNote}
+              className="min-h-12 rounded-full bg-white border border-black/10 text-[14px] font-bold active:scale-[0.98] disabled:opacity-50"
+            >
+              {copy.textNoteInstead}
             </button>
           ) : null}
           <button

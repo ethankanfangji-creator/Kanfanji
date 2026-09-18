@@ -24,6 +24,7 @@ import {
 import { ClientAuthBar } from "@/components/ClientAuthBar";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useI18n } from "@/components/I18nProvider";
+import { isActiveSubscriptionStatus } from "@/lib/billing-status";
 import { bankQuestions } from "@/lib/i18n";
 import { appendViewingUrl, uploadViewingFile } from "@/lib/media";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
@@ -135,14 +136,32 @@ export function ClientPage() {
 
   useEffect(() => {
     const supabase = getSupabase();
+    let cancelled = false;
+    let timer: number | null = null;
+
     if (!supabase || !user) {
-      setFreeCount(0);
-      setIsPro(false);
-      return;
+      queueMicrotask(() => {
+        if (cancelled) return;
+        setFreeCount(0);
+        setIsPro(false);
+      });
+      return () => {
+        cancelled = true;
+      };
     }
 
-    let cancelled = false;
-    void (async () => {
+    const awaitingCheckout =
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("checkout") === "success";
+    if (awaitingCheckout) {
+      queueMicrotask(() => {
+        if (cancelled) return;
+        setShowPaywall(false);
+        setSyncMessage("Pro 訂閱處理中，刷新後生效");
+      });
+    }
+
+    const loadEntitlement = async () => {
       const [{ count }, { data: sub }] = await Promise.all([
         supabase
           .from("viewings")
@@ -154,25 +173,36 @@ export function ClientPage() {
           .eq("user_id", user.id)
           .maybeSingle(),
       ]);
-      if (cancelled) return;
+      if (cancelled) return false;
       setFreeCount(count ?? 0);
-      setIsPro(sub?.status === "active" || sub?.status === "trialing");
+      const pro = isActiveSubscriptionStatus(sub?.status);
+      setIsPro(pro);
+      if (awaitingCheckout && pro) {
+        setSyncMessage("Pro 已啟用");
+      }
+      return pro;
+    };
+
+    void (async () => {
+      const pro = await loadEntitlement();
+      if (cancelled || pro || !awaitingCheckout) return;
+      let attempts = 0;
+      const tick = async () => {
+        const nextPro = await loadEntitlement();
+        if (cancelled || nextPro) return;
+        attempts += 1;
+        if (attempts < 7) {
+          timer = window.setTimeout(() => void tick(), 1500);
+        }
+      };
+      timer = window.setTimeout(() => void tick(), 1500);
     })();
 
     return () => {
       cancelled = true;
+      if (timer != null) window.clearTimeout(timer);
     };
   }, [user]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("checkout") === "success") {
-      setIsPro(true);
-      setShowPaywall(false);
-      setSyncMessage("Pro 訂閱處理中，刷新後生效");
-    }
-  }, []);
 
   useEffect(() => {
     photosRef.current = photos;
@@ -726,7 +756,7 @@ export function ClientPage() {
             .maybeSingle(),
         ]);
         const nextCount = count ?? 0;
-        const nextPro = sub?.status === "active" || sub?.status === "trialing";
+        const nextPro = isActiveSubscriptionStatus(sub?.status);
         setFreeCount(nextCount);
         setIsPro(nextPro);
         if (!viewingId && nextCount >= FREE_VIEWING_LIMIT && !nextPro) {

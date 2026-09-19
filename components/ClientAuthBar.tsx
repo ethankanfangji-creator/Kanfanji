@@ -1,27 +1,31 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { useI18n } from "@/components/I18nProvider";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
+import { resetSyncEngineSingleton } from "@/lib/sync";
+import { setPersistenceAccountScope } from "@/lib/idb/draft-store";
 
 export function ClientAuthBar() {
   const { messages } = useI18n();
+  const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
-  const [ready, setReady] = useState(false);
+  const [ready, setReady] = useState(() => !isSupabaseConfigured());
 
   useEffect(() => {
     const supabase = getSupabase();
-    if (!supabase) {
-      setReady(true);
-      return;
-    }
+    if (!supabase) return;
 
-    void supabase.auth.getUser().then(({ data }) => {
-      setUser(data.user);
-      setReady(true);
-    });
+    void supabase.auth.getUser()
+      .then(({ data }) => setUser(data.user))
+      .catch(() => {
+        setPersistenceAccountScope(null);
+        setUser(null);
+      })
+      .finally(() => setReady(true));
 
     const {
       data: { subscription },
@@ -34,12 +38,18 @@ export function ClientAuthBar() {
   }, []);
 
   if (!ready) {
-    return <span className="h-8 w-16 rounded-full bg-[#EFEAE4] animate-pulse" />;
+    return (
+      <span
+        className="h-11 w-16 rounded-full bg-[#EFEAE4] animate-pulse"
+        role="status"
+        aria-label="Loading account"
+      />
+    );
   }
 
   if (!isSupabaseConfigured()) {
     return (
-      <span className="h-8 px-3 rounded-full bg-[#FEF2F2] border border-[#FECACA] text-[11px] font-bold text-[#991B1B] inline-flex items-center">
+      <span className="min-h-11 px-3 rounded-full bg-[#FEF2F2] border border-[#FECACA] text-[12px] font-bold text-[#991B1B] inline-flex items-center">
         缺 Supabase env
       </span>
     );
@@ -49,7 +59,7 @@ export function ClientAuthBar() {
     return (
       <Link
         href="/login"
-        className="h-8 px-3 rounded-full bg-black text-white text-[11px] font-bold inline-flex items-center"
+        className="min-h-11 px-4 rounded-full bg-black text-white text-[12px] font-bold inline-flex items-center"
       >
         {messages.nav.signIn}
       </Link>
@@ -64,10 +74,12 @@ export function ClientAuthBar() {
         onClick={() => {
           const supabase = getSupabase();
           void supabase?.auth.signOut().then(() => {
-            window.location.href = "/login";
+            resetSyncEngineSingleton();
+            setPersistenceAccountScope(null);
+            router.replace("/login");
           });
         }}
-        className="h-8 px-3 rounded-full bg-white border border-black/10 text-[11px] font-bold"
+        className="min-h-11 px-3 rounded-full bg-white border border-black/10 text-[12px] font-bold"
       >
         {messages.nav.signOut}
       </button>

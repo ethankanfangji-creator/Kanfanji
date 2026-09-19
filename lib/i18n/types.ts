@@ -15,13 +15,169 @@ export type Messages = {
     noKeys: string;
     freeQuota: string;
   };
+  sync: {
+    savedLocal: string;
+    pending: string;
+    syncing: string;
+    synced: string;
+    failed: string;
+    conflict: string;
+    retry: string;
+  };
+  wizard: {
+    step1: string;
+    step2: string;
+    step3: string;
+    back: string;
+    next: string;
+    backToEdit: string;
+    saveDraft: string;
+    draftSaved: string;
+    checklistTitle: string;
+    checkAddress: string;
+    checkViewingAt: string;
+    checkFieldContent: string;
+    checkAuthSync: string;
+    checkSyncOk: string;
+    progress: string;
+    textNotesTitle: string;
+    textNotesPlaceholder: string;
+    textNotesAdd: string;
+    editCard: string;
+    saveEdits: string;
+    addressSwitchTitle: string;
+    addressSwitchBody: string;
+    addressSwitchSaveAndNew: string;
+    addressSwitchDiscardAndNew: string;
+    addressSwitchCancel: string;
+    needAddress: string;
+    needStartViewing: string;
+    needFieldContent: string;
+    highlightsLoading: string;
+    highlightsReady: string;
+    propertyDetailsTitle: string;
+    propertyDetailsHint: string;
+    finishViewing: string;
+    backToAddressTitle: string;
+    backToAddressBody: string;
+    backToAddressConfirm: string;
+    backToAddressCancel: string;
+    highPriorityTitle: string;
+    highPriorityBody: string;
+    highPriorityContinue: string;
+    highPriorityStay: string;
+    stepProgress: string;
+    stepNavLabel: string;
+    stepStatusActive: string;
+    stepStatusCompleted: string;
+    stepStatusError: string;
+    stepStatusEmpty: string;
+  };
+  composer: {
+    placeholder: string;
+    placeholderBound: string;
+    send: string;
+    cancel: string;
+    recording: string;
+    stopRecording: string;
+    attachImage: string;
+    removeImage: string;
+    removeAudio: string;
+    clearBound: string;
+    suggestionsLabel: string;
+    limitsHint: string;
+    imageTooLarge: string;
+    imageBadType: string;
+    audioTooLarge: string;
+    emptyError: string;
+    micDenied: string;
+    micUnsupported: string;
+    uploading: string;
+    integrating: string;
+    transcribing: string;
+    reEdit: string;
+    sourceUser: string;
+    sourceAi: string;
+    discoveryBadge: string;
+    discoveryConfirm: string;
+    discoveryIgnore: string;
+    discoveryAnswer: string;
+    offTopic: string;
+    imageUncertain: string;
+    bindHint: string;
+  };
+  setup: {
+    title: string;
+    subtitle: string;
+    viewingAt: string;
+    unitLabel: string;
+    priceLabel: string;
+    layoutLabel: string;
+    areaLabel: string;
+    managementFeeLabel: string;
+    listingUrl: string;
+    setupNotes: string;
+    lookupOptional: string;
+    startViewing: string;
+    startViewingHint: string;
+  };
   intro: string;
   address: {
     placeholder: string;
     hint: string;
     lookingUp: string;
     identified: string;
+    autofilledHint: string;
     openDataPrefix: string;
+    photoMetaImport: string;
+    photoMetaHint: string;
+    photoMetaReading: string;
+    photoMetaNoGps: string;
+    photoMetaUnsupported: string;
+    photoMetaError: string;
+    photoMetaGpsPrivacyTitle: string;
+    photoMetaGpsPrivacyBody: string;
+    photoMetaGpsAccept: string;
+    photoMetaGpsRefuse: string;
+    photoMetaGpsRefused: string;
+    photoMetaGpsApplied: string;
+    suggestLoading: string;
+    suggestEmpty: string;
+    suggestError: string;
+    suggestListLabel: string;
+    useMyLocation: string;
+    locating: string;
+    locationDenied: string;
+    locationUnavailable: string;
+    locationUnsupported: string;
+    locationFailed: string;
+    confirmAddress: string;
+    changeAddress: string;
+    confirmedLabel: string;
+    selectToConfirm: string;
+  };
+  propertyBasics: {
+    title: string;
+    loading: string;
+    retry: string;
+    failed: string;
+    unknown: string;
+    sources: string;
+    fields: {
+      displayName: string;
+      propertyType: string;
+      layout: string;
+      area: string;
+      price: string;
+      managementFee: string;
+      yearBuilt: string;
+      summary: string;
+    };
+    confidence: {
+      verified: string;
+      inferred: string;
+      unknown: string;
+    };
   };
   bank: {
     title: string;
@@ -33,6 +189,60 @@ export type Messages = {
     tip: string;
     tipExample: string;
     matched: string;
+    checklistSection: string;
+    checklistBadge: string;
+    checklistHint: string;
+    countLabel: string;
+    answered: string;
+    answerTitle: string;
+    answerPlaceholder: string;
+    answerSave: string;
+    answerClear: string;
+    answerEmpty: string;
+    fieldTitle: string;
+    progressLabel: string;
+    sectionUnanswered: string;
+    sectionAnswered: string;
+    emptyUnanswered: string;
+    emptyAnswered: string;
+    answerCta: string;
+    editCta: string;
+    statusUnanswered: string;
+    statusProcessing: string;
+    statusAnswered: string;
+    statusAnalyzing: string;
+    statusAnalysisFailed: string;
+    statusToConfirm: string;
+    statusNeedsMore: string;
+    noteSummaryLabel: string;
+    aiSummaryLabel: string;
+    priorityHigh: string;
+    priorityMedium: string;
+    priorityLow: string;
+    categoryCondition: string;
+    categoryTransit: string;
+    categoryAmenities: string;
+    categoryCostsDocs: string;
+    categoryOnsiteConfirm: string;
+    categoryOther: string;
+    methodTitle: string;
+    methodDescription: string;
+    methodAudio: string;
+    methodPhoto: string;
+    methodVideo: string;
+    methodNote: string;
+    methodClose: string;
+    methodNoteTitle: string;
+    methodNotePlaceholder: string;
+    methodNoteSave: string;
+    methodNoteCancel: string;
+    captureAudioSummary: string;
+    capturePhotoSummary: string;
+    captureVideoSummary: string;
+    discoveryBadge: string;
+    discoveryConfirm: string;
+    discoveryIgnore: string;
+    discoveryAnswer: string;
   };
   audio: {
     title: string;
@@ -43,12 +253,35 @@ export type Messages = {
     import: string;
     importHint: string;
     noteLabel: string;
+    stop: string;
+    cancel: string;
+    markerTitle: string;
+    markerHint: string;
+    markerListTitle: string;
+    markerEmpty: string;
+    markerEdit: string;
+    markerDelete: string;
+    markerNotePlaceholder: string;
+    markerSave: string;
+    markerPlay: string;
+    markerCooldown: string;
+    markerTags: Record<
+      "price" | "noise" | "leak" | "like" | "worry" | "follow_up" | "other",
+      string
+    >;
   };
   photos: {
     title: string;
     add: string;
     addSub: string;
     tip: string;
+    annotateTitle: string;
+    tagLabel: string;
+    noteLabel: string;
+    notePlaceholder: string;
+    saveAnnotation: string;
+    editAnnotation: string;
+    thumbHint: string;
   };
   video: {
     title: string;
@@ -58,16 +291,119 @@ export type Messages = {
     startSub: string;
     tip: string;
   };
+  permissions: {
+    titleMic: string;
+    titleCamera: string;
+    titlePhoto: string;
+    bodyMic: string;
+    bodyCamera: string;
+    bodyPhoto: string;
+    localNote: string;
+    continue: string;
+    cancel: string;
+    importInstead: string;
+    textNoteInstead: string;
+    settingsHint: string;
+    busyElsewhere: string;
+    savedOnStop: string;
+    interruptedSaved: string;
+    status: {
+      granted: string;
+      prompt: string;
+      denied: string;
+      blocked: string;
+      unsupported: string;
+      "in-use": string;
+      "permission-revoked": string;
+    };
+  };
+  mediaImport: {
+    photoGallery: string;
+    videoGallery: string;
+    invalidPhoto: string;
+    invalidVideo: string;
+    emptyFile: string;
+    photoTooLarge: string;
+    videoTooLarge: string;
+  };
+  offline: {
+    offline: string;
+    backOnline: string;
+    updateReady: string;
+    refresh: string;
+    fallbackTitle: string;
+    fallbackBody: string;
+  };
   share: {
     button: string;
     uploading: string;
+    retry: string;
     readyLoggedIn: string;
     readyGuest: string;
     needMore: string;
+    signInToShare: string;
+    previewTitle: string;
+    previewEmpty: string;
+    previewOpen: string;
+    generateFailed: string;
+    stageOrganize: string;
+    stageAnalyze: string;
+    stageSummary: string;
+    stageBuild: string;
+    reportTitle: string;
+    reportProperty: string;
+    reportViewing: string;
+    reportCategories: string;
+    reportObservations: string;
+    reportOriginalNotes: string;
+    reportPhotos: string;
+    reportAnswered: string;
+    reportUnanswered: string;
+    reportDiscoveries: string;
+    reportRisks: string;
+    reportToConfirm: string;
+    reportAiSummary: string;
+    reportEmpty: string;
+    reportViewingAt: string;
+    reportMarket: string;
+    reportTags: string;
+    reportPreserveNote: string;
+  };
+  shareAccess: {
+    title: string;
+    statusLabel: string;
+    statusActive: string;
+    statusLocal: string;
+    statusNone: string;
+    statusRevoked: string;
+    statusExpired: string;
+    lastUpdated: string;
+    tokenOk: string;
+    expiry: string;
+    expirySave: string;
+    password: string;
+    passwordSave: string;
+    passwordClear: string;
+    passwordPlaceholder: string;
+    revoke: string;
+    rotate: string;
+    readOnly: string;
+    copyHint: string;
+    expiresAtLabel: string;
+    passwordOn: string;
+    passwordOff: string;
+    confirmRevoke: string;
+    busy: string;
+    errorGeneric: string;
+    historyTitle: string;
+    historyEmpty: string;
+    historyRevokedAt: string;
   };
   loginGate: {
     title: string;
     body: string;
+    bodyExport: string;
+    bodyLink: string;
     email: string;
     password: string;
     submitSignIn: string;
@@ -75,6 +411,12 @@ export type Messages = {
     processing: string;
     switchToSignUp: string;
     switchToSignIn: string;
+    showPassword: string;
+    hidePassword: string;
+    emailInvalid: string;
+    passwordTooShort: string;
+    needCloud: string;
+    bodySecondRoom: string;
   };
   paywall: {
     title: string;
@@ -90,7 +432,9 @@ export type Messages = {
   card: {
     close: string;
     copy: string;
+    copyLink: string;
     share: string;
+    shareLink: string;
     pros: string;
     risks: string;
     qa: string;
@@ -100,6 +444,84 @@ export type Messages = {
     pending: string;
     byDialogue: string;
     byTag: string;
+    eyebrow: string;
+    address: string;
+    viewingAt: string;
+    basics: string;
+    unit: string;
+    price: string;
+    layout: string;
+    area: string;
+    managementFee: string;
+    listingUrl: string;
+    setupNotes: string;
+    rating: string;
+    ratingEmpty: string;
+    photos: string;
+    photoNote: string;
+    facts: string;
+    followUps: string;
+    actionItems: string;
+    emptySection: string;
+    selectHint: string;
+    disclaimer: string;
+    generatedAt: string;
+    localPreview: string;
+    signInToShare: string;
+    syncedHint: string;
+    needSync: string;
+    privacyTitle: string;
+    privacyBody: string;
+    privacyAddress: string;
+    privacyPhotos: string;
+    privacyPersonal: string;
+    privacyConfirm: string;
+    privacyCancel: string;
+    privacyBodyFile: string;
+    privacyConfirmFile: string;
+  };
+  cardImageExport: {
+    button: string;
+    preparingImages: string;
+    generating: string;
+    success: string;
+    readyHint: string;
+    retry: string;
+    error: string;
+    imageError: string;
+    openFallback: string;
+    fileShareTitle: string;
+  };
+  aiSummary: {
+    title: string;
+    facts: string;
+    pros: string;
+    risks: string;
+    followUps: string;
+    actionItems: string;
+    riskDisclaimer: string;
+    source: string;
+    edit: string;
+    delete: string;
+    empty: string;
+    confidence: {
+      high: string;
+      medium: string;
+      low: string;
+      needs_verification: string;
+    };
+  };
+  aiBoundary: {
+    consentTitle: string;
+    consentBody: string;
+    consentAccept: string;
+    consentDecline: string;
+    declined: string;
+    queued: string;
+    processing: string;
+    quota: string;
+    unavailable: string;
+    failed: string;
   };
   loginPage: {
     signInTitle: string;
@@ -121,6 +543,46 @@ export type Messages = {
     questions: string;
     media: string;
   };
+  compare: {
+    title: string;
+    subtitle: string;
+    selectMode: string;
+    cancelSelect: string;
+    startCompare: string;
+    selectHint: string;
+    selectRange: string;
+    loading: string;
+    notFound: string;
+    backToList: string;
+    backHome: string;
+    lastUpdated: string;
+    readOnlySource: string;
+    readOnlyShare: string;
+    empty: string;
+    price: string;
+    layout: string;
+    location: string;
+    area: string;
+    managementFee: string;
+    rating: string;
+    pros: string;
+    risks: string;
+    followUps: string;
+    notes: string;
+    includeInShare: string;
+    sortPrice: string;
+    sortRating: string;
+    sortRisks: string;
+    edit: string;
+    doneEdit: string;
+    share: string;
+    shareCopied: string;
+    shareHint: string;
+    shareMissingTitle: string;
+    shareMissingBody: string;
+    close: string;
+    error: string;
+  };
   language: {
     label: string;
   };
@@ -128,7 +590,42 @@ export type Messages = {
     ca: string[];
     th: string[];
   };
+  /** Localized labels for stable photo tag ids. */
+  photoTagLabels: Record<
+    | "living"
+    | "kitchen"
+    | "master_bedroom"
+    | "bathroom"
+    | "electrical_panel"
+    | "window"
+    | "balcony"
+    | "parking"
+    | "common_area"
+    | "exterior"
+    | "other",
+    string
+  >;
+  /** @deprecated Prefer photoTagLabels; kept for any legacy UI. */
   photoTags: string[];
+  fieldChecklist: {
+    title: string;
+    add: string;
+    addPlaceholder: string;
+    notePlaceholder: string;
+    labels: Record<
+      | "water_leak"
+      | "wall_crack"
+      | "window_fog"
+      | "light_air"
+      | "noise"
+      | "electrical_panel"
+      | "water_heater"
+      | "plumbing"
+      | "amenities"
+      | "parking",
+      string
+    >;
+  };
   clipLabels: string[];
   defaults: {
     pros: string[];

@@ -1,38 +1,24 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
+import {
+  AiInputError,
+  aiErrorResponse,
+  aiTimeoutMs,
+  assertContentLength,
+  authorizeAiRequest,
+  validateVisionBody,
+} from "@/lib/ai-boundary/server-entry";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json(
-      { error: "尚未設定 OPENAI_API_KEY，請加到 .env.local" },
-      { status: 500 },
-    );
-  }
-
   try {
-    const body = (await request.json()) as {
-      base64?: string;
-      tag?: string;
-      locale?: string;
-    };
-    const tag = (body.tag || "現場").trim();
-    const locale = (body.locale || "zh-Hant").trim();
-    let base64 = (body.base64 || "").trim();
-
-    if (!base64) {
-      return NextResponse.json({ error: "缺少照片 base64" }, { status: 400 });
-    }
-
-    // Accept raw base64 or data URL
-    let mime = "image/jpeg";
-    const dataUrlMatch = base64.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
-    if (dataUrlMatch) {
-      mime = dataUrlMatch[1];
-      base64 = dataUrlMatch[2];
-    }
+    assertContentLength(request);
+    const input = validateVisionBody(await request.json());
+    const boundary = await authorizeAiRequest(request, input);
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) throw new AiInputError("ai_unavailable", 503);
+    const { tag, locale, base64, mime, mediaId } = input;
 
     const languageHint =
       locale.startsWith("th")
@@ -44,11 +30,12 @@ export async function POST(request: Request) {
             : "繁體中文，尖銳";
 
     const openai = new OpenAI({ apiKey });
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      temperature: 0.3,
-      max_tokens: 120,
-      messages: [
+    const completion = await openai.chat.completions.create(
+      {
+        model: "gpt-4o-mini",
+        temperature: 0.3,
+        max_tokens: 120,
+        messages: [
         {
           role: "user",
           content: [
@@ -65,8 +52,10 @@ export async function POST(request: Request) {
             },
           ],
         },
-      ],
-    });
+        ],
+      },
+      { signal: AbortSignal.timeout(aiTimeoutMs()) },
+    );
 
     const question = (completion.choices[0]?.message?.content || "")
       .trim()
@@ -76,12 +65,11 @@ export async function POST(request: Request) {
       ?.trim();
 
     if (!question) {
-      return NextResponse.json({ error: "Vision 沒有回傳問題" }, { status: 422 });
+      throw new AiInputError("ai_empty_response", 422);
     }
 
-    return NextResponse.json({ question, tag });
+    return boundary.applyCookie(NextResponse.json({ question, tag, jobId: mediaId }));
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Vision 分析失敗";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return aiErrorResponse(error);
   }
 }

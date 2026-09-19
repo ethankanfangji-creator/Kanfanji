@@ -9,6 +9,16 @@ export type ViewingQuestion = {
   source?: string;
 };
 
+export type ViewingAudioNote = {
+  id: number;
+  duration: number;
+  transcript: string;
+  matched: number[];
+  mediaId?: string;
+  kind?: "transcript" | "text";
+  markers?: import("@/lib/audio-markers").AudioMarker[];
+};
+
 export type Viewing = {
   id: string;
   user_id?: string | null;
@@ -17,8 +27,15 @@ export type Viewing = {
   tags: string[];
   market: string | null;
   questions: ViewingQuestion[];
+  notes?: ViewingAudioNote[];
+  pros?: string[];
+  risks?: string[];
   photo_urls: string[];
   video_urls: string[];
+  audio_urls?: string[];
+  share_token?: string | null;
+  client_updated_at?: string | null;
+  revision?: number;
   property?: Record<string, unknown> | null;
   is_pro?: boolean;
   created_at: string;

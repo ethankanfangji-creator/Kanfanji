@@ -1,10 +1,15 @@
 "use client";
 
-import { LOCALES, LOCALE_LABELS, type Locale } from "@/lib/i18n/config";
+import { useEffect } from "react";
+import { htmlLang, LOCALES, LOCALE_LABELS, type Locale } from "@/lib/i18n/config";
 import { useI18n } from "@/components/I18nProvider";
 
 export function LanguageSwitcher() {
   const { locale, setLocale, messages } = useI18n();
+
+  useEffect(() => {
+    document.documentElement.lang = htmlLang(locale);
+  }, [locale]);
 
   return (
     <label className="inline-flex items-center gap-1.5 h-8 px-2 rounded-full bg-white border border-black/10">

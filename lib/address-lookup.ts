@@ -108,6 +108,90 @@ async function enrichNeighborhood(result: AddressLookupResult): Promise<AddressL
   }
 }
 
+async function reverseGeocodeNominatim(
+  lat: number,
+  lng: number,
+): Promise<AddressLookupResult> {
+  const url = new URL("https://nominatim.openstreetmap.org/reverse");
+  url.searchParams.set("lat", String(lat));
+  url.searchParams.set("lon", String(lng));
+  url.searchParams.set("format", "json");
+  url.searchParams.set("zoom", "18");
+  url.searchParams.set("addressdetails", "1");
+
+  const res = await fetch(url, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "KanFangJi/0.1 (open-house recorder; contact@localhost)",
+    },
+    next: { revalidate: 0 },
+  });
+  if (!res.ok) {
+    throw new Error("無法從 GPS 反查地址");
+  }
+
+  const row = (await res.json()) as NominatimResult & {
+    error?: string;
+    display_name?: string;
+  };
+  if (row.error || !row.display_name) {
+    throw new Error("無法從 GPS 反查地址");
+  }
+
+  const city =
+    row.address?.city || row.address?.town || row.address?.village || undefined;
+  const province = row.address?.state;
+  const country = row.address?.country;
+  const countryCode = row.address?.country_code?.toUpperCase();
+  const market = detectMarketHint(row.display_name, country || countryCode);
+  const neighborhood = row.address?.suburb || row.address?.neighbourhood;
+
+  return {
+    market,
+    displayAddress: row.display_name,
+    tags: [city, province, country].filter(Boolean) as string[],
+    source: "EXIF GPS + OSM reverse",
+    details: {
+      city,
+      province,
+      country,
+      neighborhood,
+      postalCode: row.address?.postcode,
+      lat,
+      lng,
+      normalizedAddress: row.display_name.toLowerCase().trim(),
+      mlsNote: "建議來自照片 EXIF GPS，非影像辨識",
+    },
+  };
+}
+
+/**
+ * Reverse-geocode consented EXIF GPS coordinates.
+ * Does not accept or analyze photo bytes — coordinates only.
+ */
+export async function lookupAddressDetailsFromGps(
+  lat: number,
+  lng: number,
+): Promise<AddressLookupResult> {
+  if (
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lng) ||
+    lat < -90 ||
+    lat > 90 ||
+    lng < -180 ||
+    lng > 180
+  ) {
+    throw new Error("GPS 座標無效");
+  }
+
+  let result = await reverseGeocodeNominatim(lat, lng);
+  if (result.market === "CA") {
+    result = await withMetroOpenData(await enrichNeighborhood(result));
+  }
+  result = await withPropertyRegistry(result);
+  return result;
+}
+
 async function withMetroOpenData(result: AddressLookupResult): Promise<AddressLookupResult> {
   if (result.market !== "CA") return result;
 

@@ -53,7 +53,7 @@ export function buildDecisionSummary(
         remotePath: photo.remotePath ?? null,
         tag: (photo.tag || "").trim() || "其他",
         note: (photo.note || "").trim(),
-        selected: photo.selected ?? index < 3,
+        selected: photo.selected ?? index < 5,
       };
     })
     .filter((photo) => photo.url || photo.remotePath);

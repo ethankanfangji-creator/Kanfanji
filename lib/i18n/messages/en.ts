@@ -357,12 +357,16 @@ const en: Messages = {
     privacyPersonal: "Avoid sharing personal contact details in notes",
     privacyConfirm: "I understand — continue",
     privacyCancel: "Go back",
+    privacyBodyFile:
+      "The image includes your selected content. Once saved as a file it cannot be revoked like a share link — please confirm.",
+    privacyConfirmFile: "I understand — export image",
   },
   cardImageExport: {
     button: "Export image",
     preparingImages: "Preparing photos…",
     generating: "Creating image…",
-    success: "Image is ready",
+    success: "Image saved or shared",
+    readyHint: "Image ready — tap again to open the system share sheet",
     retry: "Retry export",
     error: "Image export failed. Please retry.",
     imageError: "A selected photo could not be loaded. Retry or change the photo selection.",

@@ -343,12 +343,15 @@ export type Messages = {
     privacyPersonal: string;
     privacyConfirm: string;
     privacyCancel: string;
+    privacyBodyFile: string;
+    privacyConfirmFile: string;
   };
   cardImageExport: {
     button: string;
     preparingImages: string;
     generating: string;
     success: string;
+    readyHint: string;
     retry: string;
     error: string;
     imageError: string;

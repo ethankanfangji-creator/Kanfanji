@@ -10,7 +10,8 @@ export type PreparedCardImagePhoto = {
   id: string;
   tag: string;
   note: string;
-  dataUrl: string;
+  /** Downscaled JPEG blob — prefer over data URLs to limit peak memory. */
+  blob: Blob;
   width: number;
   height: number;
 };
@@ -50,9 +51,20 @@ export type CardImageExportUiLabels = {
   preparingImages: string;
   generating: string;
   success: string;
+  readyHint: string;
   retry: string;
   error: string;
   imageError: string;
   openFallback: string;
   fileShareTitle: string;
 };
+
+/** Matches DecisionSummaryCard section order after header/basics/rating. */
+export const CARD_IMAGE_CONTENT_SECTIONS = [
+  "pros",
+  "risks",
+  "photos",
+  "facts",
+  "followUps",
+  "actionItems",
+] as const;

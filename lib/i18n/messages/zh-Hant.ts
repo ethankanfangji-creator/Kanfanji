@@ -355,12 +355,16 @@ const zhHant: Messages = {
     privacyPersonal: "備註中請避免留下個人聯絡資料",
     privacyConfirm: "我了解，繼續分享",
     privacyCancel: "返回修改",
+    privacyBodyFile:
+      "長圖會包含你勾選的內容；存成檔案後無法像分享連結一樣撤銷，請再確認一次。",
+    privacyConfirmFile: "我了解，繼續匯出長圖",
   },
   cardImageExport: {
     button: "匯出長圖",
     preparingImages: "正在準備照片…",
     generating: "正在產生長圖…",
-    success: "長圖已準備完成",
+    success: "長圖已儲存或分享",
+    readyHint: "長圖已就緒，再點一次以開啟系統分享",
     retry: "重試匯出",
     error: "長圖產生失敗，請重試",
     imageError: "選取的照片無法載入，請重試或重新選擇照片",

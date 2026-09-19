@@ -104,6 +104,9 @@ queries, advisor findings, and forward-fix guidance.
 - [ ] Portrait and landscape photos stay within the long-image bounds.
 - [ ] Failed photo loading shows an error and Retry; no image is silently produced with missing selected photos.
 - [ ] Repeated export does not duplicate, freeze or leak stale blob URLs.
+- [x] Long-image content section order matches on-screen card (pros → risks → photos → facts…).
+- [x] Guest can open the decision card / export path without login (local preview).
+- [x] Export requires privacy confirm; iOS ready state uses distinct “tap again to share” copy.
 
 
 

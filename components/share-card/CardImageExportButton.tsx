@@ -20,26 +20,24 @@ type ExportState =
 
 const RENDER_TIMEOUT_MS = 60_000;
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error("CARD_IMAGE_RENDER_TIMEOUT")), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
-function isIosSafari(): boolean {
-  const ua = navigator.userAgent;
-  const ios =
-    /iPad|iPhone|iPod/.test(ua) ||
-    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-  return ios && /Safari/.test(ua) && !/CriOS|FxiOS/.test(ua);
+function snapshotFingerprint(
+  snapshot: DecisionSummarySnapshot,
+  photoSources: CardImagePhotoSource[],
+): string {
+  return JSON.stringify({
+    address: snapshot.address,
+    viewingAt: snapshot.viewingAt,
+    rating: snapshot.overallRating,
+    pros: snapshot.pros.filter((item) => item.selected).map((item) => item.id),
+    risks: snapshot.risks.filter((item) => item.selected).map((item) => item.id),
+    facts: snapshot.facts.filter((item) => item.selected).map((item) => item.id),
+    followUps: snapshot.followUps.filter((item) => item.selected).map((item) => item.id),
+    actionItems: snapshot.actionItems.filter((item) => item.selected).map((item) => item.id),
+    photos: snapshot.photos
+      .filter((item) => item.selected)
+      .map((item) => ({ id: item.id, note: item.note, tag: item.tag })),
+    sources: photoSources.map((source) => source.id),
+  });
 }
 
 function downloadBlob(blob: Blob, fileName: string) {
@@ -60,23 +58,55 @@ export function CardImageExportButton({
   locale,
   documentLabels,
   uiLabels,
+  privacyArmed = true,
+  onRequestPrivacy,
+  onPrivacyConsumed,
 }: {
   snapshot: DecisionSummarySnapshot;
   photoSources: CardImagePhotoSource[];
   locale: string;
   documentLabels: CardImageDocumentLabels;
   uiLabels: CardImageExportUiLabels;
+  /** When false, first click asks the parent to run privacy confirm. */
+  privacyArmed?: boolean;
+  onRequestPrivacy?: () => void;
+  onPrivacyConsumed?: () => void;
 }) {
   const [state, setState] = useState<ExportState>({ status: "idle" });
   const mounted = useRef(true);
   const pendingFile = useRef<File | null>(null);
+  const pendingFingerprint = useRef<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const fingerprint = snapshotFingerprint(snapshot, photoSources);
 
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      abortRef.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    if (pendingFingerprint.current && pendingFingerprint.current !== fingerprint) {
+      pendingFile.current = null;
+      pendingFingerprint.current = null;
+      queueMicrotask(() => {
+        if (mounted.current) setState({ status: "idle" });
+      });
+    }
+  }, [fingerprint]);
+
+  useEffect(() => {
+    if (!privacyArmed) return;
+    if (state.status !== "idle") return;
+    if (!onPrivacyConsumed) return;
+    // Parent just armed privacy after confirm — continue export on next tick.
+    queueMicrotask(() => {
+      if (mounted.current) void runExport();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to arming
+  }, [privacyArmed]);
 
   const busy = state.status === "preparing" || state.status === "generating";
   const buttonLabel =
@@ -92,33 +122,27 @@ export function CardImageExportButton({
             ? uiLabels.retry
             : uiLabels.button;
 
-  async function exportImage() {
-    const iosSafari = isIosSafari();
-    const preparedFile = pendingFile.current;
-    if (preparedFile) {
-      try {
-        if (
-          typeof navigator.share === "function" &&
-          typeof navigator.canShare === "function" &&
-          navigator.canShare({ files: [preparedFile] })
-        ) {
-          await navigator.share({
-            title: uiLabels.fileShareTitle,
-            files: [preparedFile],
-          });
-        } else {
-          downloadBlob(preparedFile, preparedFile.name);
-        }
-        pendingFile.current = null;
-        if (mounted.current) setState({ status: "success" });
-      } catch (error) {
-        if (!(error instanceof DOMException && error.name === "AbortError")) {
-          pendingFile.current = null;
-          if (mounted.current) setState({ status: "error", message: uiLabels.error });
-        }
-      }
+  async function shareOrDownload(file: File) {
+    if (
+      typeof navigator.share === "function" &&
+      typeof navigator.canShare === "function" &&
+      navigator.canShare({ files: [file] })
+    ) {
+      await navigator.share({
+        title: uiLabels.fileShareTitle,
+        files: [file],
+      });
       return;
     }
+    downloadBlob(file, file.name);
+  }
+
+  async function runExport() {
+    onPrivacyConsumed?.();
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const timeout = window.setTimeout(() => controller.abort(), RENDER_TIMEOUT_MS);
 
     setState({ status: "preparing", completed: 0, total: 0 });
     try {
@@ -136,31 +160,38 @@ export function CardImageExportButton({
             setState({ status: "preparing", completed, total });
           }
         },
+        controller.signal,
       );
       if (mounted.current) setState({ status: "generating" });
       const model = buildCardImageModel(publicModel.snapshot, photos);
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      const blob = await withTimeout(
-        renderCardImageJpeg(model, documentLabels, locale),
-        RENDER_TIMEOUT_MS,
+      const blob = await renderCardImageJpeg(
+        model,
+        documentLabels,
+        locale,
+        controller.signal,
       );
       const file = new File([blob], model.fileName, { type: "image/jpeg" });
       const canShareFile =
-        iosSafari &&
         typeof navigator.share === "function" &&
         typeof navigator.canShare === "function" &&
         navigator.canShare({ files: [file] });
 
       if (canShareFile) {
         pendingFile.current = file;
+        pendingFingerprint.current = fingerprint;
         if (mounted.current) setState({ status: "ready" });
         return;
       }
       downloadBlob(blob, model.fileName);
+      pendingFile.current = null;
+      pendingFingerprint.current = null;
       if (mounted.current) setState({ status: "success" });
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
-        if (mounted.current) setState({ status: "idle" });
+        if (mounted.current) {
+          setState({ status: "error", message: uiLabels.error });
+        }
         return;
       }
       const isImageError =
@@ -171,7 +202,35 @@ export function CardImageExportButton({
           message: isImageError ? uiLabels.imageError : uiLabels.error,
         });
       }
+    } finally {
+      window.clearTimeout(timeout);
     }
+  }
+
+  async function exportImage() {
+    const preparedFile = pendingFile.current;
+    if (preparedFile && pendingFingerprint.current === fingerprint) {
+      try {
+        await shareOrDownload(preparedFile);
+        pendingFile.current = null;
+        pendingFingerprint.current = null;
+        if (mounted.current) setState({ status: "success" });
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          pendingFile.current = null;
+          pendingFingerprint.current = null;
+          if (mounted.current) setState({ status: "error", message: uiLabels.error });
+        }
+      }
+      return;
+    }
+
+    if (!privacyArmed) {
+      onRequestPrivacy?.();
+      return;
+    }
+
+    await runExport();
   }
 
   return (
@@ -195,7 +254,11 @@ export function CardImageExportButton({
         <p role="alert" className="text-[11px] text-[#991B1B] text-center">
           {state.message}
         </p>
-      ) : state.status === "ready" || state.status === "success" ? (
+      ) : state.status === "ready" ? (
+        <p role="status" className="text-[11px] text-[#166534] text-center">
+          {uiLabels.readyHint}
+        </p>
+      ) : state.status === "success" ? (
         <p role="status" className="text-[11px] text-[#166534] text-center">
           {uiLabels.success}
         </p>

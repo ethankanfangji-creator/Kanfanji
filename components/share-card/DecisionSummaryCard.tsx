@@ -259,10 +259,12 @@ function PhotoGrid({
   selectHint: string;
   onToggle?: (id: string) => void;
 }) {
+  const all = photos.filter((p) => p.url || p.remotePath);
   const visible =
-    mode === "readonly" || (mode === "preview" && !editing)
-      ? photos.filter((p) => p.selected && (p.url || p.remotePath))
-      : photos.filter((p) => p.url || p.remotePath);
+    mode === "readonly"
+      ? all.filter((p) => p.selected)
+      : all;
+  const selectedCount = all.filter((p) => p.selected).length;
 
   if (visible.length === 0) return <EmptyLine label={emptyLabel} />;
 
@@ -270,7 +272,14 @@ function PhotoGrid({
 
   return (
     <div className="space-y-2">
-      {interactive ? <p className="text-[10px] text-[#6B7280]">{selectHint}</p> : null}
+      {mode === "preview" ? (
+        <p className="text-[10px] text-[#6B7280]">
+          {selectHint}
+          {all.length > 0 ? ` · ${selectedCount}/${all.length}` : ""}
+        </p>
+      ) : interactive ? (
+        <p className="text-[10px] text-[#6B7280]">{selectHint}</p>
+      ) : null}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
         {visible.map((photo) => (
           <figure

@@ -102,7 +102,7 @@ export function buildCardFromViewing(
         const byText = prevItems.find((p) => p.text === item.text);
         if (byText) return { ...item, selected: byText.selected };
       }
-      return { ...item, selected: item.selected ?? index < 3 };
+      return { ...item, selected: item.selected ?? index < 5 };
     });
 
   return {

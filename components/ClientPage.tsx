@@ -316,7 +316,10 @@ export function ClientPage() {
   const [showCard, setShowCard] = useState(false);
   const [cardDraft, setCardDraft] = useState<DecisionSummarySnapshot | null>(null);
   const [showPrivacyCheck, setShowPrivacyCheck] = useState(false);
-  const [privacyAction, setPrivacyAction] = useState<"copy" | "share" | null>(null);
+  const [privacyAction, setPrivacyAction] = useState<"copy" | "share" | "exportImage" | null>(
+    null,
+  );
+  const [exportImageArmed, setExportImageArmed] = useState(false);
   const [showLoginGate, setShowLoginGate] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
@@ -2937,8 +2940,8 @@ export function ClientPage() {
       return;
     }
     if (!user) {
-      setShowLoginGate(true);
-      setLoginError("");
+      // Local long-image / card preview does not require login; cloud link sync still needs auth.
+      openDecisionCard();
       return;
     }
     // New viewing only: free users capped at 3
@@ -3594,7 +3597,7 @@ export function ClientPage() {
     setShowCard(true);
   }
 
-  function requestShareAction(action: "copy" | "share") {
+  function requestShareAction(action: "copy" | "share" | "exportImage") {
     if (!cardDraft) openDecisionCard();
     setPrivacyAction(action);
     setShowPrivacyCheck(true);
@@ -4807,6 +4810,9 @@ export function ClientPage() {
                           generatedAt: messages.card.generatedAt,
                         }}
                         uiLabels={messages.cardImageExport}
+                        privacyArmed={exportImageArmed}
+                        onRequestPrivacy={() => requestShareAction("exportImage")}
+                        onPrivacyConsumed={() => setExportImageArmed(false)}
                       />
                       <button
                         type="button"
@@ -4839,11 +4845,17 @@ export function ClientPage() {
           open={showPrivacyCheck}
           labels={{
             title: messages.card.privacyTitle,
-            body: messages.card.privacyBody,
+            body:
+              privacyAction === "exportImage"
+                ? messages.card.privacyBodyFile
+                : messages.card.privacyBody,
             address: messages.card.privacyAddress,
             photos: messages.card.privacyPhotos,
             personal: messages.card.privacyPersonal,
-            confirm: messages.card.privacyConfirm,
+            confirm:
+              privacyAction === "exportImage"
+                ? messages.card.privacyConfirmFile
+                : messages.card.privacyConfirm,
             cancel: messages.card.privacyCancel,
           }}
           onCancel={() => {
@@ -4854,6 +4866,10 @@ export function ClientPage() {
             const action = privacyAction;
             setShowPrivacyCheck(false);
             setPrivacyAction(null);
+            if (action === "exportImage") {
+              setExportImageArmed(true);
+              return;
+            }
             if (action) void performShareAction(action);
           }}
         />

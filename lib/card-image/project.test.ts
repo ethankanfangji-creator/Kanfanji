@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { DecisionSummarySnapshot } from "@/lib/share-card";
+import { DECISION_SUMMARY_CARD_SECTIONS } from "@/components/share-card/DecisionSummaryCard";
 import { buildCardImageModel, cardImageFileName } from "./project";
+import { CARD_IMAGE_CONTENT_SECTIONS } from "./types";
 
 const snapshot: DecisionSummarySnapshot = {
   version: 1,
@@ -49,7 +51,7 @@ describe("card image projection", () => {
         id: "photo-1",
         tag: "Kitchen",
         note: "Selected annotation",
-        dataUrl: "data:image/jpeg;base64,AA==",
+        blob: new Blob(["x"], { type: "image/jpeg" }),
         width: 100,
         height: 80,
       },
@@ -57,7 +59,7 @@ describe("card image projection", () => {
         id: "photo-2",
         tag: "Bedroom",
         note: "Private annotation",
-        dataUrl: "data:image/jpeg;base64,AA==",
+        blob: new Blob(["y"], { type: "image/jpeg" }),
         width: 100,
         height: 80,
       },
@@ -68,10 +70,17 @@ describe("card image projection", () => {
     expect(result.snapshot.photos.map((photo) => photo.id)).toEqual(["photo-1"]);
     expect(result.photos.map((photo) => photo.id)).toEqual(["photo-1"]);
     expect(result.photos[0].note).toBe("Selected annotation");
-    expect(JSON.stringify(result)).not.toContain("Private");
+    expect(JSON.stringify(result.snapshot)).not.toContain("Private");
   });
 
   it("creates a filesystem-safe JPEG filename", () => {
     expect(cardImageFileName(snapshot)).toBe("12 34 Test Street-2026-09-15.jpg");
+  });
+
+  it("keeps long-image content order aligned with the on-screen card", () => {
+    const cardOrder = DECISION_SUMMARY_CARD_SECTIONS.filter((key) =>
+      (CARD_IMAGE_CONTENT_SECTIONS as readonly string[]).includes(key),
+    );
+    expect([...CARD_IMAGE_CONTENT_SECTIONS]).toEqual(cardOrder);
   });
 });

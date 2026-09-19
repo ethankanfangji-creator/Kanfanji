@@ -355,12 +355,16 @@ const zhHans: Messages = {
     privacyPersonal: "备注中请避免留下个人联络资料",
     privacyConfirm: "我了解，继续分享",
     privacyCancel: "返回修改",
+    privacyBodyFile:
+      "长图会包含你勾选的内容；存成文件后无法像分享链接一样撤销，请再确认一次。",
+    privacyConfirmFile: "我了解，继续导出长图",
   },
   cardImageExport: {
     button: "导出长图",
     preparingImages: "正在准备照片…",
     generating: "正在生成长图…",
-    success: "长图已准备完成",
+    success: "长图已保存或分享",
+    readyHint: "长图已就绪，再点一次以打开系统分享",
     retry: "重试导出",
     error: "长图生成失败，请重试",
     imageError: "选中的照片无法加载，请重试或重新选择照片",

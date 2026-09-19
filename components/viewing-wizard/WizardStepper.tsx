@@ -8,7 +8,16 @@ type StepMeta = {
   status: StepUiStatus;
 };
 
-const STATUS_LABELS: Record<StepUiStatus, string> = {
+export type WizardStepperLabels = {
+  navLabel: string;
+  progress: string;
+  statusActive: string;
+  statusCompleted: string;
+  statusError: string;
+  statusEmpty: string;
+};
+
+const DEFAULT_STATUS: Record<StepUiStatus, string> = {
   active: "目前步驟",
   completed: "已完成",
   error: "需要處理",
@@ -18,18 +27,50 @@ const STATUS_LABELS: Record<StepUiStatus, string> = {
 export function WizardStepper({
   steps,
   onSelect,
+  canEnter,
+  labels,
+  activeStep,
 }: {
   steps: StepMeta[];
   onSelect: (step: WizardStep) => void;
+  /** When provided, overrides default reachability (step 1 always, later steps after setup). */
+  canEnter?: (step: WizardStep) => boolean;
+  labels?: Partial<WizardStepperLabels>;
+  activeStep?: WizardStep;
 }) {
-  const setupReady = steps.some(
-    (s) => s.step === 1 && (s.status === "completed" || s.status === "active" || s.status === "error"),
+  const statusLabels: Record<StepUiStatus, string> = {
+    active: labels?.statusActive ?? DEFAULT_STATUS.active,
+    completed: labels?.statusCompleted ?? DEFAULT_STATUS.completed,
+    error: labels?.statusError ?? DEFAULT_STATUS.error,
+    empty: labels?.statusEmpty ?? DEFAULT_STATUS.empty,
+  };
+  const current =
+    activeStep ?? steps.find((item) => item.status === "active")?.step ?? 1;
+  const step1Complete = steps.some((s) => s.step === 1 && s.status === "completed");
+  const progressText = (labels?.progress ?? "Step {current} / 3").replace(
+    "{current}",
+    String(current),
   );
+
   return (
-    <nav aria-label="Viewing wizard" className="mb-4">
+    <nav
+      aria-label={labels?.navLabel ?? "Viewing wizard"}
+      className="sticky top-0 z-30 -mx-1 mb-4 rounded-2xl border border-black/5 bg-[var(--color-canvas,#FDF6F0)]/95 px-1 py-2 backdrop-blur-md"
+    >
+      <p className="mb-2 px-1 text-[11px] font-bold tracking-wide text-[#6B7280]">
+        {progressText}
+      </p>
       <ol className="flex items-stretch gap-1.5">
         {steps.map((item) => {
-          const clickable = item.step === 1 || setupReady || item.status !== "empty";
+          const clickable = canEnter
+            ? canEnter(item.step)
+            : item.step === 1 ||
+              item.status === "active" ||
+              item.status === "completed" ||
+              (step1Complete && item.step <= 2) ||
+              (step1Complete &&
+                steps.some((s) => s.step === 2 && s.status === "completed") &&
+                item.step === 3);
           return (
             <li key={item.step} className="flex-1 min-w-0">
               <button
@@ -46,7 +87,7 @@ export function WizardStepper({
                   {item.label}
                 </p>
                 <span className="mt-1 block text-[10px] font-medium opacity-80">
-                  {STATUS_LABELS[item.status]}
+                  {statusLabels[item.status]}
                 </span>
               </button>
             </li>

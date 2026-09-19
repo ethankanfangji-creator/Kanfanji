@@ -19,6 +19,9 @@ const PROTECTED_SETUP_KEYS = [
   "liveAudioMarkers",
   "shareAccess",
   "shareToken",
+  "propertyBasics",
+  "viewingStartedAt",
+  "localSessionId",
 ] as const;
 
 export function resolveLookupDisplayAddress(

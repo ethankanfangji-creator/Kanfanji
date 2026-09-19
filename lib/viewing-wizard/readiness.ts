@@ -30,6 +30,11 @@ export type WizardSnapshot = {
   captureError?: boolean;
   /** When true, auth/sync rule checklist row is marked satisfied. */
   authenticated?: boolean;
+  /**
+   * True after the user explicitly starts the viewing (Step 1 CTA).
+   * Address confirm alone is not enough to enter Step 2.
+   */
+  viewingStarted?: boolean;
 };
 
 export function hasAddress(address: string): boolean {
@@ -54,8 +59,18 @@ export function hasFieldContent(input: {
   );
 }
 
-export function isStep1Complete(snap: Pick<WizardSnapshot, "address" | "viewingAt">): boolean {
-  return hasAddress(snap.address) && hasViewingAt(snap.viewingAt);
+/** Step 1 requires a confirmed (looked-up) address — not free text alone. */
+export function isStep1Complete(
+  snap: Pick<WizardSnapshot, "address" | "identified">,
+): boolean {
+  return hasAddress(snap.address) && Boolean(snap.identified);
+}
+
+/** Viewing session started via Start CTA (or restored mid-capture). */
+export function isViewingStarted(
+  snap: Pick<WizardSnapshot, "viewingStarted">,
+): boolean {
+  return Boolean(snap.viewingStarted);
 }
 
 export function isStep2Complete(
@@ -116,7 +131,7 @@ export function getShareChecklist(snap: WizardSnapshot): ShareChecklistItem[] {
       required: true,
     },
     {
-      // Informational: guest can still tap generate and hit the login gate.
+      // Guests can tap generate; ClientPage shows LoginGate before cloud share.
       id: "authSync",
       ok: Boolean(snap.authenticated),
       required: false,
@@ -153,8 +168,17 @@ export function getPublishReadiness(
 
 export function canEnterStep(target: WizardStep, snap: WizardSnapshot): boolean {
   if (target === 1) return true;
-  // Step 2 and 3 only require setup complete so Step 3 checklist can show gaps.
-  return isStep1Complete(snap);
+  // Step 2+ requires confirmed address AND an explicitly started viewing.
+  if (!isStep1Complete(snap) || !isViewingStarted(snap)) return false;
+  if (target === 2) return true;
+  // Step 3 requires at least one on-site answer / note / media.
+  return isStep2Complete(snap);
+}
+
+/** Stamp viewing time when leaving Step 1 if the user never set one. */
+export function ensureViewingAt(viewingAt: string, now = new Date()): string {
+  if (hasViewingAt(viewingAt)) return viewingAt;
+  return now.toISOString();
 }
 
 export function toDatetimeLocalValue(iso: string): string {

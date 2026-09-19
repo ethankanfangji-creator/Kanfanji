@@ -3,6 +3,7 @@ import {
   AI_CONSENT_VERSION,
   AI_LIMITS,
   AiInputError,
+  validateIntegrateInputBody,
   validateRecordingForm,
   validateVisionBody,
 } from "./index";
@@ -85,5 +86,27 @@ describe("AI inbound validation", () => {
   it("uses stable typed input errors", () => {
     const error = new AiInputError("bad", 422);
     expect(error).toMatchObject({ code: "bad", status: 422 });
+  });
+
+  it("validates integrate-input body and requires at least one payload", () => {
+    const base = {
+      viewingSessionId: "view-1",
+      address: "123 Main St",
+      locale: "zh-Hant",
+      market: "CA",
+      boundQuestionId: 1,
+      boundQuestionText: "Check leaks",
+      text: "Ceiling stain",
+      transcript: "",
+      questions: [{ id: 1, text: "Check leaks", category: "condition" }],
+      imageBase64: null,
+      consentVersion: AI_CONSENT_VERSION,
+      consentSessionId: "session-1",
+      identityKind: "guest",
+    };
+    expect(validateIntegrateInputBody(base).text).toBe("Ceiling stain");
+    expect(() =>
+      validateIntegrateInputBody({ ...base, text: "", transcript: "", imageBase64: null }),
+    ).toThrowError(expect.objectContaining({ code: "input_required" }));
   });
 });

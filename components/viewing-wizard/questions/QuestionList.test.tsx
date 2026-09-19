@@ -9,7 +9,7 @@ import { QuestionList } from "./QuestionList";
 afterEach(cleanup);
 
 const messages = {
-  fieldTitle: "On-site answers",
+  fieldTitle: "Viewing focus tickets",
   progressLabel: "Completed {completed} / {total}",
   sectionUnanswered: "Unanswered",
   sectionAnswered: "Answered",
@@ -25,8 +25,21 @@ const messages = {
     statusAnswered: "Answered",
     statusAnalyzing: "Analyzing",
     statusAnalysisFailed: "Analysis failed",
+    statusToConfirm: "To confirm",
+    statusNeedsMore: "Needs more",
     noteSummaryLabel: "Note: ",
     aiSummaryLabel: "AI summary: ",
+    priorityHigh: "High",
+    priorityMedium: "Medium",
+    priorityLow: "Low",
+    categories: {
+      condition: "Condition",
+      transit: "Transit & location",
+      amenities: "Daily amenities",
+      costs_docs: "Costs & documents",
+      onsite_confirm: "Confirm on site",
+      other: "Other",
+    },
   },
   methodSheet: {
     title: "How do you want to answer?",
@@ -44,7 +57,7 @@ const messages = {
 };
 
 describe("QuestionList", () => {
-  it("opens answer method sheet and saves a note without leaving the list", async () => {
+  it("groups tickets by category and opens answer sheet", async () => {
     const user = userEvent.setup();
     const onSaveAnswer = vi.fn();
     const onSelectMethod = vi.fn();
@@ -53,13 +66,31 @@ describe("QuestionList", () => {
       <QuestionList
         messages={messages}
         questions={[
-          { id: 1, text: "Any water damage?", checked: false },
+          {
+            id: 1,
+            text: "Any water damage at Burquitlam?",
+            checked: false,
+            category: "condition",
+            priority: "high",
+            source: "viewing_brief",
+          },
           {
             id: 2,
             text: "Noise check",
             checked: true,
-            answer: "Loud at night",
-            answerPreview: { noteSummary: "Loud at night" },
+            answer: "Loud at night near the street",
+            category: "condition",
+            priority: "medium",
+            source: "viewing_brief",
+            answerPreview: { noteSummary: "Loud at night near the street" },
+          },
+          {
+            id: 3,
+            text: "Confirm transit access",
+            checked: false,
+            category: "transit",
+            priority: "high",
+            source: "viewing_brief",
           },
         ]}
         onSaveAnswer={onSaveAnswer}
@@ -67,43 +98,22 @@ describe("QuestionList", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "On-site answers" })).toBeVisible();
-    expect(screen.getByText("Completed 1 / 2")).toBeVisible();
-    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "1");
-    expect(screen.getByRole("heading", { name: "Unanswered" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Answered" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Viewing focus tickets" })).toBeVisible();
+    expect(screen.getByText("Completed 1 / 3")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Condition" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Transit & location" })).toBeVisible();
+    expect(screen.getAllByText("To confirm").length).toBeGreaterThan(0);
     expect(screen.getByText(/Loud at night/)).toBeVisible();
-    expect(screen.getByText(/Note:/)).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: "Answer question" }));
+    await user.click(screen.getAllByRole("button", { name: "Answer question" })[0]!);
     expect(screen.getByRole("dialog")).toBeVisible();
     expect(screen.getByRole("heading", { name: "How do you want to answer?" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Record audio" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Take photo" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Record video" })).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "Write note" }));
-    await user.type(screen.getByPlaceholderText("Note…"), "Ceiling stain");
+    expect(screen.getByLabelText("Write a note")).toBeVisible();
+    await user.type(screen.getByPlaceholderText("Note…"), "Ceiling stain near kitchen");
     await user.click(screen.getByRole("button", { name: "Save answer" }));
-    expect(onSaveAnswer).toHaveBeenCalledWith(1, "Ceiling stain");
+    expect(onSaveAnswer).toHaveBeenCalledWith(1, "Ceiling stain near kitchen");
     expect(onSelectMethod).not.toHaveBeenCalled();
-  });
-
-  it("routes capture methods to the parent handler", async () => {
-    const user = userEvent.setup();
-    const onSelectMethod = vi.fn();
-
-    render(
-      <QuestionList
-        messages={messages}
-        questions={[{ id: 9, text: "Parking?", checked: false }]}
-        onSaveAnswer={vi.fn()}
-        onSelectMethod={onSelectMethod}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Answer question" }));
-    await user.click(screen.getByRole("button", { name: "Take photo" }));
-    expect(onSelectMethod).toHaveBeenCalledWith(9, "photo");
   });
 });

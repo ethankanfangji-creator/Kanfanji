@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   canEnterStep,
   canGenerateShareCard,
+  ensureViewingAt,
   getPublishReadiness,
   getShareChecklist,
   getStepStatus,
   isStep1Complete,
   isStep2Complete,
   isStep3Complete,
+  isViewingStarted,
   mirrorSetupIntoPropertyDraft,
 } from "./readiness";
 
@@ -21,13 +23,22 @@ const base = {
 };
 
 describe("viewing wizard readiness", () => {
-  it("requires address + viewingAt for step 1", () => {
-    expect(isStep1Complete({ address: "", viewingAt: "2026-09-15T10:00" })).toBe(false);
-    expect(isStep1Complete({ address: "1200 Westwood", viewingAt: "" })).toBe(false);
-    expect(isStep1Complete({ address: "1200 Westwood", viewingAt: "not-a-date" })).toBe(false);
-    expect(
-      isStep1Complete({ address: "1200 Westwood", viewingAt: "2026-09-15T10:00:00.000Z" }),
-    ).toBe(true);
+  it("requires a confirmed address for step 1", () => {
+    expect(isStep1Complete({ address: "" })).toBe(false);
+    expect(isStep1Complete({ address: "1200 Westwood" })).toBe(false);
+    expect(isStep1Complete({ address: "1200 Westwood", identified: false })).toBe(false);
+    expect(isStep1Complete({ address: "1200 Westwood", identified: true })).toBe(true);
+  });
+
+  it("requires Start viewing before Step 2", () => {
+    expect(isViewingStarted({})).toBe(false);
+    expect(isViewingStarted({ viewingStarted: true })).toBe(true);
+  });
+
+  it("stamps viewingAt when empty", () => {
+    const stamped = ensureViewingAt("", new Date("2026-09-15T10:00:00.000Z"));
+    expect(stamped).toBe("2026-09-15T10:00:00.000Z");
+    expect(ensureViewingAt("2026-09-16T12:00:00.000Z")).toBe("2026-09-16T12:00:00.000Z");
   });
 
   it("requires any field content for step 2", () => {
@@ -49,6 +60,7 @@ describe("viewing wizard readiness", () => {
     const snap = {
       ...base,
       address: "A",
+      identified: true,
       viewingAt: "2026-09-15T10:00:00.000Z",
       notesCount: 1,
     };
@@ -83,11 +95,22 @@ describe("viewing wizard readiness", () => {
 
   it("gates entering later steps", () => {
     expect(canEnterStep(2, base)).toBe(false);
+    expect(canEnterStep(2, { ...base, address: "A" })).toBe(false);
+    expect(canEnterStep(2, { ...base, address: "A", identified: true })).toBe(false);
     expect(
-      canEnterStep(2, { ...base, address: "A", viewingAt: "2026-09-15T10:00:00.000Z" }),
+      canEnterStep(2, { ...base, address: "A", identified: true, viewingStarted: true }),
     ).toBe(true);
     expect(
-      canEnterStep(3, { ...base, address: "A", viewingAt: "2026-09-15T10:00:00.000Z" }),
+      canEnterStep(3, { ...base, address: "A", identified: true, viewingStarted: true }),
+    ).toBe(false);
+    expect(
+      canEnterStep(3, {
+        ...base,
+        address: "A",
+        identified: true,
+        viewingStarted: true,
+        notesCount: 1,
+      }),
     ).toBe(true);
   });
 

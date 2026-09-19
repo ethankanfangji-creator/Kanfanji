@@ -5,6 +5,11 @@ import {
   ShareAccessPanel,
   type ShareAccessPanelLabels,
 } from "@/components/share-card/ShareAccessPanel";
+import {
+  ViewingReportPanel,
+  type ViewingReportPanelLabels,
+} from "@/components/viewing-wizard/ViewingReportPanel";
+import type { ViewingReport } from "@/lib/viewing-report/types";
 import { ShareReadinessList } from "./ShareReadiness";
 import type { SessionUiStatus } from "@/lib/sync";
 import type { ShareLinkRecord } from "@/lib/share-access/types";
@@ -51,6 +56,11 @@ export function StepShare({
   shareLink,
   onCopyShareLink,
   onShareLinkChanged,
+  report = null,
+  reportLabels,
+  shareEnabled = false,
+  signInToShareLabel,
+  onRequestSignIn,
 }: {
   checklist: ShareChecklistItem[];
   checklistLabels: Record<ShareChecklistItemId, string>;
@@ -92,6 +102,12 @@ export function StepShare({
     link: ShareLinkRecord | null;
     urlPath?: string;
   }) => void;
+  report?: ViewingReport | null;
+  reportLabels?: ViewingReportPanelLabels;
+  /** When false, share link panel is hidden and a sign-in CTA may show. */
+  shareEnabled?: boolean;
+  signInToShareLabel?: string;
+  onRequestSignIn?: () => void;
 }) {
   const statusText = (() => {
     if (syncingCard && generateStage) return stageLabels[generateStage];
@@ -117,7 +133,7 @@ export function StepShare({
     }
   })();
 
-  const showShareAccess = Boolean(hasShareToken || shareLink);
+  const showShareAccess = Boolean(shareEnabled && (hasShareToken || shareLink));
 
   return (
     <div className="space-y-4">
@@ -193,6 +209,10 @@ export function StepShare({
           </p>
         ) : null}
       </section>
+
+      {report && reportLabels ? (
+        <ViewingReportPanel report={report} labels={reportLabels} />
+      ) : null}
 
       <section
         aria-labelledby="step3-preview-heading"
@@ -272,6 +292,17 @@ export function StepShare({
           onCopyLink={onCopyShareLink}
           onLinkChanged={onShareLinkChanged}
         />
+      ) : !shareEnabled && signInToShareLabel && onRequestSignIn ? (
+        <section className="rounded-[22px] border border-dashed border-black/15 bg-white p-4">
+          <p className="text-[12px] leading-[1.45] text-[#6B7280]">{generateHint}</p>
+          <button
+            type="button"
+            onClick={onRequestSignIn}
+            className="mt-3 w-full min-h-12 rounded-full bg-black text-[14px] font-bold text-white"
+          >
+            {signInToShareLabel}
+          </button>
+        </section>
       ) : null}
     </div>
   );

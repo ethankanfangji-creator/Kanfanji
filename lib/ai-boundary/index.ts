@@ -8,11 +8,13 @@ export {
 export {
   AiInputError,
   assertContentLength,
+  validateIntegrateInputBody,
   validateRecordingForm,
   validateVisionBody,
 } from "./validation";
 export type {
   AiConsentAssertion,
+  IntegrateInputBody,
   RecordingInput,
   VisionInput,
 } from "./validation";

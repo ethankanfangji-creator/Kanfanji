@@ -223,6 +223,7 @@ export function emptyDraft(partial?: Partial<ViewingDraftRecord>): ViewingDraftR
     liveAudioMarkers: [],
     aiSummary: null,
     fieldChecklist: [],
+    inputLog: [],
     ...partial,
   };
 }

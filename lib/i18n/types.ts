@@ -50,9 +50,65 @@ export type Messages = {
     addressSwitchSaveAndNew: string;
     addressSwitchDiscardAndNew: string;
     addressSwitchCancel: string;
+    needAddress: string;
+    needStartViewing: string;
+    needFieldContent: string;
+    highlightsLoading: string;
+    highlightsReady: string;
+    propertyDetailsTitle: string;
+    propertyDetailsHint: string;
+    finishViewing: string;
+    backToAddressTitle: string;
+    backToAddressBody: string;
+    backToAddressConfirm: string;
+    backToAddressCancel: string;
+    highPriorityTitle: string;
+    highPriorityBody: string;
+    highPriorityContinue: string;
+    highPriorityStay: string;
+    stepProgress: string;
+    stepNavLabel: string;
+    stepStatusActive: string;
+    stepStatusCompleted: string;
+    stepStatusError: string;
+    stepStatusEmpty: string;
+  };
+  composer: {
+    placeholder: string;
+    placeholderBound: string;
+    send: string;
+    cancel: string;
+    recording: string;
+    stopRecording: string;
+    attachImage: string;
+    removeImage: string;
+    removeAudio: string;
+    clearBound: string;
+    suggestionsLabel: string;
+    limitsHint: string;
+    imageTooLarge: string;
+    imageBadType: string;
+    audioTooLarge: string;
+    emptyError: string;
+    micDenied: string;
+    micUnsupported: string;
+    uploading: string;
+    integrating: string;
+    transcribing: string;
+    reEdit: string;
+    sourceUser: string;
+    sourceAi: string;
+    discoveryBadge: string;
+    discoveryConfirm: string;
+    discoveryIgnore: string;
+    discoveryAnswer: string;
+    offTopic: string;
+    imageUncertain: string;
+    bindHint: string;
   };
   setup: {
     title: string;
+    subtitle: string;
     viewingAt: string;
     unitLabel: string;
     priceLabel: string;
@@ -62,6 +118,8 @@ export type Messages = {
     listingUrl: string;
     setupNotes: string;
     lookupOptional: string;
+    startViewing: string;
+    startViewingHint: string;
   };
   intro: string;
   address: {
@@ -83,6 +141,43 @@ export type Messages = {
     photoMetaGpsRefuse: string;
     photoMetaGpsRefused: string;
     photoMetaGpsApplied: string;
+    suggestLoading: string;
+    suggestEmpty: string;
+    suggestError: string;
+    suggestListLabel: string;
+    useMyLocation: string;
+    locating: string;
+    locationDenied: string;
+    locationUnavailable: string;
+    locationUnsupported: string;
+    locationFailed: string;
+    confirmAddress: string;
+    changeAddress: string;
+    confirmedLabel: string;
+    selectToConfirm: string;
+  };
+  propertyBasics: {
+    title: string;
+    loading: string;
+    retry: string;
+    failed: string;
+    unknown: string;
+    sources: string;
+    fields: {
+      displayName: string;
+      propertyType: string;
+      layout: string;
+      area: string;
+      price: string;
+      managementFee: string;
+      yearBuilt: string;
+      summary: string;
+    };
+    confidence: {
+      verified: string;
+      inferred: string;
+      unknown: string;
+    };
   };
   bank: {
     title: string;
@@ -117,8 +212,19 @@ export type Messages = {
     statusAnswered: string;
     statusAnalyzing: string;
     statusAnalysisFailed: string;
+    statusToConfirm: string;
+    statusNeedsMore: string;
     noteSummaryLabel: string;
     aiSummaryLabel: string;
+    priorityHigh: string;
+    priorityMedium: string;
+    priorityLow: string;
+    categoryCondition: string;
+    categoryTransit: string;
+    categoryAmenities: string;
+    categoryCostsDocs: string;
+    categoryOnsiteConfirm: string;
+    categoryOther: string;
     methodTitle: string;
     methodDescription: string;
     methodAudio: string;
@@ -133,6 +239,10 @@ export type Messages = {
     captureAudioSummary: string;
     capturePhotoSummary: string;
     captureVideoSummary: string;
+    discoveryBadge: string;
+    discoveryConfirm: string;
+    discoveryIgnore: string;
+    discoveryAnswer: string;
   };
   audio: {
     title: string;
@@ -231,6 +341,7 @@ export type Messages = {
     readyLoggedIn: string;
     readyGuest: string;
     needMore: string;
+    signInToShare: string;
     previewTitle: string;
     previewEmpty: string;
     previewOpen: string;
@@ -239,6 +350,24 @@ export type Messages = {
     stageAnalyze: string;
     stageSummary: string;
     stageBuild: string;
+    reportTitle: string;
+    reportProperty: string;
+    reportViewing: string;
+    reportCategories: string;
+    reportObservations: string;
+    reportOriginalNotes: string;
+    reportPhotos: string;
+    reportAnswered: string;
+    reportUnanswered: string;
+    reportDiscoveries: string;
+    reportRisks: string;
+    reportToConfirm: string;
+    reportAiSummary: string;
+    reportEmpty: string;
+    reportViewingAt: string;
+    reportMarket: string;
+    reportTags: string;
+    reportPreserveNote: string;
   };
   shareAccess: {
     title: string;
@@ -273,6 +402,8 @@ export type Messages = {
   loginGate: {
     title: string;
     body: string;
+    bodyExport: string;
+    bodyLink: string;
     email: string;
     password: string;
     submitSignIn: string;
@@ -284,6 +415,8 @@ export type Messages = {
     hidePassword: string;
     emailInvalid: string;
     passwordTooShort: string;
+    needCloud: string;
+    bodySecondRoom: string;
   };
   paywall: {
     title: string;
@@ -334,6 +467,7 @@ export type Messages = {
     disclaimer: string;
     generatedAt: string;
     localPreview: string;
+    signInToShare: string;
     syncedHint: string;
     needSync: string;
     privacyTitle: string;

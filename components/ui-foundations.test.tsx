@@ -2,7 +2,6 @@
 
 import { cleanup, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
-import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SyncStatusBanner } from "./SyncStatusBanner";
 import { StepSetup, type StepSetupMessages } from "./viewing-wizard/StepSetup";
@@ -28,10 +27,9 @@ describe("UI accessibility foundations", () => {
       "step",
     );
     expect(screen.getByText("已完成")).toBeVisible();
-    expect(screen.getByText("尚未開始")).toBeVisible();
   });
 
-  it("announces sync status updates politely", () => {
+  it("announces sync status politely", () => {
     render(
       <SyncStatusBanner
         status={{
@@ -41,7 +39,7 @@ describe("UI accessibility foundations", () => {
           canRetry: false,
         }}
         messages={{
-          savedLocal: "Saved",
+          savedLocal: "Saved on this device",
           pending: "Pending",
           syncing: "Syncing",
           synced: "Synced",
@@ -56,57 +54,37 @@ describe("UI accessibility foundations", () => {
     expect(screen.getByRole("status")).toHaveAttribute("aria-atomic", "true");
   });
 
-  it("adds native constraints and narrow-screen form layout", async () => {
-    const user = userEvent.setup();
-    const onViewingAtChange = vi.fn();
-    const { container } = render(
+  it("keeps Step 1 address-first with confirm and location actions", () => {
+    render(
       <StepSetup
         messages={setupMessages}
         address=""
         onAddressChange={vi.fn()}
         lookingUp={false}
-        onLookup={vi.fn()}
+        onConfirmAddress={vi.fn()}
+        onConfirmSuggestion={vi.fn()}
+        onReselectAddress={vi.fn()}
         identified={false}
         tags={[]}
         propertyDraft={{}}
         syncMessage=""
         lookupError={false}
-        viewingAtLocal=""
-        onViewingAtChange={onViewingAtChange}
-        unitLabel=""
-        onUnitLabelChange={vi.fn()}
-        priceLabel=""
-        onPriceLabelChange={vi.fn()}
-        layoutLabel=""
-        onLayoutLabelChange={vi.fn()}
-        areaLabel=""
-        onAreaLabelChange={vi.fn()}
-        managementFeeLabel=""
-        onManagementFeeLabelChange={vi.fn()}
-        listingUrl=""
-        onListingUrlChange={vi.fn()}
-        setupNotes=""
-        onSetupNotesChange={vi.fn()}
         onApplyExifGps={vi.fn(async () => undefined)}
+        onUseMyLocation={vi.fn()}
+        propertyBasicsStatus="idle"
+        propertyBasics={null}
+        onRetryPropertyBasics={vi.fn()}
+        onStartViewing={vi.fn()}
       />,
     );
 
-    const date = screen.getByLabelText(/Viewing time/);
-    expect(date).toBeRequired();
     expect(screen.getByRole("heading", { name: "Create a new viewing" })).toBeVisible();
-    expect(container.querySelector(".setup-form-grid")).not.toBeNull();
-    expect(screen.getByLabelText("ADDRESS")).toBeRequired();
-    expect(screen.getByLabelText("ADDRESS")).toHaveAttribute("autocomplete", "street-address");
-    expect(screen.getByLabelText("Price")).toHaveAttribute("inputmode", "decimal");
-    expect(screen.getByLabelText("Listing URL")).toHaveAttribute("maxlength", "2048");
-    expect(date).toHaveAttribute("type", "datetime-local");
-    expect(date.className).toMatch(/min-w-0/);
-
-    await user.type(screen.getByLabelText("Unit"), "12A");
-    expect(screen.getByLabelText("Unit")).toHaveAttribute("maxlength", "80");
-    expect(
-      screen.getByRole("button", { name: /Read EXIF from photo/i }),
-    ).toBeVisible();
+    expect(screen.getByText(/Start with the address/i)).toBeVisible();
+    expect(screen.getByRole("combobox")).toBeRequired();
+    expect(screen.getByRole("button", { name: /Confirm address/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Use my location/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Start viewing$/i })).toBeDisabled();
+    expect(screen.queryByLabelText(/Viewing time/i)).toBeNull();
   });
 });
 
@@ -116,7 +94,7 @@ const setupMessages: StepSetupMessages = {
     hint: "Optional lookup",
     lookingUp: "Looking up",
     identified: "Identified",
-    autofilledHint: "Auto-filled from address — you can edit",
+    autofilledHint: "Auto-filled",
     openDataPrefix: "Open data: ",
     photoMetaImport: "Read EXIF from photo (optional)",
     photoMetaHint: "Reads embedded photo metadata only",
@@ -125,22 +103,54 @@ const setupMessages: StepSetupMessages = {
     photoMetaUnsupported: "Unsupported file",
     photoMetaError: "Metadata read failed",
     photoMetaGpsPrivacyTitle: "Use GPS from this photo?",
-    photoMetaGpsPrivacyBody: "Coordinates only; photo is not uploaded for recognition.",
+    photoMetaGpsPrivacyBody: "Coordinates only",
     photoMetaGpsAccept: "Use GPS",
     photoMetaGpsRefuse: "Refuse",
     photoMetaGpsRefused: "GPS refused",
     photoMetaGpsApplied: "Suggested from EXIF GPS",
+    suggestLoading: "Searching…",
+    suggestEmpty: "No matches",
+    suggestError: "Search failed",
+    suggestListLabel: "Suggestions",
+    useMyLocation: "Use my location",
+    locating: "Locating…",
+    locationDenied: "Denied",
+    locationUnavailable: "Unavailable",
+    locationUnsupported: "Unsupported",
+    locationFailed: "Failed",
+    confirmAddress: "Confirm address",
+    changeAddress: "Change address",
+    confirmedLabel: "Confirmed address",
+    selectToConfirm: "Pick a suggestion or confirm",
   },
   setup: {
     title: "Create a new viewing",
-    viewingAt: "Viewing time",
-    unitLabel: "Unit",
-    priceLabel: "Price",
-    layoutLabel: "Layout",
-    areaLabel: "Area",
-    managementFeeLabel: "Management fee",
-    listingUrl: "Listing URL",
-    setupNotes: "Notes",
+    subtitle: "Start with the address. Other listing details can wait until you are on site.",
     lookupOptional: "Lookup is optional",
+    startViewing: "Start viewing",
+    startViewingHint: "Saves this viewing on this device",
+  },
+  propertyBasics: {
+    title: "Property basics",
+    loading: "Loading",
+    retry: "Retry",
+    failed: "Failed",
+    unknown: "Unknown / to confirm",
+    sources: "Sources",
+    fields: {
+      displayName: "Name",
+      propertyType: "Type",
+      layout: "Layout",
+      area: "Area",
+      price: "Price",
+      managementFee: "Fee",
+      yearBuilt: "Year",
+      summary: "Summary",
+    },
+    confidence: {
+      verified: "Verified",
+      inferred: "Inferred",
+      unknown: "Unknown",
+    },
   },
 };

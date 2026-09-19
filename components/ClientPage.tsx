@@ -27,8 +27,10 @@ import {
   useMediaCapture,
 } from "@/components/media/useMediaCapture";
 import { PhotoAnnotator } from "@/components/viewing-wizard/PhotoAnnotator";
+import { ChatComposer, type ChatComposerSubmitPayload } from "@/components/viewing-wizard/ChatComposer";
 import { QuestionList } from "@/components/viewing-wizard/questions";
 import { StepSetup } from "@/components/viewing-wizard/StepSetup";
+import { PropertyDetailsPanel } from "@/components/viewing-wizard/PropertyDetailsPanel";
 import { StepShare } from "@/components/viewing-wizard/StepShare";
 import { WizardBottomNav, WizardStepper } from "@/components/viewing-wizard/WizardStepper";
 import { useViewingSyncController } from "@/components/viewing-wizard/useViewingSyncController";
@@ -48,6 +50,8 @@ import {
   updateTextItem,
   type DecisionSummarySnapshot,
 } from "@/lib/share-card";
+import { buildViewingReport } from "@/lib/viewing-report/build";
+import type { ViewingReport } from "@/lib/viewing-report/types";
 import type { ShareLinkRecord } from "@/lib/share-access/types";
 import { bankQuestions } from "@/lib/i18n";
 import {
@@ -128,11 +132,14 @@ import { claimGuestViewingData } from "@/lib/auth/claim-guest-data";
 import {
   canEnterStep,
   canGenerateShareCard,
+  ensureViewingAt,
   fromDatetimeLocalValue,
   getPublishReadiness,
   getShareChecklist,
   getStepStatus,
   isStep1Complete,
+  isStep2Complete,
+  isViewingStarted,
   mirrorSetupIntoPropertyDraft,
   toDatetimeLocalValue,
   type WizardStep,
@@ -142,6 +149,15 @@ import {
   mergeAddressLookupPropertyDraft,
   resolveLookupDisplayAddress,
 } from "@/lib/viewing-wizard/address-autofill";
+import {
+  type AddressHighlight,
+} from "@/lib/viewing-wizard/address-highlights";
+import { countHighPriorityOpenTickets, ensureViewingBriefQuestions } from "@/lib/viewing-wizard/viewing-brief";
+import type { AddressSuggestion } from "@/lib/address-suggest";
+import {
+  isPropertyBasicsSnapshot,
+  type PropertyBasicsSnapshot,
+} from "@/lib/property-basics/types";
 import {
   deriveWorkflowStatus,
   normalizeWorkflowStatus,
@@ -160,7 +176,24 @@ import {
   type QuestionAnswerPreview,
   type WizardQuestion,
 } from "@/lib/viewing-wizard/questions";
+import {
+  appendInputLog,
+  applyIntegrationToQuestions,
+  createInputEntryId,
+  isOffTopicAddressRequest,
+  mergeLegacyRiskLines,
+  setDiscoveryStatus,
+  type ViewingInputEntry,
+  type ViewingInputIntegrationResult,
+} from "@/lib/viewing-wizard/input-integration";
 import type { User } from "@supabase/supabase-js";
+
+import { createBrowserGeolocationService } from "@/lib/services/geolocation/browser-adapter";
+import {
+  FREE_VIEWING_LIMIT,
+  canCreateCloudViewing,
+  canStartLocalViewing,
+} from "@/lib/viewing-wizard/free-tier";
 
 type Question = WizardQuestion;
 
@@ -206,8 +239,6 @@ type AiConsentDecision = {
   decision: "accepted" | "declined";
   decidedAt: string;
 };
-
-const FREE_VIEWING_LIMIT = 3;
 
 export function ClientPage() {
   const router = useRouter();
@@ -265,6 +296,13 @@ export function ClientPage() {
   const [aiSummary, setAiSummary] = useState<ViewingAiSummary | null>(null);
   const [aiConsent, setAiConsent] = useState<AiConsentDecision | null>(null);
   const [showAiConsent, setShowAiConsent] = useState(false);
+  const [inputLog, setInputLog] = useState<ViewingInputEntry[]>([]);
+  const [boundComposerQuestionId, setBoundComposerQuestionId] = useState<number | null>(null);
+  const [composerBusy, setComposerBusy] = useState(false);
+  const [composerProgress, setComposerProgress] = useState<string | null>(null);
+  const [composerError, setComposerError] = useState<string | null>(null);
+  const [showBackToAddressConfirm, setShowBackToAddressConfirm] = useState(false);
+  const [showHighPriorityConfirm, setShowHighPriorityConfirm] = useState(false);
   const aiConsentResolverRef = useRef<((accepted: boolean) => void) | null>(null);
   const [audioPlaybackUrls, setAudioPlaybackUrls] = useState<Record<number, string>>({});
   const [annotatingPhotoId, setAnnotatingPhotoId] = useState<number | null>(null);
@@ -286,6 +324,13 @@ export function ClientPage() {
   } | null>(null);
   const [lookingUp, setLookingUp] = useState(false);
   const [identified, setIdentified] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const [locationError, setLocationError] = useState("");
+  const [propertyBasicsStatus, setPropertyBasicsStatus] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >("idle");
+  const [propertyBasics, setPropertyBasics] = useState<PropertyBasicsSnapshot | null>(null);
+  const [startingViewing, setStartingViewing] = useState(false);
   const [tags, setTags] = useState<string[]>([]);
   const [marketCode, setMarketCode] = useState<"CA" | "TH" | "OTHER">("CA");
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -315,12 +360,16 @@ export function ClientPage() {
   const audioImportInput = useRef<HTMLInputElement>(null);
   const [showCard, setShowCard] = useState(false);
   const [cardDraft, setCardDraft] = useState<DecisionSummarySnapshot | null>(null);
+  const [viewingReport, setViewingReport] = useState<ViewingReport | null>(null);
   const [showPrivacyCheck, setShowPrivacyCheck] = useState(false);
   const [privacyAction, setPrivacyAction] = useState<"copy" | "share" | "exportImage" | null>(
     null,
   );
   const [exportImageArmed, setExportImageArmed] = useState(false);
   const [showLoginGate, setShowLoginGate] = useState(false);
+  const [loginGateIntent, setLoginGateIntent] = useState<
+    "generate" | "copy" | "share" | "exportImage" | "secondRoom" | null
+  >(null);
   const [showPaywall, setShowPaywall] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [syncingCard, setSyncingCard] = useState(false);
@@ -414,6 +463,7 @@ export function ClientPage() {
     liveAudioMarkers: [] as AudioMarker[],
     aiSummary: null as ViewingAiSummary | null,
     aiConsent: null as AiConsentDecision | null,
+    inputLog: [] as ViewingInputEntry[],
   });
 
   const configured = isSupabaseConfigured();
@@ -682,6 +732,7 @@ export function ClientPage() {
       liveAudioMarkers: liveMarkers,
       aiSummary,
       aiConsent,
+      inputLog,
     };
   }, [
     address,
@@ -708,6 +759,7 @@ export function ClientPage() {
     liveMarkers,
     aiSummary,
     aiConsent,
+    inputLog,
   ]);
 
   async function resolveExistingLocalSessionId(): Promise<string | null> {
@@ -977,6 +1029,7 @@ export function ClientPage() {
       aiSummary: ViewingAiSummary | null;
       aiConsent: AiConsentDecision | null;
       workflowStatus: ViewingWorkflowStatus;
+      inputLog: ViewingInputEntry[];
     }>,
   ) {
     if (!draftHydratedRef.current) return false;
@@ -1036,6 +1089,7 @@ export function ClientPage() {
         liveAudioMarkers: snap.liveAudioMarkers,
         aiSummary: snap.aiSummary,
         aiConsent: snap.aiConsent,
+        inputLog: snap.inputLog,
       });
       requirePersistence(persisted);
       if (!sessionUiStatus || sessionUiStatus.status === "local_only" || !user) {
@@ -1321,6 +1375,14 @@ export function ClientPage() {
           setTags(draft.tags ?? []);
           setMarketCode(draft.market ?? "CA");
           setIdentified(Boolean(draft.identified));
+          const existingBasics = draft.propertyDraft?.propertyBasics;
+          if (isPropertyBasicsSnapshot(existingBasics)) {
+            setPropertyBasics(existingBasics);
+            setPropertyBasicsStatus("ready");
+          } else {
+            setPropertyBasics(null);
+            setPropertyBasicsStatus("idle");
+          }
           const hydratedChecklist = ensureFieldChecklist(
             draft.fieldChecklist,
             messages.fieldChecklist.labels,
@@ -1329,10 +1391,32 @@ export function ClientPage() {
             draft.questions ?? [],
             hydratedChecklist,
           );
-          const nextQuestions = ensureDefaultFieldQuestions(
-            mergedQuestions,
-            messages.fieldChecklist.labels,
-          );
+          const nextQuestions =
+            draft.identified && (draft.address || "").trim()
+              ? ensureViewingBriefQuestions(mergedQuestions, {
+                  address: draft.address || "",
+                  market: draft.market ?? "CA",
+                  tags: draft.tags ?? [],
+                  openData:
+                    (draft.propertyDraft?.openData as {
+                      city?: string;
+                      zoningCode?: string;
+                      zoningLabel?: string;
+                      pid?: string;
+                    } | null) ?? null,
+                  neighborhood:
+                    typeof draft.propertyDraft?.neighborhood === "string"
+                      ? draft.propertyDraft.neighborhood
+                      : undefined,
+                  city:
+                    typeof draft.propertyDraft?.city === "string"
+                      ? draft.propertyDraft.city
+                      : undefined,
+                  propertyBasics: isPropertyBasicsSnapshot(draft.propertyDraft?.propertyBasics)
+                    ? draft.propertyDraft.propertyBasics
+                    : null,
+                })
+              : ensureDefaultFieldQuestions(mergedQuestions, messages.fieldChecklist.labels);
           const derivedChecklist = deriveFieldChecklistFromQuestions(
             nextQuestions,
             messages.fieldChecklist.labels,
@@ -1357,7 +1441,37 @@ export function ClientPage() {
             setShareUrl(`${window.location.origin}/s/${draft.shareToken}`);
           }
           if (draft.wizardStep === 1 || draft.wizardStep === 2 || draft.wizardStep === 3) {
-            setWizardStep(draft.wizardStep);
+            const restoredIdentified = Boolean(draft.identified);
+            const draftViewingStartedAt =
+              typeof draft.propertyDraft?.viewingStartedAt === "string"
+                ? draft.propertyDraft.viewingStartedAt
+                : "";
+            const restoredStarted =
+              Boolean(draftViewingStartedAt) ||
+              (draft.workflowStatus != null &&
+                draft.workflowStatus !== "draft" &&
+                draft.workflowStatus !== "abandoned");
+            if ((draft.wizardStep === 2 || draft.wizardStep === 3) && !restoredIdentified) {
+              setWizardStep(1);
+            } else if (
+              (draft.wizardStep === 2 || draft.wizardStep === 3) &&
+              restoredIdentified &&
+              !restoredStarted
+            ) {
+              // Legacy drafts on Step 2/3 without start marker: backfill so restore is not lost.
+              const startedAt = new Date().toISOString();
+              setPropertyDraft((current) => ({
+                ...current,
+                ...(draft.propertyDraft ?? {}),
+                viewingStartedAt:
+                  typeof draft.propertyDraft?.viewingStartedAt === "string"
+                    ? draft.propertyDraft.viewingStartedAt
+                    : startedAt,
+              }));
+              setWizardStep(draft.wizardStep);
+            } else {
+              setWizardStep(draft.wizardStep);
+            }
           }
           if (draft.liveAudioMarkers?.length) {
             setLiveMarkers(draft.liveAudioMarkers);
@@ -1368,10 +1482,20 @@ export function ClientPage() {
           if (draft.aiConsent) {
             setAiConsent(draft.aiConsent);
           }
+          if (Array.isArray(draft.inputLog)) {
+            setInputLog(draft.inputLog as ViewingInputEntry[]);
+          }
           if (isDecisionSummarySnapshot(draft.propertyDraft?.decisionSummaryDraft)) {
             setCardDraft(draft.propertyDraft.decisionSummaryDraft);
           } else if (isDecisionSummarySnapshot(draft.propertyDraft?.decisionSummary)) {
             setCardDraft(draft.propertyDraft.decisionSummary);
+          }
+          if (
+            draft.propertyDraft?.viewingReport &&
+            typeof draft.propertyDraft.viewingReport === "object" &&
+            (draft.propertyDraft.viewingReport as { version?: unknown }).version === 1
+          ) {
+            setViewingReport(draft.propertyDraft.viewingReport as ViewingReport);
           }
           setSessionUiStatus(
             syncStatusToUi(
@@ -1388,7 +1512,9 @@ export function ClientPage() {
           setSyncMessage(
             draft.remoteViewingId
               ? "已還原本機草稿 · 登入後會自動同步"
-              : "已還原本機草稿（IndexedDB）",
+              : draft.localSessionId
+                ? `已還原未完成看房紀錄 · ${draft.localSessionId.slice(0, 8)}`
+                : "已還原本機草稿（IndexedDB）",
           );
         } else if (nextPhotos.length || nextClips.length) {
           setSessionUiStatus(syncStatusToUi("local_only"));
@@ -1436,6 +1562,13 @@ export function ClientPage() {
     messages.photoTagLabels,
     hydrateDraftForm,
   ]);
+
+  // Build / refresh the Step-3 report when entering report stage without a snapshot.
+  useEffect(() => {
+    if (!draftReady || wizardStep !== 3 || viewingReport) return;
+    refreshViewingReport(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only seed when Step 3 opens empty
+  }, [draftReady, wizardStep, viewingReport]);
 
   // Lazy-create object URLs when user reaches capture step (thumbs first for photos).
   useEffect(() => {
@@ -1706,6 +1839,312 @@ export function ClientPage() {
       return next;
     });
     scrollToQuestionCard(questionId);
+  }
+
+  function bindComposerToQuestion(questionId: number) {
+    setBoundComposerQuestionId(questionId);
+    setComposerError(null);
+    document.getElementById("step2-composer")?.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest",
+    });
+  }
+
+  function handleDiscoveryStatus(questionId: number, status: "confirmed" | "ignored") {
+    setQuestions((current) => {
+      const next = setDiscoveryStatus(current, questionId, status);
+      const derived = deriveFieldChecklistFromQuestions(next, messages.fieldChecklist.labels);
+      setFieldChecklist(derived);
+      void flushDraftToIdb({ questions: next, fieldChecklist: derived });
+      return next;
+    });
+    if (status === "confirmed") bindComposerToQuestion(questionId);
+    if (status === "ignored" && boundComposerQuestionId === questionId) {
+      setBoundComposerQuestionId(null);
+    }
+  }
+
+  async function transcribeComposerAudio(
+    blob: Blob,
+    durationSec: number,
+    consentSessionId: string,
+  ): Promise<string> {
+    const form = new FormData();
+    const audioFile =
+      blob instanceof File
+        ? blob
+        : new File([blob], `composer.${extensionFor(blob, "webm")}`, {
+            type: blob.type || "audio/webm",
+          });
+    form.append("audio", audioFile);
+    form.append(
+      "questions",
+      JSON.stringify(
+        questions.slice(0, 40).map((q) => ({
+          id: q.id,
+          text: q.text,
+          answer: q.answer,
+        })),
+      ),
+    );
+    form.append("address", (committedAddressRef.current || address).trim());
+    form.append("market", marketCode);
+    form.append("locale", locale);
+    form.append("durationSec", String(Math.max(1, durationSec)));
+    form.append("consentVersion", AI_CONSENT_VERSION);
+    form.append("consentSessionId", consentSessionId);
+    form.append("identityKind", user ? "user" : "guest");
+    form.append("openData", JSON.stringify(propertyDraft.openData ?? null));
+    form.append(
+      "propertyContext",
+      JSON.stringify({
+        tags,
+        neighborhood: propertyDraft.neighborhood,
+        city: propertyDraft.city,
+      }),
+    );
+    form.append("markers", "[]");
+
+    const response = await fetch("/api/process-recording", {
+      method: "POST",
+      body: form,
+    });
+    const payload = (await response.json()) as {
+      transcript?: string;
+      code?: string;
+      error?: string;
+    };
+    if (!response.ok || !payload.transcript?.trim()) {
+      if (payload.code === "ai_quota_exceeded") throw new Error(messages.aiBoundary.quota);
+      if (payload.code === "ai_quota_unavailable" || payload.code === "ai_unavailable") {
+        throw new Error(messages.aiBoundary.unavailable);
+      }
+      throw new Error(messages.aiBoundary.failed);
+    }
+    return payload.transcript.trim();
+  }
+
+  async function submitComposerInput(payload: ChatComposerSubmitPayload) {
+    const viewingSessionId = draftSessionIdRef.current || (await ensureLocalSessionId());
+    if (!viewingSessionId) {
+      setComposerError(messages.aiBoundary.failed);
+      return;
+    }
+    const combinedText = [payload.text, payload.transcript].filter(Boolean).join("\n");
+    if (isOffTopicAddressRequest(combinedText)) {
+      setComposerError(messages.composer.offTopic);
+      return;
+    }
+
+    const consent = await ensureAiConsent();
+    const gate = await runIfAiConsented(consent.accepted, async () => true);
+    if (!gate.started) {
+      setComposerError(messages.aiBoundary.declined);
+      return;
+    }
+
+    setComposerBusy(true);
+    setComposerError(null);
+    const entryId = createInputEntryId();
+    let transcript = payload.transcript.trim();
+    let imageBase64: string | null = null;
+    let mediaId: string | undefined;
+
+    try {
+      if (payload.audioBlob) {
+        setComposerProgress(messages.composer.transcribing);
+        transcript = await transcribeComposerAudio(
+          payload.audioBlob,
+          payload.audioDurationSec,
+          consent.sessionId,
+        );
+      }
+
+      if (payload.imageFile) {
+        setComposerProgress(messages.composer.uploading);
+        const saved = requirePersistence(
+          await saveBlobAsMedia({
+            kind: "photo",
+            label: "composer",
+            blob: payload.imageFile,
+            clientNumericId: Date.now(),
+            tagId: "other",
+            note: "composer input",
+          }),
+        );
+        mediaId = saved.id;
+        const derivative = await normalizeImageForAi(payload.imageFile);
+        imageBase64 = await blobToDataUrl(derivative);
+      }
+
+      setComposerProgress(messages.composer.integrating);
+      const boundQuestion =
+        payload.boundQuestionId != null
+          ? questions.find((q) => q.id === payload.boundQuestionId) ?? null
+          : null;
+
+      const response = await fetch("/api/integrate-input", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          viewingSessionId,
+          address: (committedAddressRef.current || address).trim(),
+          locale,
+          market: marketCode,
+          boundQuestionId: payload.boundQuestionId,
+          boundQuestionText: boundQuestion?.text ?? null,
+          text: payload.text,
+          transcript,
+          questions: questions.slice(0, 50).map((q) => ({
+            id: q.id,
+            text: q.text,
+            answer: q.answer,
+            category: q.category,
+          })),
+          imageBase64,
+          consentVersion: AI_CONSENT_VERSION,
+          consentSessionId: consent.sessionId,
+          identityKind: user ? "user" : "guest",
+        }),
+      });
+
+      const body = (await response.json()) as {
+        integration?: ViewingInputIntegrationResult;
+        code?: string;
+        error?: string;
+      };
+
+      if (!response.ok || !body.integration) {
+        if (body.code === "ai_quota_exceeded") throw new Error(messages.aiBoundary.quota);
+        if (body.code === "ai_quota_unavailable" || body.code === "ai_unavailable") {
+          throw new Error(messages.aiBoundary.unavailable);
+        }
+        throw new Error(messages.aiBoundary.failed);
+      }
+
+      const integration = body.integration;
+      if (integration.imageUncertain) {
+        setComposerError(integration.message || messages.composer.imageUncertain);
+      } else if (integration.message) {
+        setSyncMessage(integration.message);
+      }
+
+      const entry: ViewingInputEntry = {
+        id: entryId,
+        viewingSessionId,
+        createdAt: new Date().toISOString(),
+        kind:
+          payload.imageFile && (payload.text || transcript)
+            ? "mixed"
+            : payload.imageFile
+              ? "image"
+              : transcript && !payload.text
+                ? "transcript"
+                : "text",
+        original: {
+          text: payload.text || undefined,
+          transcript: transcript || undefined,
+          mediaId,
+          mimeType: payload.imageFile?.type,
+          fileName: payload.imageFile?.name,
+        },
+        boundQuestionId: payload.boundQuestionId,
+        integration,
+        error: null,
+      };
+
+      const nextLog = appendInputLog(inputLog, entry);
+      setInputLog(nextLog);
+
+      setQuestions((current) => {
+        let next = applyIntegrationToQuestions(current, integration, { entryId });
+        next = next.map((q) => {
+          const update = integration.boundQuestionUpdates.find((u) => u.questionId === q.id);
+          if (!update) return q;
+          return {
+            ...q,
+            hint:
+              update.source === "user_input"
+                ? messages.composer.sourceUser
+                : messages.composer.sourceAi,
+            discoveryStatus:
+              q.source === "ai_discovery" && !q.discoveryStatus ? "pending" : q.discoveryStatus,
+          };
+        });
+        if (payload.boundQuestionId != null && payload.text.trim()) {
+          // Ensure bound ticket keeps raw user text even if model omitted a patch.
+          const hasBound = integration.boundQuestionUpdates.some(
+            (u) => u.questionId === payload.boundQuestionId,
+          );
+          if (!hasBound) {
+            next = next.map((q) =>
+              q.id === payload.boundQuestionId
+                ? {
+                    ...q,
+                    answer: q.answer
+                      ? q.answer.includes(payload.text.trim())
+                        ? q.answer
+                        : `${q.answer}\n—\n${payload.text.trim()}`
+                      : payload.text.trim(),
+                    checked: true,
+                    hint: messages.composer.sourceUser,
+                    answerPreview: {
+                      ...q.answerPreview,
+                      noteSummary: payload.text.trim().slice(0, 180),
+                    },
+                  }
+                : q,
+            );
+          }
+        }
+        const derived = deriveFieldChecklistFromQuestions(next, messages.fieldChecklist.labels);
+        setFieldChecklist(derived);
+
+        if (integration.summaryPatches?.risks?.length) {
+          setRisks((currentRisks) =>
+            mergeLegacyRiskLines(currentRisks, integration.summaryPatches?.risks),
+          );
+        }
+
+        void flushDraftToIdb({
+          questions: next,
+          fieldChecklist: derived,
+          inputLog: nextLog,
+          risks: integration.summaryPatches?.risks?.length
+            ? mergeLegacyRiskLines(risks, integration.summaryPatches.risks)
+            : undefined,
+        });
+        return next;
+      });
+
+      if (payload.boundQuestionId != null) {
+        scrollToQuestionCard(payload.boundQuestionId);
+      }
+      setBoundComposerQuestionId(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : messages.aiBoundary.failed;
+      setComposerError(message);
+      const failedEntry: ViewingInputEntry = {
+        id: entryId,
+        viewingSessionId,
+        createdAt: new Date().toISOString(),
+        kind: "text",
+        original: {
+          text: payload.text || undefined,
+          transcript: transcript || undefined,
+          mediaId,
+        },
+        boundQuestionId: payload.boundQuestionId,
+        integration: null,
+        error: message,
+      };
+      const nextLog = appendInputLog(inputLog, failedEntry);
+      setInputLog(nextLog);
+      void flushDraftToIdb({ inputLog: nextLog });
+    } finally {
+      setComposerBusy(false);
+      setComposerProgress(null);
+    }
   }
 
   function attachMediaThumbToQuestion(questionId: number, thumbUrl: string) {
@@ -2515,9 +2954,13 @@ export function ClientPage() {
     setPros([]);
     setRisks([]);
     setCardDraft(null);
+    setViewingReport(null);
     setAiSummary(null);
     setFieldChecklist([]);
     setLiveMarkers([]);
+    setInputLog([]);
+    setBoundComposerQuestionId(null);
+    setComposerError(null);
     setShareToken(null);
     setShareUrl("");
     setViewingId(null);
@@ -2548,6 +2991,15 @@ export function ClientPage() {
     abandonPrevious: boolean;
   }) {
     const previousId = draftSessionIdRef.current;
+    if (
+      !user &&
+      previousId &&
+      !canStartLocalViewing({ authenticated: false, localViewingCount: 1 }).allowed
+    ) {
+      setLoginGateIntent("secondRoom");
+      setShowLoginGate(true);
+      return;
+    }
     if (previousId) {
       if (options.abandonPrevious) {
         await persistActiveSessionSnapshot({
@@ -2742,6 +3194,7 @@ export function ClientPage() {
         (propertyId ? ` · property ${propertyId.slice(0, 8)}` : "") +
         " · 已寫入本機草稿",
     );
+    void fetchPropertyBasicsForConfirmedAddress(nextPropertyDraft);
   }
 
   function cancelAddressSwitch() {
@@ -2754,17 +3207,48 @@ export function ClientPage() {
 
   async function lookupAddress() {
     if (!address.trim()) return;
+    await confirmAddressLookup({ address: address.trim() });
+  }
+
+  async function confirmSuggestion(suggestion: AddressSuggestion) {
+    setAddress(suggestion.label);
+    setLocationError("");
+    await confirmAddressLookup({
+      address: suggestion.label,
+      preferGeocoderDisplay: true,
+    });
+  }
+
+  function reselectAddress() {
+    setIdentified(false);
+    setLookupError(false);
+    setPropertyBasics(null);
+    setPropertyBasicsStatus("idle");
+    setSyncMessage("");
+    // Keep text so the user can edit; clear committed only after a new confirm.
+  }
+
+  async function confirmAddressLookup(options: {
+    address: string;
+    preferGeocoderDisplay?: boolean;
+    fromExifGps?: boolean;
+    fromDeviceGps?: boolean;
+  }) {
+    const nextAddress = options.address.trim();
+    if (!nextAddress) return;
 
     setLookingUp(true);
     setIdentified(false);
     setLookupError(false);
     setSyncMessage("");
+    setPropertyBasics(null);
+    setPropertyBasicsStatus("idle");
 
     try {
       const response = await fetch("/api/lookup-address", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address: address.trim() }),
+        body: JSON.stringify({ address: nextAddress }),
       });
       const payload = (await response.json()) as AddressLookupPayload;
 
@@ -2772,13 +3256,137 @@ export function ClientPage() {
         throw new Error(payload.error || "地址查詢失敗");
       }
 
-      await applyAddressLookupPayload(payload, { preferExistingAddress: true });
+      // Different confirmed address → applyAddressLookupPayload prompts switch / new viewing.
+      await applyAddressLookupPayload(payload, {
+        preferExistingAddress: !options.preferGeocoderDisplay,
+        fromExifGps: options.fromExifGps,
+        addressOverride: nextAddress,
+      });
     } catch (error) {
       setIdentified(false);
       setLookupError(true);
       setSyncMessage(error instanceof Error ? error.message : "查詢失敗");
     } finally {
       setLookingUp(false);
+    }
+  }
+
+  async function useMyLocation() {
+    setLocationError("");
+    const geo = createBrowserGeolocationService();
+    if (!geo.isSupported()) {
+      setLocationError(messages.address.locationUnsupported);
+      return;
+    }
+    setLocating(true);
+    try {
+      const position = await geo.getCurrentPosition({
+        enableHighAccuracy: true,
+        timeoutMs: 15_000,
+      });
+      if (!position.ok) {
+        if (position.code === "denied") setLocationError(messages.address.locationDenied);
+        else if (position.code === "unsupported") {
+          setLocationError(messages.address.locationUnsupported);
+        } else setLocationError(messages.address.locationFailed);
+        setIdentified(false);
+        setLookupError(true);
+        return;
+      }
+      const { lat, lng } = position;
+      setLookingUp(true);
+      setIdentified(false);
+      setLookupError(false);
+      setSyncMessage("");
+      setPropertyBasics(null);
+      setPropertyBasicsStatus("idle");
+      const response = await fetch("/api/lookup-address", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lat, lng }),
+      });
+      const payload = (await response.json()) as AddressLookupPayload;
+      if (!response.ok) {
+        throw new Error(payload.error || messages.address.locationFailed);
+      }
+      const display = payload.displayAddress?.trim() || "";
+      if (display) setAddress(display);
+      await applyAddressLookupPayload(payload, {
+        preferExistingAddress: false,
+        fromExifGps: false,
+        addressOverride: display || undefined,
+      });
+    } catch (error) {
+      setLocationError(
+        error instanceof Error ? error.message : messages.address.locationFailed,
+      );
+      setIdentified(false);
+      setLookupError(true);
+    } finally {
+      setLocating(false);
+      setLookingUp(false);
+    }
+  }
+
+  async function fetchPropertyBasicsForConfirmedAddress(
+    draftOverride?: Record<string, unknown>,
+  ) {
+    const confirmed = (committedAddressRef.current || address).trim();
+    if (!confirmed) return;
+    const draft = draftOverride ?? propertyDraft;
+    setPropertyBasicsStatus("loading");
+    try {
+      const consent = await ensureAiConsent();
+      const gate = await runIfAiConsented(consent.accepted, async () => true);
+      if (!gate.started) {
+        setPropertyBasicsStatus("idle");
+        return;
+      }
+      const openData = (draft.openData ?? null) as Record<string, unknown> | null;
+      const response = await fetch("/api/property-basics", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          address: confirmed,
+          locale,
+          market: marketCode,
+          openData,
+          propertyContext: {
+            tags,
+            neighborhood:
+              typeof draft.neighborhood === "string" ? draft.neighborhood : undefined,
+            city: typeof draft.city === "string" ? draft.city : undefined,
+            province: typeof draft.province === "string" ? draft.province : undefined,
+            country: typeof draft.country === "string" ? draft.country : undefined,
+            postalCode: typeof draft.postalCode === "string" ? draft.postalCode : undefined,
+            lat: typeof draft.lat === "number" ? draft.lat : undefined,
+            lng: typeof draft.lng === "number" ? draft.lng : undefined,
+            source: typeof draft.source === "string" ? draft.source : undefined,
+          },
+          consentVersion: AI_CONSENT_VERSION,
+          consentSessionId: consent.sessionId,
+          identityKind: user ? "user" : "guest",
+        }),
+      });
+      if (!response.ok) {
+        setPropertyBasicsStatus("error");
+        return;
+      }
+      const payload = (await response.json()) as { basics?: PropertyBasicsSnapshot };
+      if (!isPropertyBasicsSnapshot(payload.basics)) {
+        setPropertyBasicsStatus("error");
+        return;
+      }
+      setPropertyBasics(payload.basics);
+      setPropertyBasicsStatus("ready");
+      const persistDraft = {
+        ...draft,
+        propertyBasics: payload.basics,
+      };
+      setPropertyDraft(persistDraft);
+      void flushDraftToIdb({ propertyDraft: persistDraft });
+    } catch {
+      setPropertyBasicsStatus("error");
     }
   }
 
@@ -2801,7 +3409,7 @@ export function ClientPage() {
       }
 
       await applyAddressLookupPayload(payload, {
-        preferExistingAddress: true,
+        preferExistingAddress: false,
         fromExifGps: true,
       });
     } catch (error) {
@@ -2824,6 +3432,8 @@ export function ClientPage() {
       // On failure, source pros/risks/aiSummary and in-memory cardDraft remain intact.
       const next = rebuildCardDraft(cardDraft);
       setCardDraft(next);
+      const report = rebuildViewingReportSnapshot();
+      setViewingReport(report);
       setGenerateStage("analyze");
       setSyncMessage(messages.share.stageAnalyze);
       const publicSnap = toPublicDecisionSummary(next);
@@ -2832,6 +3442,7 @@ export function ClientPage() {
         decisionSummary: publicSnap,
         decisionSummaryDraft: next,
         overallRating: next.overallRating,
+        viewingReport: report,
       };
       setPropertyDraft(nextPropertyDraft);
       draftSnapshotRef.current = {
@@ -2905,7 +3516,16 @@ export function ClientPage() {
 
   async function autosaveIfLoggedIn() {
     if (!user || !configured || !draftReady || !identified) return;
-    if (!viewingId && freeCount >= FREE_VIEWING_LIMIT && !isPro) return;
+    if (
+      !canCreateCloudViewing({
+        viewingId,
+        freeCount,
+        isPro,
+        authenticated: true,
+      }).allowed
+    ) {
+      return;
+    }
     if (!notes.length && !photos.length && !clips.length) return;
 
     try {
@@ -2936,16 +3556,25 @@ export function ClientPage() {
       return;
     }
     if (!configured) {
-      openDecisionCard();
+      setSyncMessage(messages.loginGate.needCloud);
+      // Local report remains readable; do not open share actions without auth cloud.
+      refreshViewingReport(true);
       return;
     }
     if (!user) {
-      // Local long-image / card preview does not require login; cloud link sync still needs auth.
-      openDecisionCard();
+      // Cloud share / upload / export requires auth; keep field data local until login.
+      setLoginGateIntent("generate");
+      setShowLoginGate(true);
       return;
     }
-    // New viewing only: free users capped at 3
-    if (!viewingId && freeCount >= FREE_VIEWING_LIMIT && !isPro) {
+    // New viewing only: free users capped at FREE_VIEWING_LIMIT
+    const createGate = canCreateCloudViewing({
+      viewingId,
+      freeCount,
+      isPro,
+      authenticated: true,
+    });
+    if (!createGate.allowed && createGate.reason === "paywall") {
       setShowPaywall(true);
       return;
     }
@@ -2971,21 +3600,108 @@ export function ClientPage() {
     setSyncMessage(ok === false ? messages.sync.failed : messages.wizard.draftSaved);
   }
 
-  async function goToStep(target: WizardStep) {
+  async function startViewingJourney() {
+    if (!isStep1Complete({ address, identified })) {
+      setSyncMessage(messages.wizard.needAddress);
+      return;
+    }
+    setStartingViewing(true);
+    try {
+      const sessionId = await createStableLocalSessionId();
+      const nextViewingAt = ensureViewingAt(viewingAt);
+      if (nextViewingAt !== viewingAt) setViewingAt(nextViewingAt);
+      const startedAt = new Date().toISOString();
+      if (!committedAddressRef.current && address.trim()) {
+        committedAddressRef.current = address.trim();
+      }
+      const nextPropertyDraft: Record<string, unknown> = {
+        ...propertyDraft,
+        ...(propertyBasics ? { propertyBasics } : {}),
+        viewingAt: nextViewingAt,
+        viewingStartedAt: startedAt,
+        localSessionId: sessionId,
+        committedAddress: committedAddressRef.current || address.trim(),
+        workflowStatus: "collecting",
+      };
+      setPropertyDraft(nextPropertyDraft);
+      setWorkflowStatus("collecting");
+      const saved = await flushDraftToIdb({
+        localSessionId: sessionId,
+        address: address.trim(),
+        identified: true,
+        viewingAt: nextViewingAt,
+        propertyDraft: nextPropertyDraft,
+        workflowStatus: "collecting",
+        wizardStep: 1,
+      });
+      if (saved === false) {
+        setSyncMessage(messages.sync.failed);
+        return;
+      }
+      await goToStep(2, { viewingStarted: true });
+    } finally {
+      setStartingViewing(false);
+    }
+  }
+
+  async function goToStep(
+    target: WizardStep,
+    options?: { viewingStarted?: boolean },
+  ) {
+    const viewingStarted =
+      options?.viewingStarted ??
+      Boolean(
+        (typeof propertyDraft.viewingStartedAt === "string" &&
+          propertyDraft.viewingStartedAt.trim()) ||
+          (workflowStatus !== "draft" && workflowStatus !== "abandoned"),
+      );
     const snap = {
       address,
       viewingAt,
+      identified,
       notesCount: notes.length,
       photosCount: photos.length,
       clipsCount: clips.length,
       checkedQuestions: questions.filter((q) => q.checked).length,
+      viewingStarted,
     };
-    if (target > wizardStep && !canEnterStep(target, snap)) {
-      setSyncMessage("請先填地址與看房日期時間");
+
+    // Never enter Step 2/3 without a confirmed address.
+    if (target >= 2 && !isStep1Complete(snap)) {
+      setSyncMessage(messages.wizard.needAddress);
       setWizardStep(1);
+      void flushDraftToIdb({ wizardStep: 1 });
       return;
     }
+
+    // Never enter Step 2/3 without an explicitly started viewing.
+    if (target >= 2 && !isViewingStarted(snap)) {
+      setSyncMessage(messages.wizard.needStartViewing);
+      setWizardStep(1);
+      void flushDraftToIdb({ wizardStep: 1 });
+      return;
+    }
+
+    if (target > wizardStep && !canEnterStep(target, snap)) {
+      if (!isStep1Complete(snap)) {
+        setSyncMessage(messages.wizard.needAddress);
+        setWizardStep(1);
+        return;
+      }
+      if (!isViewingStarted(snap)) {
+        setSyncMessage(messages.wizard.needStartViewing);
+        setWizardStep(1);
+        return;
+      }
+      setSyncMessage(messages.wizard.needFieldContent);
+      if (wizardStep !== 2) setWizardStep(2);
+      return;
+    }
+
+    let nextViewingAt = viewingAt;
     if (target >= 2) {
+      nextViewingAt = ensureViewingAt(viewingAt);
+      if (nextViewingAt !== viewingAt) setViewingAt(nextViewingAt);
       void createStableLocalSessionId().then((sessionId) => {
         if (!committedAddressRef.current && address.trim()) {
           committedAddressRef.current = address.trim();
@@ -3002,26 +3718,179 @@ export function ClientPage() {
         setWorkflowStatus(nextStatus === "draft" && target >= 2 ? "collecting" : nextStatus);
         void flushDraftToIdb({
           localSessionId: sessionId,
+          viewingAt: nextViewingAt,
           workflowStatus: nextStatus === "draft" && target >= 2 ? "collecting" : nextStatus,
         });
       });
     }
     if (target === 2) {
       const labels = messages.fieldChecklist.labels;
-      const nextQuestions = ensureDefaultFieldQuestions(questions, labels);
+      const openData = (propertyDraft.openData ?? null) as {
+        city?: string;
+        zoningCode?: string;
+        zoningLabel?: string;
+        pid?: string;
+        planNumber?: string;
+        lotNumber?: string;
+      } | null;
+      const briefInput = {
+        address,
+        market: marketCode,
+        tags,
+        openData,
+        neighborhood:
+          typeof propertyDraft.neighborhood === "string"
+            ? propertyDraft.neighborhood
+            : undefined,
+        city: typeof propertyDraft.city === "string" ? propertyDraft.city : undefined,
+        propertyBasics,
+      };
+      const nextQuestions = ensureViewingBriefQuestions(questions, briefInput);
       const derived = deriveFieldChecklistFromQuestions(nextQuestions, labels);
       setQuestions(nextQuestions);
       setFieldChecklist(derived);
       await flushDraftToIdb({
         wizardStep: target,
+        viewingAt: nextViewingAt,
         questions: nextQuestions,
         fieldChecklist: derived,
       });
       setWizardStep(target);
+      setSyncMessage(messages.wizard.highlightsReady);
+      void enrichAddressHighlightsWithAi({
+        address,
+        market: marketCode,
+        openData,
+        tags,
+        neighborhood:
+          typeof propertyDraft.neighborhood === "string"
+            ? propertyDraft.neighborhood
+            : undefined,
+        city: typeof propertyDraft.city === "string" ? propertyDraft.city : undefined,
+      });
       return;
     }
-    await flushDraftToIdb({ wizardStep: target });
+    await flushDraftToIdb({ wizardStep: target, viewingAt: nextViewingAt });
     setWizardStep(target);
+    if (target === 3) {
+      refreshViewingReport(true);
+    }
+  }
+
+  function requestGoToStep(target: WizardStep) {
+    if (target === wizardStep) return;
+
+    if (target === 1 && wizardStep >= 2) {
+      setShowBackToAddressConfirm(true);
+      return;
+    }
+
+    if (target === 3 && wizardStep === 2) {
+      const openHigh = countHighPriorityOpenTickets(questions);
+      if (openHigh > 0) {
+        setShowHighPriorityConfirm(true);
+        return;
+      }
+    }
+
+    void goToStep(target);
+  }
+
+  async function confirmBackToAddress() {
+    setShowBackToAddressConfirm(false);
+    await goToStep(1);
+  }
+
+  async function confirmFinishDespiteHighPriority() {
+    setShowHighPriorityConfirm(false);
+    await goToStep(3);
+  }
+
+  async function enrichAddressHighlightsWithAi(input: {
+    address: string;
+    market: "CA" | "TH" | "OTHER";
+    openData: {
+      city?: string;
+      zoningCode?: string;
+      zoningLabel?: string;
+      pid?: string;
+      planNumber?: string;
+      lotNumber?: string;
+    } | null;
+    tags: string[];
+    neighborhood?: string;
+    city?: string;
+  }) {
+    if (!input.address.trim()) return;
+    const consent = await ensureAiConsent();
+    const gate = await runIfAiConsented(consent.accepted, async () => true);
+    if (!gate.started) return;
+    setSyncMessage(messages.wizard.highlightsLoading);
+    try {
+      const response = await fetch("/api/viewing-highlights", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          address: input.address.trim(),
+          locale,
+          market: input.market,
+          openData: input.openData,
+          propertyContext: {
+            tags: input.tags,
+            neighborhood: input.neighborhood,
+            city: input.city,
+          },
+          consentVersion: AI_CONSENT_VERSION,
+          consentSessionId: consent.sessionId,
+          identityKind: user ? "user" : "guest",
+        }),
+      });
+      if (!response.ok) return;
+      const payload = (await response.json()) as {
+        highlights?: Array<{ text: string; source?: string }>;
+      };
+      const aiHighlights: AddressHighlight[] = (payload.highlights ?? [])
+        .filter((item) => typeof item.text === "string" && item.text.trim())
+        .map((item) => ({
+          text: item.text.trim(),
+          source: "address" as const,
+          hint: "AI",
+        }));
+      if (aiHighlights.length === 0) return;
+      setQuestions((current) => {
+        const existingTexts = new Set(
+          current.map((q) => q.text.trim().toLowerCase()).filter(Boolean),
+        );
+        const maxId = current.reduce((max, q) => Math.max(max, q.id), 0);
+        const additions = aiHighlights
+          .filter((item) => !existingTexts.has(item.text.toLowerCase()))
+          .slice(0, 6)
+          .map((item, index) => ({
+            id: maxId + index + 1,
+            text: item.text,
+            checked: false,
+            isDynamic: true,
+            source: "viewing_brief" as const,
+            basedOn: `brief:ai_${Date.now()}_${index}`,
+            category: "onsite_confirm" as const,
+            priority: "high" as const,
+            hint: `${input.address} · AI`,
+            description: "Address-specific follow-up suggested by AI — verify on site.",
+          }));
+        if (additions.length === 0) return current;
+        const merged = [...current, ...additions];
+        const derived = deriveFieldChecklistFromQuestions(
+          merged,
+          messages.fieldChecklist.labels,
+        );
+        setFieldChecklist(derived);
+        void flushDraftToIdb({ questions: merged, fieldChecklist: derived });
+        return merged;
+      });
+      setSyncMessage(messages.wizard.highlightsReady);
+    } catch {
+      // Deterministic highlights already applied — AI enrichment is best-effort.
+    }
   }
 
   function addTextNote() {
@@ -3113,7 +3982,14 @@ export function ClientPage() {
         const nextPro = sub?.status === "active" || sub?.status === "trialing";
         setFreeCount(nextCount);
         setIsPro(nextPro);
-        if (!viewingId && nextCount >= FREE_VIEWING_LIMIT && !nextPro) {
+        if (
+          !canCreateCloudViewing({
+            viewingId,
+            freeCount: nextCount,
+            isPro: nextPro,
+            authenticated: true,
+          }).allowed
+        ) {
           setShowLoginGate(false);
           setShowPaywall(true);
           setSyncingCard(false);
@@ -3122,8 +3998,14 @@ export function ClientPage() {
       }
 
       const wasNew = !viewingId;
+      const intent = loginGateIntent;
+      setLoginGateIntent(null);
+      setShowLoginGate(false);
       await syncAndOpenCard(currentUser);
       if (wasNew) setFreeCount((n) => n + 1);
+      if (intent === "copy" || intent === "share" || intent === "exportImage") {
+        requestShareAction(intent);
+      }
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : "登入失敗");
       setSyncingCard(false);
@@ -3132,6 +4014,7 @@ export function ClientPage() {
 
   const closeLoginGate = useCallback(() => {
     setShowLoginGate(false);
+    setLoginGateIntent(null);
   }, []);
 
   const handleLoginModeChange = useCallback((mode: "signin" | "signup") => {
@@ -3577,6 +4460,53 @@ export function ClientPage() {
     });
   }
 
+  function rebuildViewingReportSnapshot(): ViewingReport {
+    return buildViewingReport({
+      address: committedAddressRef.current || address,
+      viewingAt,
+      unitLabel,
+      priceLabel,
+      layoutLabel,
+      areaLabel,
+      managementFeeLabel,
+      listingUrl,
+      setupNotes,
+      market: marketCode,
+      tags,
+      localSessionId: draftSessionIdRef.current,
+      propertyBasics,
+      questions,
+      notes: notes.map((note) => ({
+        id: note.id,
+        transcript: note.transcript,
+        kind: note.kind === "text" ? "text" : "transcript",
+      })),
+      photos: photos.map((photo) => ({
+        id: photo.id,
+        url: photo.url,
+        thumbUrl: photo.thumbUrl,
+        tag: photo.tag,
+        note: photo.note,
+      })),
+      pros,
+      risks,
+      aiSummary,
+      inputLog,
+      preserveOriginalsNote: messages.share.reportPreserveNote,
+    });
+  }
+
+  function refreshViewingReport(persist = true): ViewingReport {
+    const next = rebuildViewingReportSnapshot();
+    setViewingReport(next);
+    if (persist) {
+      const nextDraft = { ...propertyDraft, viewingReport: next };
+      setPropertyDraft(nextDraft);
+      void flushDraftToIdb({ propertyDraft: nextDraft });
+    }
+    return next;
+  }
+
   /** Commit share snapshot into propertyDraft without mutating source pros/risks/aiSummary. */
   function commitCardToPropertyDraft(snapshot: DecisionSummarySnapshot) {
     const publicSnap = toPublicDecisionSummary(snapshot);
@@ -3592,18 +4522,43 @@ export function ClientPage() {
   function openDecisionCard() {
     const next = rebuildCardDraft(cardDraft);
     setCardDraft(next);
-    commitCardToPropertyDraft(next);
+    const report = refreshViewingReport(false);
+    const publicSnap = toPublicDecisionSummary(next);
+    const nextDraft = {
+      ...propertyDraft,
+      decisionSummary: publicSnap,
+      decisionSummaryDraft: next,
+      overallRating: next.overallRating,
+      viewingReport: report,
+    };
+    setPropertyDraft(nextDraft);
+    void flushDraftToIdb({ propertyDraft: nextDraft });
     setEditingCard(false);
     setShowCard(true);
   }
 
+  function requireShareAuth(
+    intent: "generate" | "copy" | "share" | "exportImage",
+  ): boolean {
+    if (user && configured) return true;
+    if (!configured) {
+      setSyncMessage(messages.loginGate.needCloud);
+      return false;
+    }
+    setLoginGateIntent(intent);
+    setShowLoginGate(true);
+    return false;
+  }
+
   function requestShareAction(action: "copy" | "share" | "exportImage") {
+    if (!requireShareAuth(action)) return;
     if (!cardDraft) openDecisionCard();
     setPrivacyAction(action);
     setShowPrivacyCheck(true);
   }
 
   async function performShareAction(action: "copy" | "share") {
+    if (!requireShareAuth(action)) return;
     const snapshot = cardDraft ?? rebuildCardDraft();
     setCardDraft(snapshot);
     commitCardToPropertyDraft(snapshot);
@@ -3651,9 +4606,18 @@ export function ClientPage() {
       return;
     }
 
-    if (link && navigator.share) {
-      void navigator.share({ title: messages.brand.name, text: snapshot.address, url: link });
-      return;
+    // Web Share API when available; otherwise copy link or prompt sync.
+    if (link && typeof navigator.share === "function") {
+      try {
+        await navigator.share({
+          title: messages.brand.name,
+          text: snapshot.address,
+          url: link,
+        });
+        return;
+      } catch {
+        // User cancel or unsupported payload — fall through to clipboard.
+      }
     }
     if (link) {
       void navigator.clipboard?.writeText(link);
@@ -3720,22 +4684,40 @@ export function ClientPage() {
     lookupError,
     captureError,
     authenticated: Boolean(user),
+    viewingStarted: Boolean(
+      (typeof propertyDraft.viewingStartedAt === "string" &&
+        propertyDraft.viewingStartedAt.trim()) ||
+        (workflowStatus !== "draft" && workflowStatus !== "abandoned"),
+    ),
   };
   const shareChecklist = getShareChecklist(wizardSnap);
   const canShare = canGenerateShareCard(wizardSnap);
-  const previewSummary = cardDraft
+  const activeReport = viewingReport;
+  const previewSummary = activeReport
     ? [
-        cardDraft.address || address,
-        cardDraft.pros?.filter((item) => item.selected && item.text.trim()).length
-          ? `${cardDraft.pros.filter((item) => item.selected && item.text.trim()).length} pros`
+        activeReport.property.address || address,
+        `${activeReport.tickets.answered.length} answered`,
+        `${activeReport.tickets.unanswered.length} open`,
+        activeReport.tickets.discoveries.length
+          ? `${activeReport.tickets.discoveries.length} AI`
           : null,
-        cardDraft.risks?.filter((item) => item.selected && item.text.trim()).length
-          ? `${cardDraft.risks.filter((item) => item.selected && item.text.trim()).length} risks`
-          : null,
+        activeReport.risks.length ? `${activeReport.risks.length} risks` : null,
       ]
         .filter(Boolean)
         .join(" · ")
-    : null;
+    : cardDraft
+      ? [
+          cardDraft.address || address,
+          cardDraft.pros?.filter((item) => item.selected && item.text.trim()).length
+            ? `${cardDraft.pros.filter((item) => item.selected && item.text.trim()).length} pros`
+            : null,
+          cardDraft.risks?.filter((item) => item.selected && item.text.trim()).length
+            ? `${cardDraft.risks.filter((item) => item.selected && item.text.trim()).length} risks`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : null;
   const stepStatuses = ([1, 2, 3] as WizardStep[]).map((step) => ({
     step,
     label:
@@ -3749,7 +4731,9 @@ export function ClientPage() {
 
   return (
     <div className="min-h-screen w-full flex justify-center bg-[var(--color-canvas,#FDF6F0)] text-[var(--color-text,#1A1A1A)]">
-      <div className="page-container pt-[max(24px,env(safe-area-inset-top))] pb-36">
+      <div className={`page-container pt-[max(24px,env(safe-area-inset-top))] ${
+        draftReady && wizardStep === 2 ? "pb-72" : "pb-36"
+      }`}>
         {preflightKind ? (
           <PermissionPreflight
             kind={preflightKind}
@@ -3902,7 +4886,20 @@ export function ClientPage() {
         />
 
         {draftReady ? (
-          <WizardStepper steps={stepStatuses} onSelect={(step) => void goToStep(step)} />
+          <WizardStepper
+            steps={stepStatuses}
+            activeStep={wizardStep}
+            labels={{
+              navLabel: messages.wizard.stepNavLabel,
+              progress: messages.wizard.stepProgress,
+              statusActive: messages.wizard.stepStatusActive,
+              statusCompleted: messages.wizard.stepStatusCompleted,
+              statusError: messages.wizard.stepStatusError,
+              statusEmpty: messages.wizard.stepStatusEmpty,
+            }}
+            canEnter={(step) => canEnterStep(step, wizardSnap)}
+            onSelect={(step) => requestGoToStep(step)}
+          />
         ) : (
           <p role="status" aria-live="polite" className="py-8 text-center text-sm text-[#6B7280]">
             {messages.loginGate.processing}
@@ -3913,37 +4910,64 @@ export function ClientPage() {
           <StepSetup
             messages={messages}
             address={address}
-            onAddressChange={setAddress}
+            onAddressChange={(value) => {
+              if (identified) setIdentified(false);
+              setAddress(value);
+            }}
             lookingUp={lookingUp}
-            onLookup={() => void lookupAddress()}
+            onConfirmAddress={() => void lookupAddress()}
+            onConfirmSuggestion={(suggestion) => void confirmSuggestion(suggestion)}
+            onReselectAddress={reselectAddress}
             identified={identified}
             tags={tags}
             propertyDraft={propertyDraft}
             syncMessage={syncMessage}
             lookupError={lookupError}
-            viewingAtLocal={toDatetimeLocalValue(viewingAt)}
-            onViewingAtChange={(value) => setViewingAt(fromDatetimeLocalValue(value))}
-            unitLabel={unitLabel}
-            onUnitLabelChange={setUnitLabel}
-            priceLabel={priceLabel}
-            onPriceLabelChange={setPriceLabel}
-            layoutLabel={layoutLabel}
-            onLayoutLabelChange={setLayoutLabel}
-            areaLabel={areaLabel}
-            onAreaLabelChange={setAreaLabel}
-            managementFeeLabel={managementFeeLabel}
-            onManagementFeeLabelChange={setManagementFeeLabel}
-            listingUrl={listingUrl}
-            onListingUrlChange={setListingUrl}
-            setupNotes={setupNotes}
-            onSetupNotesChange={setSetupNotes}
             onApplyExifGps={applyExifGpsLookup}
             applyingExifGps={lookingUp}
+            onUseMyLocation={() => void useMyLocation()}
+            locating={locating}
+            locationError={locationError}
+            propertyBasicsStatus={propertyBasicsStatus}
+            propertyBasics={propertyBasics}
+            onRetryPropertyBasics={() => void fetchPropertyBasicsForConfirmedAddress()}
+            onStartViewing={() => void startViewingJourney()}
+            startingViewing={startingViewing}
           />
         )}
 
                 {draftReady && wizardStep === 2 && (
           <>
+        <PropertyDetailsPanel
+          messages={{
+            title: messages.wizard.propertyDetailsTitle,
+            hint: messages.wizard.propertyDetailsHint,
+            viewingAt: messages.setup.viewingAt,
+            unitLabel: messages.setup.unitLabel,
+            priceLabel: messages.setup.priceLabel,
+            layoutLabel: messages.setup.layoutLabel,
+            areaLabel: messages.setup.areaLabel,
+            managementFeeLabel: messages.setup.managementFeeLabel,
+            listingUrl: messages.setup.listingUrl,
+            setupNotes: messages.setup.setupNotes,
+          }}
+          viewingAtLocal={toDatetimeLocalValue(viewingAt)}
+          onViewingAtChange={(value) => setViewingAt(fromDatetimeLocalValue(value))}
+          unitLabel={unitLabel}
+          onUnitLabelChange={setUnitLabel}
+          priceLabel={priceLabel}
+          onPriceLabelChange={setPriceLabel}
+          layoutLabel={layoutLabel}
+          onLayoutLabelChange={setLayoutLabel}
+          areaLabel={areaLabel}
+          onAreaLabelChange={setAreaLabel}
+          managementFeeLabel={managementFeeLabel}
+          onManagementFeeLabelChange={setManagementFeeLabel}
+          listingUrl={listingUrl}
+          onListingUrlChange={setListingUrl}
+          setupNotes={setupNotes}
+          onSetupNotesChange={setSetupNotes}
+        />
         <QuestionList
           messages={{
             fieldTitle: messages.bank.fieldTitle,
@@ -3962,8 +4986,25 @@ export function ClientPage() {
               statusAnswered: messages.bank.statusAnswered,
               statusAnalyzing: messages.bank.statusAnalyzing,
               statusAnalysisFailed: messages.bank.statusAnalysisFailed,
+              statusToConfirm: messages.bank.statusToConfirm,
+              statusNeedsMore: messages.bank.statusNeedsMore,
               noteSummaryLabel: messages.bank.noteSummaryLabel,
               aiSummaryLabel: messages.bank.aiSummaryLabel,
+              priorityHigh: messages.bank.priorityHigh,
+              priorityMedium: messages.bank.priorityMedium,
+              priorityLow: messages.bank.priorityLow,
+              discoveryBadge: messages.bank.discoveryBadge,
+              discoveryConfirm: messages.bank.discoveryConfirm,
+              discoveryIgnore: messages.bank.discoveryIgnore,
+              discoveryAnswer: messages.bank.discoveryAnswer,
+              categories: {
+                condition: messages.bank.categoryCondition,
+                transit: messages.bank.categoryTransit,
+                amenities: messages.bank.categoryAmenities,
+                costs_docs: messages.bank.categoryCostsDocs,
+                onsite_confirm: messages.bank.categoryOnsiteConfirm,
+                other: messages.bank.categoryOther,
+              },
             },
             methodSheet: {
               title: messages.bank.methodTitle,
@@ -4010,7 +5051,12 @@ export function ClientPage() {
               noteSummary: answer || undefined,
             });
           }}
+          onConfirmDiscovery={(id) => handleDiscoveryStatus(id, "confirmed")}
+          onIgnoreDiscovery={(id) => handleDiscoveryStatus(id, "ignored")}
+          onAnswerViaComposer={(id) => bindComposerToQuestion(id)}
         />
+
+        <div id="step2-composer" className="h-0 scroll-mt-[40vh]" aria-hidden />
 
         <div
           id="step2-text-notes"
@@ -4545,8 +5591,78 @@ export function ClientPage() {
                 if (token) setShareToken(token);
               }
             }}
+            report={activeReport}
+            reportLabels={{
+              title: messages.share.reportTitle,
+              propertyTitle: messages.share.reportProperty,
+              viewingTitle: messages.share.reportViewing,
+              categoryTitle: messages.share.reportCategories,
+              observationsTitle: messages.share.reportObservations,
+              originalNotesTitle: messages.share.reportOriginalNotes,
+              photosTitle: messages.share.reportPhotos,
+              answeredTitle: messages.share.reportAnswered,
+              unansweredTitle: messages.share.reportUnanswered,
+              discoveriesTitle: messages.share.reportDiscoveries,
+              risksTitle: messages.share.reportRisks,
+              toConfirmTitle: messages.share.reportToConfirm,
+              aiSummaryTitle: messages.share.reportAiSummary,
+              emptySection: messages.share.reportEmpty,
+              viewingAtLabel: messages.share.reportViewingAt,
+              marketLabel: messages.share.reportMarket,
+              tagsLabel: messages.share.reportTags,
+              categories: {
+                condition: messages.bank.categoryCondition,
+                transit: messages.bank.categoryTransit,
+                amenities: messages.bank.categoryAmenities,
+                costs_docs: messages.bank.categoryCostsDocs,
+                onsite_confirm: messages.bank.categoryOnsiteConfirm,
+                other: messages.bank.categoryOther,
+              },
+            }}
+            shareEnabled={Boolean(user && configured)}
+            signInToShareLabel={messages.share.signInToShare}
+            onRequestSignIn={() => {
+              void requireShareAuth("generate");
+            }}
           />
         )}
+
+        {draftReady && wizardStep === 2 ? (
+          <ChatComposer
+            messages={messages.composer}
+            suggestions={questions
+              .filter(
+                (q) =>
+                  q.discoveryStatus !== "ignored" &&
+                  (!q.checked || q.discoveryStatus === "pending" || q.priority === "high"),
+              )
+              .slice(0, 12)
+              .map((q) => ({
+                id: q.id,
+                text: q.text,
+                priority: q.priority,
+                category: q.category,
+                discoveryStatus: q.discoveryStatus,
+                hint: q.hint,
+              }))}
+            boundQuestionId={boundComposerQuestionId}
+            boundQuestionText={
+              boundComposerQuestionId != null
+                ? questions.find((q) => q.id === boundComposerQuestionId)?.text ?? null
+                : null
+            }
+            busy={composerBusy}
+            progressLabel={composerProgress}
+            error={composerError}
+            onBindQuestion={bindComposerToQuestion}
+            onClearBound={() => setBoundComposerQuestionId(null)}
+            onSubmit={(payload) => void submitComposerInput(payload)}
+            onCancel={() => {
+              setComposerError(null);
+              setComposerProgress(null);
+            }}
+          />
+        ) : null}
 
         {draftReady ? (
           wizardStep === 3 ? (
@@ -4554,18 +5670,37 @@ export function ClientPage() {
               backLabel={messages.wizard.backToEdit}
               nextLabel={messages.wizard.saveDraft}
               nextPrimary={false}
-              onBack={() => void goToStep(2)}
+              onBack={() => requestGoToStep(2)}
               onNext={() => void saveDraftExplicit()}
               nextDisabled={syncingCard}
             />
           ) : (
             <WizardBottomNav
               backLabel={messages.wizard.back}
-              nextLabel={messages.wizard.next}
-              onBack={wizardStep > 1 ? () => void goToStep((wizardStep - 1) as WizardStep) : undefined}
-              onNext={() => void goToStep((wizardStep + 1) as WizardStep)}
+              nextLabel={
+                wizardStep === 1
+                  ? messages.setup.startViewing
+                  : messages.wizard.finishViewing
+              }
+              onBack={
+                wizardStep > 1 ? () => requestGoToStep((wizardStep - 1) as WizardStep) : undefined
+              }
+              onNext={() =>
+                void (wizardStep === 1
+                  ? startViewingJourney()
+                  : requestGoToStep(3))
+              }
               nextDisabled={
-                wizardStep === 1 ? !isStep1Complete({ address, viewingAt }) : false
+                wizardStep === 1
+                  ? !isStep1Complete({ address, identified }) || startingViewing
+                  : wizardStep === 2
+                    ? !isStep2Complete({
+                        notesCount: notes.length,
+                        photosCount: photos.length,
+                        clipsCount: clips.length,
+                        checkedQuestions: questions.filter((q) => q.checked).length,
+                      })
+                    : false
               }
             />
           )
@@ -4596,6 +5731,56 @@ export function ClientPage() {
               </div>
           </Dialog>
         )}
+
+        <Dialog
+          open={showBackToAddressConfirm}
+          onClose={() => setShowBackToAddressConfirm(false)}
+          title={messages.wizard.backToAddressTitle}
+          description={messages.wizard.backToAddressBody}
+        >
+          <div className="mt-[var(--space-4)] flex flex-col gap-[var(--space-2)]">
+            <button
+              type="button"
+              className="ui-button ui-button--primary w-full"
+              onClick={() => void confirmBackToAddress()}
+            >
+              {messages.wizard.backToAddressConfirm}
+            </button>
+            <button
+              type="button"
+              className="ui-button ui-button--secondary w-full"
+              onClick={() => setShowBackToAddressConfirm(false)}
+            >
+              {messages.wizard.backToAddressCancel}
+            </button>
+          </div>
+        </Dialog>
+
+        <Dialog
+          open={showHighPriorityConfirm}
+          onClose={() => setShowHighPriorityConfirm(false)}
+          title={messages.wizard.highPriorityTitle}
+          description={t(messages.wizard.highPriorityBody, {
+            count: countHighPriorityOpenTickets(questions),
+          })}
+        >
+          <div className="mt-[var(--space-4)] flex flex-col gap-[var(--space-2)]">
+            <button
+              type="button"
+              className="ui-button ui-button--primary w-full"
+              onClick={() => void confirmFinishDespiteHighPriority()}
+            >
+              {messages.wizard.highPriorityContinue}
+            </button>
+            <button
+              type="button"
+              className="ui-button ui-button--secondary w-full"
+              onClick={() => setShowHighPriorityConfirm(false)}
+            >
+              {messages.wizard.highPriorityStay}
+            </button>
+          </div>
+        </Dialog>
 
         <Dialog
           open={pendingAddressSwitch != null}
@@ -4630,7 +5815,19 @@ export function ClientPage() {
 
         <LoginGateDialog
           open={showLoginGate}
-          copy={{ ...messages.loginGate, close: messages.card.close }}
+          copy={{
+            ...messages.loginGate,
+            title: messages.loginGate.title,
+            body:
+              loginGateIntent === "exportImage"
+                ? messages.loginGate.bodyExport
+                : loginGateIntent === "copy" || loginGateIntent === "share"
+                  ? messages.loginGate.bodyLink
+                  : loginGateIntent === "secondRoom"
+                    ? messages.loginGate.bodySecondRoom
+                    : messages.loginGate.body,
+            close: messages.card.close,
+          }}
           email={loginEmail}
           password={loginPassword}
           mode={loginMode}
@@ -4761,59 +5958,73 @@ export function ClientPage() {
                   }}
                   footer={
                     <div className="space-y-3 pt-1">
-                      <div className="flex gap-2">
+                      {user && configured ? (
+                        <>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={copyCard}
+                              className="flex-1 h-[44px] rounded-full bg-black text-white text-[13px] font-bold flex items-center justify-center gap-2"
+                            >
+                              <Copy className="w-4 h-4" />{" "}
+                              {shareUrl ? messages.card.copyLink : messages.card.copy}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={shareCard}
+                              className="flex-1 h-[44px] rounded-full bg-[#F5F3F0] border border-black/10 text-[13px] font-bold flex items-center justify-center gap-2"
+                            >
+                              <Share2 className="w-4 h-4" /> {messages.card.shareLink}
+                            </button>
+                          </div>
+                          <CardImageExportButton
+                            snapshot={cardDraft}
+                            photoSources={photos.map((photo) => ({
+                              id: String(photo.id),
+                              url: photo.url || photo.thumbUrl,
+                              mediaId: photo.mediaId,
+                            }))}
+                            locale={locale}
+                            documentLabels={{
+                              title: messages.card.eyebrow,
+                              viewingAt: messages.card.viewingAt,
+                              basics: messages.card.basics,
+                              unit: messages.card.unit,
+                              price: messages.card.price,
+                              layout: messages.card.layout,
+                              area: messages.card.area,
+                              managementFee: messages.card.managementFee,
+                              listingUrl: messages.card.listingUrl,
+                              setupNotes: messages.card.setupNotes,
+                              rating: messages.card.rating,
+                              ratingEmpty: messages.card.ratingEmpty,
+                              pros: messages.card.pros,
+                              risks: messages.card.risks,
+                              photos: messages.card.photos,
+                              photoNote: messages.card.photoNote,
+                              facts: messages.card.facts,
+                              followUps: messages.card.followUps,
+                              actionItems: messages.card.actionItems,
+                              emptySection: messages.card.emptySection,
+                              generatedAt: messages.card.generatedAt,
+                            }}
+                            uiLabels={messages.cardImageExport}
+                            privacyArmed={exportImageArmed}
+                            onRequestPrivacy={() => requestShareAction("exportImage")}
+                            onPrivacyConsumed={() => setExportImageArmed(false)}
+                          />
+                        </>
+                      ) : (
                         <button
                           type="button"
-                          onClick={copyCard}
-                          className="flex-1 h-[44px] rounded-full bg-black text-white text-[13px] font-bold flex items-center justify-center gap-2"
+                          onClick={() => {
+                            if (!requireShareAuth("share")) return;
+                          }}
+                          className="w-full h-[44px] rounded-full bg-black text-white text-[13px] font-bold"
                         >
-                          <Copy className="w-4 h-4" />{" "}
-                          {shareUrl ? messages.card.copyLink : messages.card.copy}
+                          {messages.card.signInToShare}
                         </button>
-                        <button
-                          type="button"
-                          onClick={shareCard}
-                          className="flex-1 h-[44px] rounded-full bg-[#F5F3F0] border border-black/10 text-[13px] font-bold flex items-center justify-center gap-2"
-                        >
-                          <Share2 className="w-4 h-4" /> {messages.card.shareLink}
-                        </button>
-                      </div>
-                      <CardImageExportButton
-                        snapshot={cardDraft}
-                        photoSources={photos.map((photo) => ({
-                          id: String(photo.id),
-                          url: photo.url || photo.thumbUrl,
-                          mediaId: photo.mediaId,
-                        }))}
-                        locale={locale}
-                        documentLabels={{
-                          title: messages.card.eyebrow,
-                          viewingAt: messages.card.viewingAt,
-                          basics: messages.card.basics,
-                          unit: messages.card.unit,
-                          price: messages.card.price,
-                          layout: messages.card.layout,
-                          area: messages.card.area,
-                          managementFee: messages.card.managementFee,
-                          listingUrl: messages.card.listingUrl,
-                          setupNotes: messages.card.setupNotes,
-                          rating: messages.card.rating,
-                          ratingEmpty: messages.card.ratingEmpty,
-                          pros: messages.card.pros,
-                          risks: messages.card.risks,
-                          photos: messages.card.photos,
-                          photoNote: messages.card.photoNote,
-                          facts: messages.card.facts,
-                          followUps: messages.card.followUps,
-                          actionItems: messages.card.actionItems,
-                          emptySection: messages.card.emptySection,
-                          generatedAt: messages.card.generatedAt,
-                        }}
-                        uiLabels={messages.cardImageExport}
-                        privacyArmed={exportImageArmed}
-                        onRequestPrivacy={() => requestShareAction("exportImage")}
-                        onPrivacyConsumed={() => setExportImageArmed(false)}
-                      />
+                      )}
                       <button
                         type="button"
                         onClick={() => setShowCard(false)}
@@ -4821,7 +6032,7 @@ export function ClientPage() {
                       >
                         {messages.card.close}
                       </button>
-                      {shareUrl ? (
+                      {user && shareUrl ? (
                         <a
                           href={shareUrl}
                           target="_blank"
@@ -4832,7 +6043,11 @@ export function ClientPage() {
                         </a>
                       ) : null}
                       <p className="text-[10px] text-center text-[#9CA3AF]">
-                        {viewingId ? messages.card.syncedHint : messages.card.localPreview}
+                        {user && viewingId
+                          ? messages.card.syncedHint
+                          : user
+                            ? messages.card.needSync
+                            : messages.card.localPreview}
                       </p>
                     </div>
                   }

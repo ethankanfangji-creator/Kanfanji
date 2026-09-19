@@ -3,6 +3,7 @@
 import type { AudioMarker } from "@/lib/audio-markers";
 import type { ViewingAiSummary } from "@/lib/ai-summary";
 import type { FieldChecklistItem } from "@/lib/field-capture";
+import type { ViewingInputEntry } from "@/lib/viewing-wizard/input-integration";
 
 export const IDB_NAME = "kanfangji";
 export const IDB_VERSION = 4;
@@ -34,6 +35,18 @@ export type DraftQuestion = {
   basedOn?: string;
   isDynamic?: boolean;
   source?: string;
+  description?: string;
+  hint?: string;
+  analysisStatus?: "analyzing" | "failed";
+  answerPreview?: {
+    noteSummary?: string;
+    aiSummary?: string;
+    mediaThumbs?: string[];
+  };
+  category?: string;
+  priority?: "high" | "medium" | "low";
+  discoveryStatus?: "pending" | "confirmed" | "ignored";
+  aiJobId?: string;
 };
 
 export type DraftAudioNote = {
@@ -121,6 +134,8 @@ export type ViewingDraftRecord = {
    * Optional for older drafts — UI seeds presets when missing/empty.
    */
   fieldChecklist?: FieldChecklistItem[];
+  /** Composer audit trail: original user input + AI integration snapshots. */
+  inputLog?: ViewingInputEntry[];
 };
 
 export type MediaRecord = {

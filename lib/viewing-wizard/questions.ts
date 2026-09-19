@@ -25,7 +25,7 @@ export type WizardQuestion = {
   isFollowUp?: boolean;
   basedOn?: string;
   isDynamic?: boolean;
-  source?: "photo" | "audio" | "opendata" | "checklist" | string;
+  source?: "photo" | "audio" | "opendata" | "checklist" | "viewing_brief" | "address" | string;
   aiJobId?: string;
   /** Optional longer description shown under the title. */
   description?: string;
@@ -35,6 +35,12 @@ export type WizardQuestion = {
   analysisStatus?: "analyzing" | "failed";
   /** Display-only answer artifacts for answered cards. */
   answerPreview?: QuestionAnswerPreview;
+  /** Structured viewing-brief category for Step 2 tickets. */
+  category?: "condition" | "transit" | "amenities" | "costs_docs" | "onsite_confirm" | string;
+  /** Ticket priority for on-site triage. */
+  priority?: "high" | "medium" | "low";
+  /** AI discovery lifecycle — only for source=ai_discovery. */
+  discoveryStatus?: "pending" | "confirmed" | "ignored";
 };
 
 export function isChecklistQuestion(question: WizardQuestion): boolean {
@@ -101,10 +107,26 @@ export function deriveFieldChecklistFromQuestions(
   questions: WizardQuestion[],
   labels: Record<string, string>,
 ): FieldChecklistItem[] {
+  const briefChecklistMap: Record<string, string> = {
+    wall_crack: "brief:condition_structure",
+    water_leak: "brief:condition_leak",
+    light_air: "brief:condition_light_air",
+    noise: "brief:condition_noise",
+    electrical_panel: "brief:condition_systems",
+    amenities: "brief:amenity_grocery",
+    parking: "brief:onsite_parking",
+    window_fog: "brief:onsite_windows",
+    plumbing: "brief:onsite_plumbing",
+    water_heater: "brief:condition_systems",
+  };
+
   return FIELD_CHECKLIST_IDS.map((key, index) => {
     const basedOn = `preset:${key}`;
+    const briefBasedOn = briefChecklistMap[key];
     const question = questions.find(
-      (item) => isChecklistQuestion(item) && item.basedOn === basedOn,
+      (item) =>
+        (isChecklistQuestion(item) && item.basedOn === basedOn) ||
+        (briefBasedOn != null && item.basedOn === briefBasedOn),
     );
     return {
       id: basedOn,
@@ -138,8 +160,9 @@ export function getQuestionProgress(questions: WizardQuestion[]): {
   total: number;
   ratio: number;
 } {
-  const total = questions.length;
-  const completed = questions.filter(isQuestionAnswered).length;
+  const visible = questions.filter((q) => q.discoveryStatus !== "ignored");
+  const total = visible.length;
+  const completed = visible.filter(isQuestionAnswered).length;
   return {
     completed,
     total,

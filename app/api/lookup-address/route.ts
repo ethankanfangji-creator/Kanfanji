@@ -1,8 +1,5 @@
 import { NextResponse } from "next/server";
-import {
-  lookupAddressDetails,
-  lookupAddressDetailsFromGps,
-} from "@/lib/address-lookup";
+import { createServerAddressService } from "@/lib/services/address/server-adapter";
 import {
   assertAllowedKeys,
   optionalString,
@@ -10,6 +7,8 @@ import {
   RequestValidationError,
   validationErrorBody,
 } from "@/lib/http/validation";
+
+export const runtime = "nodejs";
 
 function optionalCoordinate(
   body: Record<string, unknown>,
@@ -30,36 +29,43 @@ export async function POST(request: Request) {
   try {
     const body = await readJsonObject(request);
     assertAllowedKeys(body, ["address", "lat", "lng"]);
-    const address = optionalString(body, "address", { min: 1, max: 500 });
+    const addressText = optionalString(body, "address", { min: 1, max: 500 });
     const lat = optionalCoordinate(body, "lat", -90, 90);
     const lng = optionalCoordinate(body, "lng", -180, 180);
 
     const hasGps = lat !== undefined || lng !== undefined;
     if (hasGps && (lat === undefined || lng === undefined)) {
       return NextResponse.json(
-        { error: "GPS 查詢需要同時提供 lat 與 lng" },
+        { error: "GPS lookup requires both lat and lng", code: "gps_incomplete" },
         { status: 400 },
       );
     }
-    if (address && hasGps) {
+    if (addressText && hasGps) {
       return NextResponse.json(
-        { error: "請擇一使用 address 或 lat/lng" },
+        { error: "Use either address or lat/lng", code: "lookup_ambiguous" },
         { status: 400 },
       );
     }
-    if (!address && !hasGps) {
-      return NextResponse.json({ error: "請輸入地址" }, { status: 400 });
+    if (!addressText && !hasGps) {
+      return NextResponse.json(
+        { error: "Address required", code: "address_required" },
+        { status: 400 },
+      );
     }
 
+    const address = createServerAddressService();
     const result = hasGps
-      ? await lookupAddressDetailsFromGps(lat!, lng!)
-      : await lookupAddressDetails(address!);
+      ? await address.lookupByCoords(lat!, lng!, request.signal)
+      : await address.lookupByAddress(addressText!, request.signal);
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof RequestValidationError) {
       return NextResponse.json(validationErrorBody(error), { status: 400 });
     }
-    const message = error instanceof Error ? error.message : "地址查詢失敗";
-    return NextResponse.json({ error: message }, { status: 404 });
+    if (error instanceof Error && error.name === "AbortError") {
+      return NextResponse.json({ error: "Cancelled", code: "cancelled" }, { status: 499 });
+    }
+    const message = error instanceof Error ? error.message : "Address lookup failed";
+    return NextResponse.json({ error: message, code: "lookup_failed" }, { status: 404 });
   }
 }

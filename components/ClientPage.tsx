@@ -26,6 +26,7 @@ import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useI18n } from "@/components/I18nProvider";
 import { bankQuestions } from "@/lib/i18n";
 import { appendViewingUrl, uploadViewingFile } from "@/lib/media";
+import { mergeRecordingAnswers } from "@/lib/merge-recording-answers";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 import type { User } from "@supabase/supabase-js";
 
@@ -308,38 +309,9 @@ export function ClientPage() {
         },
       ]);
 
-      setQuestions((current) => {
-        const base = current.length > 0 ? current : bank;
-        const updated = base.map((q) => {
-          const hit = payload.answers?.find((item) => item.id === q.id);
-          if (!hit) return q;
-          return {
-            ...q,
-            checked: hit.status === "answered",
-            answer: hit.answer,
-          };
-        });
-
-        const existingTexts = new Set(updated.map((q) => q.text.trim().toLowerCase()));
-        let nextId = updated.reduce((max, q) => Math.max(max, q.id), 0) + 1;
-        const extras: Question[] = [];
-        for (const item of generated) {
-          const text = item.text.trim();
-          if (!text || existingTexts.has(text.toLowerCase())) continue;
-          existingTexts.add(text.toLowerCase());
-          extras.push({
-            id: nextId,
-            text,
-            checked: item.status === "answered",
-            answer: item.answer || (item.status === "answered" ? "" : "待確認"),
-            isFollowUp: true,
-            basedOn: item.based_on || item.reason || "",
-          });
-          nextId += 1;
-        }
-
-        return [...updated, ...extras];
-      });
+      setQuestions((current) =>
+        mergeRecordingAnswers(current.length > 0 ? current : bank, payload.answers, generated),
+      );
 
       if (payload.pros?.length) setPros(payload.pros.slice(0, 3));
       if (payload.risks?.length) setRisks(payload.risks.slice(0, 3));

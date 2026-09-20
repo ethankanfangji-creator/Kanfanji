@@ -17,22 +17,30 @@ export function formatIntelMessage(intel: PropertyIntel, locale: string): string
   const r0 = intel.risks[0] || (locale.startsWith("en") ? "general inspection" : "基礎屋況");
   const r1 = intel.risks[1] || "";
   const riskLine = r1 ? `${r0}, ${r1}` : r0;
-  const sky = intel.location.skytrain || (locale.startsWith("en") ? "transit n/a" : "捷運待查");
+  const sky =
+    intel.location.skytrain ||
+    intel.location.bus ||
+    (locale.startsWith("en") ? "transit n/a" : "捷運待查");
   const schools =
     intel.location.schools.length > 0
       ? intel.location.schools.join("、")
       : locale.startsWith("en")
         ? "n/a"
         : "待查";
+  const market =
+    intel.market.avgUnitPrice ||
+    intel.market.priceRange ||
+    intel.history.assessed ||
+    "";
 
   if (locale.startsWith("en")) {
-    return `Found it! ${year.replace("年", "")} ${type}, ${beds}, last ${sold}, Strata ${strata}. Watch for ${riskLine}. Nearby: ${sky}; schools ${schools}. Shall we start with the electrical panel?`;
+    return `Found it! ${year.replace("年", "")} ${type}, ${beds}, last ${sold}, Strata ${strata}. Watch for ${riskLine}. Nearby: ${sky}; schools ${schools}.${market ? ` Market: ${market}.` : ""} Shall we start with the electrical panel?`;
   }
   if (locale.startsWith("th")) {
-    return `เจอแล้ว! ${year} ${type}, ${beds}, ขายล่าสุด ${sold}, Strata ${strata}. ปีนี้ควรระวัง ${riskLine}. ใกล้เคียง: ${sky}, เขตโรงเรียน ${schools}. เริ่มดูตู้ไฟก่อนไหม?`;
+    return `เจอแล้ว! ${year} ${type}, ${beds}, ขายล่าสุด ${sold}, Strata ${strata}. ปีนี้ควรระวัง ${riskLine}. ใกล้เคียง: ${sky}, เขตโรงเรียน ${schools}.${market ? ` ตลาด: ${market}.` : ""} เริ่มดูตู้ไฟก่อนไหม?`;
   }
   if (locale.includes("Hans")) {
-    return `查到了！${year} ${type}，${beds}，上次 ${sold}，Strata ${strata}。这年份要特别注意 ${riskLine}。周边：${sky}，学区 ${schools}。我们先看电箱？`;
+    return `查到了！${year} ${type}，${beds}，上次 ${sold}，Strata ${strata}。这年份要特别注意 ${riskLine}。周边：${sky}，学区 ${schools}。${market ? `行情：${market}。` : ""}我们先看电箱？`;
   }
-  return `查到了！${year} ${type}，${beds}，上次 ${sold}，Strata ${strata}。這年份要特別注意 ${riskLine}。周邊：${sky}，學區 ${schools}。我們先看電箱？`;
+  return `查到了！${year} ${type}，${beds}，上次 ${sold}，Strata ${strata}。這年份要特別注意 ${riskLine}。周邊：${sky}，學區 ${schools}。${market ? `行情：${market}。` : ""}我們先看電箱？`;
 }

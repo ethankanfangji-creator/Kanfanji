@@ -10,6 +10,7 @@ export type ChatMessageType =
   | "text"
   | "audio"
   | "photo"
+  | "file"
   | "fill"
   | "new_card"
   | "follow_up"
@@ -41,6 +42,8 @@ export type ChatMessage = {
   transcript?: string;
   /** Photo / media URL (local blob: or remote path) */
   url?: string;
+  /** Attached file display name (type=file) */
+  fileName?: string;
   /** Vision / analysis note */
   analysis?: string;
   /** Cards filled from this AI turn */

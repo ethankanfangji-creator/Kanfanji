@@ -1,6 +1,7 @@
 import {
   haversineMeters,
   walkingMinutesFromMeters,
+  type AmenityHit,
   type PropertyIntelLocation,
 } from "./types";
 
@@ -74,6 +75,22 @@ function nearestLabel(
   return `${best.name} ${mins}分`;
 }
 
+function toAmenities(
+  kind: string,
+  originLat: number,
+  originLng: number,
+  hits: PlaceHit[],
+): AmenityHit[] {
+  return hits.slice(0, 5).map((hit) => ({
+    kind,
+    name: hit.name,
+    minutesWalk: walkingMinutesFromMeters(
+      haversineMeters(originLat, originLng, hit.lat, hit.lng),
+    ),
+    source: "Google Places",
+  }));
+}
+
 /** Google Places nearby enrichment. No-op when API key missing. */
 export async function enrichGooglePlaces(
   lat: number,
@@ -83,20 +100,34 @@ export async function enrichGooglePlaces(
   if (!key) return { location: {}, sources: [] };
 
   try {
-    const [schools, markets, transit, parks] = await Promise.all([
+    const [schools, markets, transit, parks, buses, hospitals] = await Promise.all([
       nearbySearch(lat, lng, "school", key),
       nearbySearch(lat, lng, "supermarket", key),
       nearbySearch(lat, lng, "transit_station", key, 3000),
       nearbySearch(lat, lng, "park", key),
+      nearbySearch(lat, lng, "bus_station", key, 1200),
+      nearbySearch(lat, lng, "hospital", key, 2500),
     ]);
 
     const schoolNames = schools.slice(0, 3).map((s) => s.name);
+    const amenities = [
+      ...toAmenities("school", lat, lng, schools),
+      ...toAmenities("supermarket", lat, lng, markets),
+      ...toAmenities("transit", lat, lng, transit),
+      ...toAmenities("park", lat, lng, parks),
+      ...toAmenities("bus", lat, lng, buses),
+      ...toAmenities("hospital", lat, lng, hospitals),
+    ];
+
     return {
       location: {
         schools: schoolNames,
         supermarket: nearestLabel(lat, lng, markets),
         skytrain: nearestLabel(lat, lng, transit),
         park: nearestLabel(lat, lng, parks),
+        bus: nearestLabel(lat, lng, buses),
+        hospital: nearestLabel(lat, lng, hospitals),
+        amenities,
         lat,
         lng,
       },
@@ -110,7 +141,7 @@ export async function enrichGooglePlaces(
 /** Optional Google Geocode refine — returns lat/lng if BC coords missing. */
 export async function geocodeWithGoogle(
   address: string,
-): Promise<{ lat: number; lng: number } | null> {
+): Promise<{ lat: number; lng: number; formattedAddress?: string } | null> {
   const key = googleKey();
   if (!key) return null;
   try {
@@ -120,11 +151,19 @@ export async function geocodeWithGoogle(
     const res = await fetch(url.toString(), { next: { revalidate: 0 } });
     if (!res.ok) return null;
     const data = (await res.json()) as {
-      results?: Array<{ geometry?: { location?: { lat?: number; lng?: number } } }>;
+      results?: Array<{
+        formatted_address?: string;
+        geometry?: { location?: { lat?: number; lng?: number } };
+      }>;
     };
-    const loc = data.results?.[0]?.geometry?.location;
+    const row = data.results?.[0];
+    const loc = row?.geometry?.location;
     if (loc?.lat == null || loc?.lng == null) return null;
-    return { lat: loc.lat, lng: loc.lng };
+    return {
+      lat: loc.lat,
+      lng: loc.lng,
+      formattedAddress: row?.formatted_address,
+    };
   } catch {
     return null;
   }

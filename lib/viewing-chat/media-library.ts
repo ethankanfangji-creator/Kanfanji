@@ -1,9 +1,10 @@
 /**
- * Local media library for Viewing Chat (photos / videos / files).
+ * Local media library for Viewing Chat — aggregates files attached in chats.
  * Blobs live in IndexedDB; metadata is listed for the UI.
+ * Upload happens only from the chat composer, not from this library UI.
  */
 
-export type MediaKind = "image" | "video" | "file";
+export type MediaKind = "image" | "video" | "audio" | "file";
 
 export type MediaLibraryItem = {
   id: string;
@@ -13,17 +14,20 @@ export type MediaLibraryItem = {
   size: number;
   createdAt: string;
   threadId: string | null;
+  /** Viewing address / label when saved from a chat */
+  sourceLabel: string | null;
   /** Object URL for preview — revoke when disposing */
   url?: string;
 };
 
 const DB_NAME = "kanfangji.mediaLibrary";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = "files";
 
 function kindFromMime(mime: string): MediaKind {
   if (mime.startsWith("image/")) return "image";
   if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("audio/")) return "audio";
   return "file";
 }
 
@@ -49,6 +53,7 @@ type StoredRow = {
   size: number;
   createdAt: string;
   threadId: string | null;
+  sourceLabel?: string | null;
   blob: Blob;
 };
 
@@ -67,6 +72,7 @@ export async function listMediaLibrary(): Promise<MediaLibraryItem[]> {
         size: row.size,
         createdAt: row.createdAt,
         threadId: row.threadId,
+        sourceLabel: row.sourceLabel ?? null,
         url: URL.createObjectURL(row.blob),
       }));
       rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -79,6 +85,7 @@ export async function listMediaLibrary(): Promise<MediaLibraryItem[]> {
 export async function addMediaFile(
   file: File,
   threadId: string | null = null,
+  sourceLabel: string | null = null,
 ): Promise<MediaLibraryItem> {
   const db = await openDb();
   const id =
@@ -93,6 +100,7 @@ export async function addMediaFile(
     size: file.size,
     createdAt: new Date().toISOString(),
     threadId,
+    sourceLabel,
     blob: file,
   };
   await new Promise<void>((resolve, reject) => {
@@ -109,6 +117,7 @@ export async function addMediaFile(
     size: row.size,
     createdAt: row.createdAt,
     threadId: row.threadId,
+    sourceLabel: row.sourceLabel ?? null,
     url: URL.createObjectURL(file),
   };
 }

@@ -1,7 +1,9 @@
 /**
  * Property intelligence assembled for Viewing Chat (address → intel card).
- * Sources: BC Geocoder + Metro Open Data, Google Places (optional), Bing Search snippets (optional).
+ * Sources (see docs/STACK.md): BC/Google geocode, Google Places, OSM Overpass,
+ * Street View, Bing snippets, optional Attom / TW open-data adapters.
  * Never invent listing facts — missing fields stay null / empty.
+ * No site crawling — search snippets / official APIs only.
  */
 
 export type PropertyIntelBasic = {
@@ -19,39 +21,99 @@ export type PropertyIntelHistory = {
   strata: string | null;
 };
 
+export type AmenityHit = {
+  kind: string;
+  name: string;
+  minutesWalk: number | null;
+  source: string;
+};
+
 export type PropertyIntelLocation = {
   skytrain: string | null;
+  bus: string | null;
   schools: string[];
   supermarket: string | null;
   park: string | null;
+  hospital: string | null;
   noise: string | null;
   lat: number | null;
   lng: number | null;
+  amenities: AmenityHit[];
+};
+
+export type PropertyIntelVisuals = {
+  /** Google Street View Static URL (or null if unavailable) */
+  streetViewUrl: string | null;
+};
+
+export type PropertyIntelNeighborhood = {
+  name: string | null;
+  builder: string | null;
+  amenityRatio: string | null;
+  notes: string[];
+};
+
+export type PropertyIntelMarket = {
+  region: "CA" | "TW" | "US" | "OTHER" | null;
+  avgUnitPrice: string | null;
+  priceRange: string | null;
+  currency: string | null;
+};
+
+/** Compliance flags — UI copy stays in i18n, not stored as prose. */
+export type PropertyIntelCompliance = {
+  /** Street View may show faces / license plates */
+  streetViewNotice: boolean;
+  /** Exact unit / 戶 is sensitive + valuation may be noisy */
+  unitLevelNotice: boolean;
 };
 
 export type PropertyIntel = {
   address: string;
+  /** Canonical query used for cache / upstream (台→臺, floors normalized) */
+  normalizedQuery: string;
   basic: PropertyIntelBasic;
   history: PropertyIntelHistory;
   location: PropertyIntelLocation;
+  visuals: PropertyIntelVisuals;
+  neighborhood: PropertyIntelNeighborhood;
+  market: PropertyIntelMarket;
+  compliance: PropertyIntelCompliance;
   risks: string[];
   sources: string[];
   fetchedAt: string;
 };
 
-export function emptyIntel(address: string): PropertyIntel {
+export function looksLikeUnitLevelAddress(address: string): boolean {
+  return /(\d+\s*[樓层層]|[Ff]l(?:oor)?\.?\s*\d+|unit\s*#?\s*\d+|apt\.?\s*#?\s*\d+|#\s*\d+\b|之\d+|戶)/i.test(
+    address,
+  );
+}
+
+export function emptyIntel(address: string, normalizedQuery = address): PropertyIntel {
   return {
     address,
+    normalizedQuery,
     basic: { year: null, type: null, beds: null, baths: null, area: null, pid: null },
     history: { last_sold: null, assessed: null, strata: null },
     location: {
       skytrain: null,
+      bus: null,
       schools: [],
       supermarket: null,
       park: null,
+      hospital: null,
       noise: null,
       lat: null,
       lng: null,
+      amenities: [],
+    },
+    visuals: { streetViewUrl: null },
+    neighborhood: { name: null, builder: null, amenityRatio: null, notes: [] },
+    market: { region: null, avgUnitPrice: null, priceRange: null, currency: null },
+    compliance: {
+      streetViewNotice: false,
+      unitLevelNotice: looksLikeUnitLevelAddress(address) || looksLikeUnitLevelAddress(normalizedQuery),
     },
     risks: [],
     sources: [],
@@ -100,7 +162,7 @@ export function haversineMeters(
 
 export function guessNoiseNote(address: string): string | null {
   const major =
-    /\b(hwy|highway|freeway|lougheed|kingsway|hastings|broadway|granville|marine|barnet|westwood|guilford|fraser|oak|cambie|boundary|canada way)\b/i;
+    /\b(hwy|highway|freeway|lougheed|kingsway|hastings|broadway|granville|marine|barnet|westwood|guilford|fraser|oak|cambie|boundary|canada way|中山|忠孝|信義|建國|環河|快速道路)\b/i;
   if (!major.test(address)) return null;
   const street = address.split(",")[0]?.trim() || address;
   return `${street} 可能是主幹道／車流較多`;
@@ -110,4 +172,28 @@ export function detectStrata(type: string | null, strataFee: string | null): boo
   if (strataFee) return true;
   if (!type) return false;
   return /strata|condo|townhouse|apartment|公寓|鎮屋|連棟/i.test(type);
+}
+
+export function detectMarketRegion(address: string): PropertyIntelMarket["region"] {
+  if (/台灣|臺灣|台北|臺北|新北|桃園|台中|臺中|高雄|台南|臺南|\bTW\b|Taiwan/i.test(address)) {
+    return "TW";
+  }
+  if (
+    /\b(BC|B\.C\.|British Columbia|Vancouver|Burnaby|Richmond|Surrey|Coquitlam|Ontario|Toronto|Canada)\b/i.test(
+      address,
+    )
+  ) {
+    return "CA";
+  }
+  if (/\b(USA|United States|CA|NY|WA|OR|TX|FL)\b/.test(address) || /,\s*[A-Z]{2}\s+\d{5}/.test(address)) {
+    return "US";
+  }
+  return "OTHER";
+}
+
+export function mergeAmenityLabel(
+  existing: string | null,
+  candidate: string | null,
+): string | null {
+  return existing || candidate;
 }

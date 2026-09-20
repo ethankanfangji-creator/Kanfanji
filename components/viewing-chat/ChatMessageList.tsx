@@ -56,6 +56,14 @@ export function ChatMessageList({
                   {message.text ? <p>{message.text}</p> : null}
                 </div>
               ) : null}
+              {message.type === "file" ? (
+                <div className="space-y-1">
+                  <p className="text-[13px] font-semibold">
+                    📎 {message.fileName || "file"}
+                  </p>
+                  {message.text ? <p>{message.text}</p> : null}
+                </div>
+              ) : null}
               {(message.type === "fill" ||
                 message.type === "follow_up" ||
                 message.type === "new_card" ||

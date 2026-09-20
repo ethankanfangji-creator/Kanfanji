@@ -1,9 +1,8 @@
 "use client";
 
-import { Database, FileIcon, ImageIcon, Trash2, Upload, Video, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Database, FileIcon, ImageIcon, Music, Trash2, Video, X } from "lucide-react";
+import { useEffect, useState } from "react";
 import {
-  addMediaFile,
   formatBytes,
   listMediaLibrary,
   removeMediaFile,
@@ -11,25 +10,21 @@ import {
 } from "@/lib/viewing-chat/media-library";
 
 export function MediaLibraryPanel({
-  threadId,
   onClose,
   labels,
   railExpanded,
 }: {
-  threadId: string | null;
   onClose: () => void;
   labels: {
     title: string;
     hint: string;
     empty: string;
-    upload: string;
     close: string;
     delete: string;
     failed: string;
   };
   railExpanded?: boolean;
 }) {
-  const inputRef = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<MediaLibraryItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -46,7 +41,6 @@ export function MediaLibraryPanel({
   useEffect(() => {
     void refresh();
     return () => {
-      // revoke object URLs on unmount
       setItems((prev) => {
         for (const item of prev) {
           if (item.url) URL.revokeObjectURL(item.url);
@@ -55,23 +49,6 @@ export function MediaLibraryPanel({
       });
     };
   }, []);
-
-  async function onPick(files: FileList | null) {
-    if (!files?.length) return;
-    setBusy(true);
-    setError("");
-    try {
-      for (const file of Array.from(files)) {
-        await addMediaFile(file, threadId);
-      }
-      await refresh();
-    } catch {
-      setError(labels.failed);
-    } finally {
-      setBusy(false);
-      if (inputRef.current) inputRef.current.value = "";
-    }
-  }
 
   async function onDelete(id: string) {
     setBusy(true);
@@ -111,28 +88,11 @@ export function MediaLibraryPanel({
           </button>
         </div>
 
-        <div className="border-b border-black/8 p-4">
-          <input
-            ref={inputRef}
-            type="file"
-            accept="image/*,video/*,.pdf,.doc,.docx,.txt"
-            multiple
-            className="hidden"
-            onChange={(e) => void onPick(e.target.files)}
-          />
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => inputRef.current?.click()}
-            className="flex h-11 w-full items-center justify-center gap-2 rounded-full bg-black text-[13px] font-bold text-white disabled:opacity-50"
-          >
-            <Upload className="h-4 w-4" />
-            {labels.upload}
-          </button>
-          {error ? (
-            <p className="mt-2 text-center text-[12px] font-semibold text-[#991B1B]">{error}</p>
-          ) : null}
-        </div>
+        {error ? (
+          <p className="border-b border-black/8 px-4 py-2 text-center text-[12px] font-semibold text-[#991B1B]">
+            {error}
+          </p>
+        ) : null}
 
         <ul className="flex-1 space-y-2 overflow-y-auto p-3">
           {items.length === 0 ? (
@@ -149,6 +109,8 @@ export function MediaLibraryPanel({
                     <img src={item.url} alt="" className="h-full w-full object-cover" />
                   ) : item.kind === "video" ? (
                     <Video className="h-5 w-5 text-[#6B7280]" />
+                  ) : item.kind === "audio" ? (
+                    <Music className="h-5 w-5 text-[#6B7280]" />
                   ) : item.kind === "image" ? (
                     <ImageIcon className="h-5 w-5 text-[#6B7280]" />
                   ) : (
@@ -160,8 +122,14 @@ export function MediaLibraryPanel({
                   <p className="mt-0.5 text-[11px] text-[#6B7280]">
                     {formatBytes(item.size)} · {new Date(item.createdAt).toLocaleString()}
                   </p>
+                  {item.sourceLabel ? (
+                    <p className="mt-0.5 truncate text-[11px] text-[#9CA3AF]">{item.sourceLabel}</p>
+                  ) : null}
                   {item.kind === "video" && item.url ? (
                     <video src={item.url} controls className="mt-2 max-h-36 w-full rounded-lg" />
+                  ) : null}
+                  {item.kind === "audio" && item.url ? (
+                    <audio src={item.url} controls className="mt-2 w-full" />
                   ) : null}
                 </div>
                 <button

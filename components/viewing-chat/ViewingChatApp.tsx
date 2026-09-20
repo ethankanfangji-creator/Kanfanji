@@ -153,6 +153,7 @@ export function ViewingChatApp() {
     text: string;
     audio: Blob | null;
     image: File | null;
+    file: File | null;
   }) {
     if (!active) {
       setStatus(c.needAddress);
@@ -161,11 +162,18 @@ export function ViewingChatApp() {
     setBusy(true);
     setStatus("");
     try {
+      const fileNote = payload.file
+        ? locale.startsWith("en")
+          ? `[Uploaded file: ${payload.file.name}]`
+          : `【已上傳檔案：${payload.file.name}】`
+        : "";
+      const textForAi = [payload.text, fileNote].filter(Boolean).join("\n");
+
       const form = new FormData();
       form.append("address", active.address);
       form.append("locale", locale);
       form.append("viewingId", active.id.startsWith("local_") ? "" : active.id);
-      form.append("text", payload.text);
+      form.append("text", textForAi);
       form.append("messages", JSON.stringify(active.messages));
       form.append("consentVersion", AI_CONSENT_VERSION);
       form.append("consentSessionId", consentSessionId());
@@ -192,6 +200,7 @@ export function ViewingChatApp() {
         throw new Error(data.error || data.code || c.turnFailed);
       }
       let nextMessages = data.messages;
+
       if (payload.image) {
         const previewUrl = URL.createObjectURL(payload.image);
         nextMessages = nextMessages.map((message, index) => {
@@ -200,10 +209,30 @@ export function ViewingChatApp() {
           }
           return message;
         });
-        void addMediaFile(payload.image, active.id).catch(() => {
+        void addMediaFile(payload.image, active.id, active.address).catch(() => {
           /* best-effort library save */
         });
       }
+
+      if (payload.file) {
+        const previewUrl = URL.createObjectURL(payload.file);
+        nextMessages = nextMessages.map((message, index) => {
+          if (index === nextMessages.length - 2 && message.role === "user") {
+            return {
+              ...message,
+              type: "file",
+              fileName: payload.file!.name,
+              url: previewUrl,
+              text: payload.text || message.text,
+            };
+          }
+          return message;
+        });
+        void addMediaFile(payload.file, active.id, active.address).catch(() => {
+          /* best-effort library save */
+        });
+      }
+
       if (payload.audio) {
         const audioFile =
           payload.audio instanceof File
@@ -211,10 +240,11 @@ export function ViewingChatApp() {
             : new File([payload.audio], "note.webm", {
                 type: payload.audio.type || "audio/webm",
               });
-        void addMediaFile(audioFile, active.id).catch(() => {
+        void addMediaFile(audioFile, active.id, active.address).catch(() => {
           /* best-effort library save */
         });
       }
+
       saveLocalMessages(active.id, nextMessages);
       refreshLocal();
     } catch (error) {
@@ -354,6 +384,11 @@ export function ViewingChatApp() {
                   strata: c.intelStrata,
                   risks: c.intelRisks,
                   unknown: c.intelUnknown,
+                  transit: c.intelTransit,
+                  schools: c.intelSchools,
+                  market: c.intelMarket,
+                  streetViewNotice: c.intelStreetViewNotice,
+                  unitLevelNotice: c.intelUnitLevelNotice,
                 }}
               />
             ) : intelLoading ? (
@@ -385,8 +420,10 @@ export function ViewingChatApp() {
                 send: c.send,
                 recording: c.recording,
                 stop: c.stop,
-                photo: c.photo,
-                importAudio: c.importAudio,
+                attach: c.attach,
+                camera: c.attachCamera,
+                uploadImage: c.attachImage,
+                uploadFile: c.attachFile,
                 empty: c.emptyComposer,
                 micDenied: c.micDenied,
               }}
@@ -457,14 +494,12 @@ export function ViewingChatApp() {
 
       {mediaOpen ? (
         <MediaLibraryPanel
-          threadId={activeId}
           onClose={() => setMediaOpen(false)}
           railExpanded={historyOpen}
           labels={{
             title: c.mediaLibrary,
             hint: c.mediaLibraryHint,
             empty: c.mediaLibraryEmpty,
-            upload: c.mediaLibraryUpload,
             close: c.searchClose,
             delete: c.mediaLibraryDelete,
             failed: c.mediaLibraryFailed,

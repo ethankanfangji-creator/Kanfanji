@@ -650,6 +650,11 @@ export type Messages = {
     intelStrata: string;
     intelRisks: string;
     intelUnknown: string;
+    intelTransit: string;
+    intelSchools: string;
+    intelMarket: string;
+    intelStreetViewNotice: string;
+    intelUnitLevelNotice: string;
     bankTitle: string;
     bankHint: string;
     justDiscussed: string;
@@ -678,6 +683,10 @@ export type Messages = {
     send: string;
     recording: string;
     stop: string;
+    attach: string;
+    attachCamera: string;
+    attachImage: string;
+    attachFile: string;
     photo: string;
     importAudio: string;
     emptyComposer: string;

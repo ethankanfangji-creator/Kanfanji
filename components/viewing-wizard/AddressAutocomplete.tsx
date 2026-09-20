@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { Loader2, MapPin } from "lucide-react";
+import { Loader2, MapPin, Search } from "lucide-react";
 import type { AddressSuggestion } from "@/lib/address-suggest";
 
 export type AddressAutocompleteCopy = {
@@ -10,6 +10,8 @@ export type AddressAutocompleteCopy = {
   empty: string;
   error: string;
   listLabel: string;
+  /** Magnifier / Enter search button label */
+  search?: string;
 };
 
 type SuggestState =
@@ -23,6 +25,7 @@ export function AddressAutocomplete({
   value,
   onChange,
   onSelect,
+  onCommit,
   disabled,
   copy,
   confirmed,
@@ -30,6 +33,8 @@ export function AddressAutocomplete({
   value: string;
   onChange: (value: string) => void;
   onSelect: (suggestion: AddressSuggestion) => void;
+  /** Enter / search icon with no highlighted suggestion — commit free-typed address. */
+  onCommit?: (value: string) => void;
   disabled?: boolean;
   copy: AddressAutocompleteCopy;
   confirmed?: boolean;
@@ -95,7 +100,25 @@ export function AddressAutocomplete({
     setSuggest({ status: "idle" });
   }
 
+  function commitSearch() {
+    if (disabled) return;
+    if (open && items[highlight]) {
+      selectIndex(highlight);
+      return;
+    }
+    const trimmed = value.trim();
+    if (onCommit && trimmed) {
+      setOpen(false);
+      onCommit(trimmed);
+    }
+  }
+
   function onKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commitSearch();
+      return;
+    }
     if (!open && (event.key === "ArrowDown" || event.key === "ArrowUp") && items.length) {
       setOpen(true);
       return;
@@ -113,11 +136,6 @@ export function AddressAutocomplete({
       setHighlight((current) =>
         items.length ? (current - 1 + items.length) % items.length : 0,
       );
-    } else if (event.key === "Enter") {
-      if (items[highlight]) {
-        event.preventDefault();
-        selectIndex(highlight);
-      }
     }
   }
 
@@ -129,98 +147,117 @@ export function AddressAutocomplete({
       suggest.status === "empty" ||
       suggest.status === "error");
 
-  return (
-    <div className="relative min-w-0 flex-1">
-      <MapPin
-        aria-hidden="true"
-        className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-text-muted)]"
-      />
-      <input
-        ref={inputRef}
-        id="setup-address"
-        role="combobox"
-        aria-expanded={showList}
-        aria-controls={listId}
-        aria-autocomplete="list"
-        aria-activedescendant={
-          showList && items[highlight] ? `${listId}-option-${highlight}` : undefined
-        }
-        required
-        disabled={disabled}
-        value={value}
-        onChange={(event) => {
-          onChange(event.target.value);
-          setOpen(true);
-        }}
-        onKeyDown={onKeyDown}
-        onFocus={() => {
-          if (!confirmed && value.trim().length >= 3) setOpen(true);
-        }}
-        onBlur={() => {
-          // Delay so option click can register.
-          window.setTimeout(() => setOpen(false), 150);
-        }}
-        placeholder={copy.placeholder}
-        autoComplete="off"
-        maxLength={200}
-        className="mt-[var(--space-2)] w-full min-w-0 max-w-full min-h-[var(--touch-target)] box-border rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)] pl-9 pr-3 text-[16px] font-medium text-[var(--color-text)] outline-none focus:ring-2 focus:ring-[var(--color-focus)]/20 sm:text-[var(--font-size-sm)] disabled:opacity-60"
-      />
+  const canSearch = Boolean(value.trim()) && !disabled;
+  const searchLabel = copy.search || "Search";
 
-      {showList ? (
-        <ul
-          id={listId}
-          role="listbox"
-          aria-label={copy.listLabel}
-          className="absolute z-30 mt-2 max-h-64 w-full overflow-auto rounded-[16px] border border-black/10 bg-white py-1 shadow-[0_12px_32px_rgba(0,0,0,0.12)]"
+  return (
+    <div className="mt-[var(--space-2)] min-w-0 flex-1">
+      <div className="relative">
+        <MapPin
+          aria-hidden="true"
+          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-text-muted)]"
+        />
+        <input
+          ref={inputRef}
+          id="setup-address"
+          role="combobox"
+          aria-expanded={showList}
+          aria-controls={listId}
+          aria-autocomplete="list"
+          aria-activedescendant={
+            showList && items[highlight] ? `${listId}-option-${highlight}` : undefined
+          }
+          required
+          disabled={disabled}
+          value={value}
+          onChange={(event) => {
+            onChange(event.target.value);
+            setOpen(true);
+          }}
+          onKeyDown={onKeyDown}
+          onFocus={() => {
+            if (!confirmed && value.trim().length >= 3) setOpen(true);
+          }}
+          onBlur={() => {
+            // Delay so option / search click can register.
+            window.setTimeout(() => setOpen(false), 150);
+          }}
+          placeholder={copy.placeholder}
+          autoComplete="off"
+          maxLength={200}
+          className="w-full min-w-0 max-w-full min-h-[var(--touch-target)] box-border rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)] pl-9 pr-12 text-[16px] font-medium text-[var(--color-text)] outline-none focus:ring-2 focus:ring-[var(--color-focus)]/20 sm:text-[var(--font-size-sm)] disabled:opacity-60"
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          disabled={!canSearch}
+          aria-label={searchLabel}
+          title={searchLabel}
+          onMouseDown={(event) => {
+            event.preventDefault();
+            commitSearch();
+          }}
+          className="absolute right-1.5 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full text-[#374151] transition-colors hover:bg-black/5 disabled:opacity-40"
         >
-          {suggest.status === "loading" ? (
-            <li
-              role="presentation"
-              className="flex items-center gap-2 px-3 py-3 text-[13px] text-[#6B7280]"
-            >
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-              {copy.loading}
-            </li>
-          ) : null}
-          {suggest.status === "empty" ? (
-            <li role="presentation" className="px-3 py-3 text-[13px] text-[#6B7280]">
-              {copy.empty}
-            </li>
-          ) : null}
-          {suggest.status === "error" ? (
-            <li role="alert" className="px-3 py-3 text-[13px] text-[#991B1B]">
-              {suggest.message}
-            </li>
-          ) : null}
-          {items.map((item, index) => (
-            <li
-              key={item.id}
-              id={`${listId}-option-${index}`}
-              role="option"
-              aria-selected={highlight === index}
-              className={`cursor-pointer px-3 py-2.5 text-left ${
-                highlight === index ? "bg-[#111] text-white" : "text-[#1A1A1A] hover:bg-[#F5F3F0]"
-              }`}
-              onMouseDown={(event) => {
-                event.preventDefault();
-                selectIndex(index);
-              }}
-              onMouseEnter={() => setHighlight(index)}
-            >
-              <p className="text-[13px] font-semibold leading-snug">{item.label}</p>
-              {item.secondary ? (
-                <p
-                  className={`mt-0.5 text-[11px] ${
-                    highlight === index ? "text-white/75" : "text-[#6B7280]"
-                  }`}
-                >
-                  {item.secondary}
-                </p>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      ) : null}
+          <Search className="h-4 w-4" strokeWidth={2.25} />
+        </button>
+
+        {showList ? (
+          <ul
+            id={listId}
+            role="listbox"
+            aria-label={copy.listLabel}
+            className="absolute z-30 mt-2 max-h-64 w-full overflow-auto rounded-[16px] border border-black/10 bg-white py-1 shadow-[0_12px_32px_rgba(0,0,0,0.12)]"
+          >
+            {suggest.status === "loading" ? (
+              <li
+                role="presentation"
+                className="flex items-center gap-2 px-3 py-3 text-[13px] text-[#6B7280]"
+              >
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                {copy.loading}
+              </li>
+            ) : null}
+            {suggest.status === "empty" ? (
+              <li role="presentation" className="px-3 py-3 text-[13px] text-[#6B7280]">
+                {copy.empty}
+              </li>
+            ) : null}
+            {suggest.status === "error" ? (
+              <li role="alert" className="px-3 py-3 text-[13px] text-[#991B1B]">
+                {suggest.message}
+              </li>
+            ) : null}
+            {items.map((item, index) => (
+              <li
+                key={item.id}
+                id={`${listId}-option-${index}`}
+                role="option"
+                aria-selected={highlight === index}
+                className={`cursor-pointer px-3 py-2.5 text-left ${
+                  highlight === index ? "bg-[#111] text-white" : "text-[#1A1A1A] hover:bg-[#F5F3F0]"
+                }`}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  selectIndex(index);
+                }}
+                onMouseEnter={() => setHighlight(index)}
+              >
+                <p className="text-[13px] font-semibold leading-snug">{item.label}</p>
+                {item.secondary ? (
+                  <p
+                    className={`mt-0.5 text-[11px] ${
+                      highlight === index ? "text-white/75" : "text-[#6B7280]"
+                    }`}
+                  >
+                    {item.secondary}
+                  </p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
     </div>
   );
 }

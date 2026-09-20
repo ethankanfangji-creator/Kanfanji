@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { FormEvent, useState } from "react";
-import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useI18n } from "@/components/I18nProvider";
 import {
   Button,
@@ -73,7 +72,6 @@ export default function LoginPage() {
               : messages.loginPage.signUpTitle
           }
           description={messages.loginPage.body}
-          actions={<LanguageSwitcher />}
         />
 
         <Card className="mt-[var(--space-6)]">

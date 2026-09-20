@@ -49,6 +49,9 @@ const COMMON_KEYS = [
   "revision",
   "created_at",
   "updated_at",
+  "messages",
+  "report",
+  "metadata",
 ] as const;
 
 const COLLABORATOR_KEYS = [

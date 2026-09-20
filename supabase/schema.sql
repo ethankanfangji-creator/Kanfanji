@@ -52,6 +52,9 @@ create table if not exists public.viewings (
   property jsonb not null default '{}'::jsonb,
   is_pro boolean not null default false,
   property_id uuid references public.properties (id) on delete set null,
+  messages jsonb not null default '[]'::jsonb,
+  report jsonb,
+  metadata jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

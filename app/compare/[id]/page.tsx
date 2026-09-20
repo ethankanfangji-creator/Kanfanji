@@ -13,7 +13,6 @@ import {
   X,
 } from "lucide-react";
 import { ComparisonBoard } from "@/components/comparison/ComparisonBoard";
-import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useI18n } from "@/components/I18nProvider";
 import { PageContainer } from "@/components/ui/primitives";
 import {
@@ -139,7 +138,6 @@ export default function ComparePage({
               {labels.readOnlySource}
             </p>
           </div>
-          <LanguageSwitcher />
         </div>
 
         <div className="flex flex-wrap gap-2 mb-4">

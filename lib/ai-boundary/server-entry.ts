@@ -3,6 +3,7 @@ export { aiErrorResponse, authorizeAiRequest } from "./server";
 export {
   AiInputError,
   assertContentLength,
+  validateConsent,
   validateIntegrateInputBody,
   validatePropertyBasicsBody,
   validateRecordingForm,

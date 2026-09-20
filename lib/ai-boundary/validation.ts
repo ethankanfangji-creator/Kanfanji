@@ -49,7 +49,7 @@ export type AiConsentAssertion = {
   identityKind: "guest" | "user";
 };
 
-function validateConsent(
+export function validateConsent(
   get: (key: string) => unknown,
 ): AiConsentAssertion {
   if (get("consentVersion") !== AI_CONSENT_VERSION) {

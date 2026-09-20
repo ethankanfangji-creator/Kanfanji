@@ -56,11 +56,13 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!ready) return;
     document.documentElement.lang = htmlLang(locale);
-    window.localStorage.setItem(LOCALE_STORAGE_KEY, locale);
   }, [locale, ready]);
 
   const setLocale = useCallback((next: Locale) => {
     setLocaleState(next);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(LOCALE_STORAGE_KEY, next);
+    }
   }, []);
 
   const messages = useMemo(() => getMessages(locale), [locale]);

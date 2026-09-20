@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ArrowLeft, Camera, Check, GitCompare, MapPin, Video } from "lucide-react";
 import { ClientAuthBar } from "@/components/ClientAuthBar";
-import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useI18n } from "@/components/I18nProvider";
 import { PageContainer } from "@/components/ui/primitives";
 import {
@@ -118,7 +117,6 @@ export default function ViewingsPage() {
             </h1>
           </div>
           <div className="mt-1.5 flex flex-col items-end gap-2">
-            <LanguageSwitcher />
             <ClientAuthBar />
           </div>
         </div>

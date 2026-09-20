@@ -14,6 +14,7 @@ Last updated: 2026-09-19. Living inventory for agents and humans.
 | Local draft | IndexedDB (`lib/idb`, `lib/draft-db`) | Guests can create/read without login |
 | AI | OpenAI (`gpt-4o-mini`, Whisper) | **Server routes only** via `lib/ai-boundary` + `AiService` |
 | Geocoding | BC Address Geocoder + OSM Nominatim | **Server only** via `AddressService` |
+| Property intel | BC + Google Places + Bing snippets | `/api/property-intel` — optional `GOOGLE_MAPS_API_KEY`, `BING_SEARCH_API_KEY` |
 | Payments | Stripe Checkout + webhook | Server secrets only |
 | i18n | `zh-Hant` / `zh-Hans` / `en` / `th` | `lib/i18n/*` — no hardcoded product copy in new UI |
 | Tests | Vitest + Playwright | `npm test` / `npm run test:e2e` |
@@ -34,6 +35,7 @@ Last updated: 2026-09-19. Living inventory for agents and humans.
 - `AI_GUEST_COOKIE_SECRET`, `AI_QUOTA_HASH_SECRET`
 - `SHARE_COOKIE_SECRET`
 - Optional quotas/timeouts: `AI_UPSTREAM_TIMEOUT_MS`, `AI_*_DAILY_LIMIT`, `AI_QUOTA_WINDOW_SECONDS`
+- Optional property intel: `GOOGLE_MAPS_API_KEY`, `BING_SEARCH_API_KEY`
 
 If a dedicated AI/share cookie secret is unset, code may fall back to `SUPABASE_SERVICE_ROLE_KEY` — configure dedicated secrets in production.
 
@@ -99,6 +101,17 @@ Every user-triggered async flow should expose:
 Address confirm → property basics → Start viewing → Step 2 one text input → ticket merge → Step 3 Report → guest share LoginGate.
 
 Contract tests: `lib/viewing-wizard/vertical-slice.test.ts`.
+
+## Viewing Chat Thread (2026-09-19)
+
+Home UI is now Meta-AI style chat (`ViewingChatApp`):
+
+- `viewings.messages` JSONB + `viewings.report` JSONB (migration `viewing_chat_messages`)
+- Guest threads in `localStorage`; authenticated can persist via `/api/viewing-chat/*`
+- Question bank = read-only projection from messages (`lib/viewing-chat/project-bank.ts`)
+- APIs: `POST /api/viewing-chat/turn` (Whisper + fill/new_card), `POST /api/viewing-chat/report`
+
+Legacy wizard `ClientPage` remains in repo but is no longer the home route.
 
 ## Quality TODOs (remaining / next slice)
 

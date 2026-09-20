@@ -473,21 +473,33 @@ export function ClientPage() {
     const supabase = getSupabase();
     if (!supabase) {
       setPersistenceAccountScope(null);
+      setAuthReady(true);
       return;
     }
 
-    void supabase.auth.getUser()
-      .then(({ data }) => {
-        setPersistenceAccountScope(data.user?.id ?? null);
-        if (!data.user) setLegacyDraftClaim({ status: "none" });
-        setUser(data.user);
+    let cancelled = false;
+    const AUTH_TIMEOUT_MS = 4_000;
+    void Promise.race([
+      supabase.auth.getUser().then(({ data }) => data.user ?? null),
+      new Promise<null>((resolve) => {
+        window.setTimeout(() => resolve(null), AUTH_TIMEOUT_MS);
+      }),
+    ])
+      .then((nextUser) => {
+        if (cancelled) return;
+        setPersistenceAccountScope(nextUser?.id ?? null);
+        if (!nextUser) setLegacyDraftClaim({ status: "none" });
+        setUser(nextUser);
       })
       .catch(() => {
+        if (cancelled) return;
         setPersistenceAccountScope(null);
         setLegacyDraftClaim({ status: "none" });
         setUser(null);
       })
-      .finally(() => setAuthReady(true));
+      .finally(() => {
+        if (!cancelled) setAuthReady(true);
+      });
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
@@ -500,7 +512,10 @@ export function ClientPage() {
       setUser(session?.user ?? null);
       setAuthReady(true);
     });
-    return () => subscription.unsubscribe();
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, [router]);
 
   useEffect(() => {

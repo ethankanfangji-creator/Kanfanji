@@ -26,6 +26,10 @@ import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useI18n } from "@/components/I18nProvider";
 import { bankQuestions } from "@/lib/i18n";
 import { appendViewingUrl, uploadViewingFile } from "@/lib/media";
+import {
+  mergeQuestionBankOnAddressLookup,
+  shouldPreserveLookupQuestions,
+} from "@/lib/merge-lookup-questions";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 import type { User } from "@supabase/supabase-js";
 
@@ -517,8 +521,12 @@ export function ClientPage() {
   async function lookupAddress() {
     if (!address.trim()) return;
 
+    const wasIdentified = identified;
+    const previousAddress = address.trim();
+    const previousPropertyId =
+      typeof propertyDraft.propertyId === "string" ? propertyDraft.propertyId : null;
+
     setLookingUp(true);
-    setIdentified(false);
     setSyncMessage("");
 
     try {
@@ -547,17 +555,25 @@ export function ClientPage() {
         ...q,
         checked: false,
       }));
+      const nextPropertyIdRaw = payload.propertyId ?? payload.details?.propertyId;
+      const nextPropertyId =
+        typeof nextPropertyIdRaw === "string" ? nextPropertyIdRaw : null;
+      const preserveRecorded = shouldPreserveLookupQuestions({
+        wasIdentified,
+        previousPropertyId,
+        nextPropertyId,
+        previousAddress,
+        nextAddress: payload.displayAddress || previousAddress,
+      });
 
       if (payload.displayAddress) {
         setAddress(payload.displayAddress);
       }
       setMarketCode(nextMarket);
       setTags(nextTags);
-      setQuestions((current) => {
-        const dynamic = current.filter((q) => q.isDynamic);
-        const texts = new Set(dynamic.map((q) => q.text.toLowerCase()));
-        return [...dynamic, ...nextQuestions.filter((q) => !texts.has(q.text.toLowerCase()))];
-      });
+      setQuestions((current) =>
+        mergeQuestionBankOnAddressLookup(current, nextQuestions, preserveRecorded),
+      );
       setPropertyDraft({
         source: payload.source,
         propertyId: payload.propertyId ?? payload.details?.propertyId,
@@ -576,7 +592,6 @@ export function ClientPage() {
           " · 資料暫存本機",
       );
     } catch (error) {
-      setIdentified(false);
       setSyncMessage(error instanceof Error ? error.message : "查詢失敗");
     } finally {
       setLookingUp(false);

@@ -671,6 +671,8 @@ const zhHant: Messages = {
     emptyHistory: "尚無看房紀錄",
     deleteHistory: "刪除紀錄",
     deleteHistoryConfirm: "確定要刪除這筆看房紀錄？",
+    pinHistory: "釘選紀錄",
+    unpinHistory: "取消釘選",
     recentHint: "最近的看房",
     intelLoading: "正在查房源情報…",
     intelFailed: "房源情報查詢失敗，仍可繼續現場記錄",

@@ -20,6 +20,7 @@ import {
   deleteLocalThread,
   listLocalThreads,
   saveLocalMessages,
+  setLocalThreadPinned,
 } from "@/lib/viewing-chat/local-store";
 import { addMediaFile } from "@/lib/viewing-chat/media-library";
 import { createAiMessage, type ChatMessage, type ViewingChatThread } from "@/lib/viewing-chat/types";
@@ -290,6 +291,13 @@ export function ViewingChatApp() {
     }
   }
 
+  function togglePinThread(id: string) {
+    const thread = listLocalThreads().find((item) => item.id === id);
+    if (!thread) return;
+    setLocalThreadPinned(id, !thread.pinned);
+    refreshLocal();
+  }
+
   return (
     <div className="flex h-[100dvh] w-full overflow-hidden bg-[#FAF6F1] text-[#1A1A1A]">
       <IconRail
@@ -318,7 +326,7 @@ export function ViewingChatApp() {
         activeId={activeId}
         onSelectThread={selectThread}
         onDeleteThread={deleteThread}
-        recordsLabel={t.nav.records}
+        onTogglePinThread={togglePinThread}
       />
 
       <section className="mx-auto flex min-w-0 max-w-[900px] flex-1 flex-col">

@@ -687,6 +687,8 @@ const en: Messages = {
     emptyHistory: "No viewings yet",
     deleteHistory: "Delete record",
     deleteHistoryConfirm: "Delete this viewing record?",
+    pinHistory: "Pin record",
+    unpinHistory: "Unpin",
     recentHint: "Recent viewings",
     intelLoading: "Looking up property intel…",
     intelFailed: "Property intel failed — you can still capture on site",

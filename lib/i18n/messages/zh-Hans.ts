@@ -671,6 +671,8 @@ const zhHans: Messages = {
     emptyHistory: "尚无看房纪录",
     deleteHistory: "删除纪录",
     deleteHistoryConfirm: "确定要删除这笔看房纪录？",
+    pinHistory: "钉选纪录",
+    unpinHistory: "取消钉选",
     recentHint: "最近的看房",
     intelLoading: "正在查房源情报…",
     intelFailed: "房源情报查询失败，仍可继续现场记录",

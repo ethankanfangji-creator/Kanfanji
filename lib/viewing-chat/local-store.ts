@@ -19,6 +19,7 @@ function readAll(): ViewingChatThread[] {
       metadata: thread.metadata ?? null,
       messages: thread.messages ?? [],
       report: thread.report ?? null,
+      pinned: Boolean(thread.pinned),
     }));
   } catch {
     return [];
@@ -31,7 +32,11 @@ function writeAll(threads: ViewingChatThread[]) {
 }
 
 export function listLocalThreads(): ViewingChatThread[] {
-  return readAll().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  return readAll().sort((a, b) => {
+    const pin = Number(Boolean(b.pinned)) - Number(Boolean(a.pinned));
+    if (pin !== 0) return pin;
+    return b.updatedAt.localeCompare(a.updatedAt);
+  });
 }
 
 export function getLocalThread(id: string): ViewingChatThread | null {
@@ -62,6 +67,7 @@ export function createLocalThread(
     messages: initialMessages,
     report: null,
     metadata,
+    pinned: false,
   };
   return upsertLocalThread(thread);
 }
@@ -89,4 +95,14 @@ export function deleteLocalThread(id: string): boolean {
   if (next.length === all.length) return false;
   writeAll(next);
   return true;
+}
+
+export function setLocalThreadPinned(id: string, pinned: boolean): ViewingChatThread | null {
+  const existing = getLocalThread(id);
+  if (!existing) return null;
+  return upsertLocalThread({
+    ...existing,
+    pinned,
+    updatedAt: existing.updatedAt,
+  });
 }

@@ -638,6 +638,8 @@ export type Messages = {
     emptyHistory: string;
     deleteHistory: string;
     deleteHistoryConfirm: string;
+    pinHistory: string;
+    unpinHistory: string;
     recentHint: string;
     intelLoading: string;
     intelFailed: string;

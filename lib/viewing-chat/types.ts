@@ -72,6 +72,8 @@ export type ViewingChatThread = {
   messages: ChatMessage[];
   report: ChatReportSnapshot | null;
   metadata: PropertyIntel | null;
+  /** Keep near top of sidebar history */
+  pinned?: boolean;
 };
 
 export const DEFAULT_QUESTION_BANK: Array<Omit<QuestionBankItem, "answer" | "justDiscussed">> = [

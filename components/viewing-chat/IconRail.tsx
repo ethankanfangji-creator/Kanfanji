@@ -8,6 +8,7 @@ import {
   Globe,
   LogOut,
   PanelLeft,
+  Pin,
   Plus,
   Search,
   Trash2,
@@ -87,7 +88,7 @@ export function IconRail({
   activeId,
   onSelectThread,
   onDeleteThread,
-  recordsLabel,
+  onTogglePinThread,
 }: {
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
@@ -100,7 +101,7 @@ export function IconRail({
   activeId: string | null;
   onSelectThread: (id: string) => void;
   onDeleteThread: (id: string) => void;
-  recordsLabel: string;
+  onTogglePinThread: (id: string) => void;
 }) {
   const { messages, locale, setLocale } = useI18n();
   const router = useRouter();
@@ -214,12 +215,18 @@ export function IconRail({
                     <button
                       type="button"
                       onClick={() => onSelectThread(thread.id)}
-                      className={`w-full rounded-xl py-2.5 pl-3 pr-10 text-left ${
+                      className={`w-full rounded-xl py-2.5 pl-3 pr-16 text-left ${
                         active ? "bg-[#EFF6FF]" : "hover:bg-[#FAF6F1]"
                       }`}
                     >
-                      <p className="truncate text-[13px] font-bold text-[#1A1A1A]">
-                        {thread.address || "—"}
+                      <p className="flex items-center gap-1 truncate text-[13px] font-bold text-[#1A1A1A]">
+                        {thread.pinned ? (
+                          <Pin
+                            className="h-3 w-3 shrink-0 fill-current text-[#2563EB]"
+                            aria-hidden
+                          />
+                        ) : null}
+                        <span className="truncate">{thread.address || "—"}</span>
                       </p>
                       {preview ? (
                         <p className="mt-0.5 truncate text-[11px] text-[#6B7280]">
@@ -230,29 +237,51 @@ export function IconRail({
                         {new Date(thread.updatedAt).toLocaleString()}
                       </p>
                     </button>
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onDeleteThread(thread.id);
-                      }}
-                      className="absolute right-1.5 top-2.5 flex h-8 w-8 items-center justify-center rounded-full text-[#9CA3AF] opacity-70 hover:bg-[#FEF2F2] hover:text-[#991B1B] group-hover:opacity-100"
-                      aria-label={messages.chat.deleteHistory}
-                      title={messages.chat.deleteHistory}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    <div className="absolute right-1 top-2 flex items-center gap-0.5">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onTogglePinThread(thread.id);
+                        }}
+                        className={`flex h-8 w-8 items-center justify-center rounded-full opacity-70 hover:bg-[#EFF6FF] hover:text-[#2563EB] group-hover:opacity-100 ${
+                          thread.pinned
+                            ? "text-[#2563EB] opacity-100"
+                            : "text-[#9CA3AF]"
+                        }`}
+                        aria-label={
+                          thread.pinned
+                            ? messages.chat.unpinHistory
+                            : messages.chat.pinHistory
+                        }
+                        title={
+                          thread.pinned
+                            ? messages.chat.unpinHistory
+                            : messages.chat.pinHistory
+                        }
+                      >
+                        <Pin
+                          className={`h-3.5 w-3.5 ${thread.pinned ? "fill-current" : ""}`}
+                        />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onDeleteThread(thread.id);
+                        }}
+                        className="flex h-8 w-8 items-center justify-center rounded-full text-[#9CA3AF] opacity-70 hover:bg-[#FEF2F2] hover:text-[#991B1B] group-hover:opacity-100"
+                        aria-label={messages.chat.deleteHistory}
+                        title={messages.chat.deleteHistory}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </li>
                 );
               })
             )}
           </ul>
-          <Link
-            href="/viewings"
-            className="mt-2 flex h-10 shrink-0 items-center justify-center rounded-full border border-black/10 bg-[#FAF6F1] text-[12px] font-bold"
-          >
-            {recordsLabel}
-          </Link>
         </div>
       ) : null}
 

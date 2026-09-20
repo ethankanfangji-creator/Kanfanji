@@ -686,6 +686,8 @@ const th: Messages = {
     emptyHistory: "ยังไม่มีประวัติ",
     deleteHistory: "ลบรายการ",
     deleteHistoryConfirm: "ลบประวัติชมบ้านนี้หรือไม่?",
+    pinHistory: "ปักหมุด",
+    unpinHistory: "เลิกปักหมุด",
     recentHint: "ชมบ้านล่าสุด",
     intelLoading: "กำลังค้นหาข้อมูลอสังหา…",
     intelFailed: "ค้นหาข้อมูลไม่สำเร็จ — ยังบันทึกหน้างานได้",

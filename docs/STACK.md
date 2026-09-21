@@ -99,21 +99,48 @@ Every user-triggered async flow should expose:
 
 ## Property facts pipeline (US / CA / TW)
 
-Canonical path: **Address Normalizer → Geocoding → Country Orchestrator (9 lanes) → Evidence → Confidence/Conflict → FactCard → LLM report (read-only)**.
+Canonical path: **`generatePropertyReport(address)`** — Address Normalizer → Geocoding → Country Adapter → Domain Providers (parallel) → Data Normalizer → Conflict Resolver + Confidence → POI/transit distances → FactCard → legacy Report + Domain JSON (`property-domain/v1`) → zh-Hant Markdown.
 
-| Piece | Location |
+Unified domain models (`lib/property-domain/`): `Address`, `GeocodingResult`, `Property`, `Listing`, `Transaction`, `BuildingPermit`, `Assessment`, `TaxRecord`, `HOAOrManagementFee`, `ZoningRecord`, `NearbyPlace`, `TransitStop`, `MarketComparable`, `RiskRecord`, `Evidence`, `DataGap`, `PropertyReport` — important fields use `ProvenancedValue` (`value`, `unit`, `source`, `sourceUrl`, `retrievedAt`, `effectiveDate`, `confidence`, `evidenceIds`, `limitations`, `status`). Zod: `DomainPropertyReportSchema` (`property-domain/v1`). Persistence: `supabase/migrate-property-domain.sql` (`private.property_evidence`, `private.property_domain_reports`).
+
+Module boundaries (`lib/property-facts/interfaces.ts` + `services/` + `providers/{listing,public-record,poi-transit,risk}/`):
+
+| Boundary | Default impl |
 | --- | --- |
-| Types / ProvenancedField | `lib/property-facts/types.ts` |
-| Orchestrator | `lib/property-facts/orchestrator.ts` |
-| Resolve / merge | `lib/property-facts/resolve.ts` |
-| Lanes | `lib/property-facts/lanes/*` |
-| Project to legacy intel/basics | `lib/property-facts/project.ts` |
-| API | `POST /api/property-facts`, `POST /api/property-intel` (projects FactCard) |
+| Address normalization | `services/address-normalization.ts` |
+| Geocoding provider | `services/geocoding.ts` → `geocode.ts` |
+| Country adapter | `adapters/country/*` — US / CA / TW (+ OTHER fallback) |
+| Listing / public-record / POI-transit / risk | `providers/*/default.ts` → lanes |
+| Data normalizer / conflict / confidence / report | `services/*` |
+| Evidence store | `MemoryEvidenceStore` (tests) / `PostgresEvidenceStore` (Supabase cache) |
+| API | `POST /api/property-report`, `GET /api/property-report/:id`, `POST /api/property-report/erase`, `GET /api/providers/availability`, `GET /api/evidence/:id`, legacy `POST /api/property-facts` / `POST /api/property-intel` |
 
-`POST /api/property-facts` returns:
+Redis / PostGIS / Docker are **reserved** (interfaces only) — default stack stays Next.js + Supabase Postgres TTL cache.
+
+`POST /api/property-report` (canonical) generates + persists a snapshot (`private.property_domain_reports` / `property_evidence`), returns `reportId`, `cache`, `stages`, `report`, `domainReport`, `markdown`, `links`. Defaults omit `factCard` (set `includeFactCard: true` to include). Timeout: `PROPERTY_REPORT_TIMEOUT_MS` (default 60s, clamp 15–90). Errors: `{ error, code, request_id, retryable }` + `x-request-id`; `429` includes `Retry-After`.
+
+- `GET /api/property-report/:id` — read snapshot (expired → `200` + `cache.stale: true`); consent via body/headers/query; no generate quota
+- `GET /api/evidence/:id?reportId=` — single evidence row from that report
+- `GET /api/providers/availability?country=US` — registry availability (no secrets, no generate quota)
+- `POST /api/property-report/erase` — delete report/evidence/intel cache by `reportId` / `address` / `cacheKey`; writes audit
+- `POST /api/property-facts` — thin alias: same pipeline + `reportId` / `promptPayload` (factCard on by default)
+
+### Data security & compliance
+
+- **API keys**: server env only (`OPENAI_*`, `GOOGLE_MAPS_API_KEY`, `BING_*`, `ATTOM_*`, service role). Never `NEXT_PUBLIC_*` for secrets; provider availability responses never include `envKeyName`.
+- **LLM minimization**: chat report uses `buildLlmPropertyPayload` (redacted evidence; owner/deed-like fields dropped; public_web fenced as `<UNTRUSTED_DATA>`). System rules include anti–prompt-injection.
+- **Untrusted content**: Bing snippets / HTML sanitized to plain text (`lib/security/untrusted-content.ts`) before storage or LLM.
+- **Source / license**: evidence keeps `source_type` / `source_name` / `limitations`; compliance lists providers + auth scopes.
+- **Retention**: `expires_at` on reports/evidence/cache; `PROPERTY_REPORT_TTL_HOURS`; `purgeExpiredPropertyData()`.
+- **Erasure / audit**: `private.property_data_audit` (`generate` | `read` | `erase` | `purge_expired` | `llm_export`); migration `supabase/migrate-property-compliance-audit.sql`.
+
+`POST /api/property-facts` historically returned:
 
 - `factCard` — internal provenance card
-- `report` — external DTO (`request` / `property` / `costs` / `market` / `location` / `risks` / `evidence` / `disclaimer`)
+- `report` — legacy external DTO
+- `domainReport` — canonical `property-domain/v1` (Zod-validated; null if invalid)
+- `markdown` — Traditional Chinese markdown report (evidence-cited; no LLM invent)
+- `stages` — normalized / geocoded / country / providers / gap counts
 - `promptPayload` — compact LLM-safe summary
 
 Confirmed values are bare in `report.property` / `report.market`. Cost fields use `{ value, basis, status, confidence, evidence_id }` so listing claims stay `needs_human` and never look like official fees. Gaps appear in `risks.data_gaps`.
@@ -126,15 +153,20 @@ Address → report pipeline stages:
 4. Address match (`exact_unit` / `exact_parcel` / `street` / …)
 5. Distance enrich (straight-line + walking always; driving / peak via Distance Matrix when keyed)
 6. Project `PropertyReport` DTO
-7. Chat report LLM may only cite `evidence` ids from that report (`/api/viewing-chat/report`)
+7. Attach deterministic `narrative` (zh-Hant): fixed 12 sections — address, property, condition, costs, market, amenities, transit, zoning, risks, confidence, verification, disclaimer — plus EN/FR source snippets preserved
+8. Render markdown with the same fixed TOC; dining POI under amenities; verification embeds compliance checklist + data gaps
+9. Chat report LLM may only cite `evidence` ids from that report (`/api/viewing-chat/report`)
 
-**Rules:** adapters write facts; Bing snippets are `public_web` evidence only; LLM must not invent listing fields; missing data is `not_found` / `needs_human`. Source precedence: `official > public_record > licensed_vendor > licensed_listing > crawl_service > public_web > listing_claim > area_statistic > user > model_estimate`. `listing_claim` and `model_estimate` never become a confirmed value. Confidence is a 0–1 score from source type, address match, freshness, and conflict — not a label the model assigns.
+**Conflict resolution** (`conflict-policy.ts`): exact address match > street/neighborhood; official/public_record > licensed > public_web; newer `effectiveDate`/`retrievedAt` wins. Policy-tied disagreeing values → `status: conflict` with `value: null` and both rows in `conflicts` (no automatic pick). `model_estimate` / `area_statistic` → `estimated: true`, never `found`.
 
-Jurisdiction keys (not one national feed):
+Jurisdiction keys (not one national feed) — selected by country adapters:
 
-- US: `us:{state}:{county}:{city}:{lane}`
-- CA: `ca:{province}:{municipality}:{lane}` — Metro Vancouver open data only for BC metro municipalities
-- TW: `tw:{縣市}:{行政區}:{地段}:{lane}`
+- US (`UnitedStatesAdapter`): `us:{state}:{county}:{city}` — USD / sqft / HOA; prefers `attom`+`google_maps`
+- CA (`CanadaAdapter`): `ca:{province}:{municipality}` — CAD / Strata; Metro Van open data only for BC metro
+- TW (`TaiwanAdapter`): `tw:{縣市}:{行政區}:{地段}` — TWD / 坪 / 管理費; 謄本 stub + human verify
+- OTHER: geocode + POI only; no invented currency/tax
+
+Each adapter supplies: admin parse, available data types, provider selection, units, structural gaps, legal notices, localized report labels. Snapshot appears on `report.request.adapter` and `factCard.meta.countryAdapter`.
 
 Markets: property region `CA|US|TW|OTHER`; viewing/AI markets also allow `TH` (locale product).
 

@@ -6,15 +6,15 @@ import {
   authorizeAiRequest,
   validateConsent,
 } from "@/lib/ai-boundary/server-entry";
-import { assemblePropertyFacts } from "@/lib/property-facts/orchestrator";
 import { factCardPromptPayload } from "@/lib/property-facts/project";
-import { projectFactCardToReport } from "@/lib/property-facts/report";
+import { createPropertyReportApi } from "@/lib/property-domain/create-report-api";
 
 export const runtime = "nodejs";
+export const maxDuration = 90;
 
 /**
- * Property facts JSON — provenance-first card for US / CA / TW.
- * Returns factCard (internal provenance) + report (external DTO) + promptPayload.
+ * Thin alias of POST /api/property-report (legacy shape + reportId).
+ * Prefer /api/property-report for new clients.
  */
 export async function POST(request: Request) {
   try {
@@ -26,15 +26,31 @@ export async function POST(request: Request) {
     const address = typeof body.address === "string" ? body.address.trim() : "";
     if (!address || address.length > 500) throw new AiInputError("address_invalid");
 
-    const bypassCache = body.bypassCache === true;
-    const card = await assemblePropertyFacts({ address, bypassCache });
-    const report = projectFactCardToReport(card);
+    const includeFactCard = body.includeFactCard !== false;
+    const result = await createPropertyReportApi(address, {
+      bypassCache: body.bypassCache === true,
+      includeMarkdown: body.includeMarkdown !== false,
+      includeLegacyReport: true,
+      includeDomainReport: true,
+      includeFactCard,
+    });
+
+    const factCard =
+      result.body.factCard ??
+      result.generated?.factCard ??
+      null;
 
     return boundary.applyCookie(
       NextResponse.json({
-        factCard: card,
-        report,
-        promptPayload: factCardPromptPayload(card),
+        reportId: result.body.reportId,
+        cache: result.body.cache,
+        links: result.body.links,
+        factCard,
+        report: result.body.report,
+        domainReport: result.body.domainReport,
+        markdown: result.body.markdown,
+        stages: result.body.stages,
+        promptPayload: factCard ? factCardPromptPayload(factCard as never) : null,
       }),
     );
   } catch (error) {

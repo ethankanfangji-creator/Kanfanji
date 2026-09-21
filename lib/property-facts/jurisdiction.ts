@@ -113,10 +113,15 @@ export function deriveJurisdiction(input: {
   county?: string | null;
   municipality?: string | null;
   district?: string | null;
+  section?: string | null;
   houseNumber?: string | null;
 }): Jurisdiction {
   const query = input.query.normalize("NFKC");
-  const section = query.match(/(?<=區)([\u4e00-\u9fff]{1,6}段)/)?.[1] ?? query.match(/([\u4e00-\u9fff]{1,4}段)/)?.[1] ?? null;
+  const section =
+    input.section ||
+    query.match(/(?<=區)([\u4e00-\u9fff]{1,6}段)/)?.[1] ||
+    query.match(/([\u4e00-\u9fff]{1,4}段)/)?.[1] ||
+    null;
   const doorFromText = query.match(/(\d+\s*號)/)?.[1]?.replace(/\s+/g, "") ?? null;
   const districtFromText =
     query.match(/(?<=市|縣)([\u4e00-\u9fff]{1,4}區)/)?.[1] ??

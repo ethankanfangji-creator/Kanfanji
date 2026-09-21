@@ -1,5 +1,8 @@
 import type { AmenityFact, PropertyFactCard, ProvenancedField, SourceType } from "./types";
 import { notFoundField } from "./evidence";
+import { buildReportNarrative } from "./narrative";
+import { buildReportCompliance } from "./compliance";
+import { filterNarrativeEvidenceIds } from "./citations";
 import {
   PROPERTY_REPORT_DISCLAIMER,
   type PropertyReport,
@@ -20,8 +23,16 @@ function pushEvidence<T>(
   field: string,
   pf: ProvenancedField<T>,
 ): string | null {
-  if (pf.status !== "found" && pf.status !== "needs_human") return null;
-  if (pf.status === "needs_human" && pf.value == null && !pf.evidence && !pf.rawRef) {
+  if (pf.status !== "found" && pf.status !== "needs_human" && pf.status !== "conflict") {
+    return null;
+  }
+  if (
+    (pf.status === "needs_human" || pf.status === "conflict") &&
+    pf.value == null &&
+    !pf.evidence &&
+    !pf.rawRef &&
+    !(pf.conflicts && pf.conflicts.length)
+  ) {
     return null;
   }
   const id = `ev_${list.length + 1}_${field}`;
@@ -39,7 +50,7 @@ function pushEvidence<T>(
     match_level: pf.matchLevel,
     evidence: pf.evidence ?? (typeof pf.rawRef === "string" ? pf.rawRef : null),
     limitations: pf.limitations,
-    status: pf.status,
+    status: pf.status === "conflict" ? "conflict" : pf.status,
   });
   return id;
 }
@@ -75,6 +86,16 @@ function claimable<T>(
       evidence_id: evidenceId,
     };
   }
+  if (pf.status === "conflict") {
+    gaps.push(`${field}:conflict`);
+    return {
+      value: null,
+      basis: basisFromSourceType(pf.sourceType),
+      status: "conflict",
+      confidence: pf.confidence,
+      evidence_id: evidenceId,
+    };
+  }
   return {
     value: pf.value,
     basis: basisFromSourceType(pf.sourceType),
@@ -87,6 +108,7 @@ function claimable<T>(
 function gapIfMissing<T>(pf: ProvenancedField<T>, field: string, gaps: string[]) {
   if (pf.status === "not_found" || pf.status === "expired") gaps.push(field);
   if (pf.status === "needs_human") gaps.push(`${field}:needs_human`);
+  if (pf.status === "conflict") gaps.push(`${field}:conflict`);
 }
 
 function toLocationItem(
@@ -240,6 +262,10 @@ export function projectFactCardToReport(card: PropertyFactCard): PropertyReport 
       .map((a) => toLocationItem(a, amenitiesId ?? parkId)),
   ];
 
+  const dining: ReportLocationItem[] = (amenities ?? [])
+    .filter((a) => a.kind === "restaurant" || a.kind === "dining")
+    .map((a) => toLocationItem(a, amenitiesId));
+
   const dedupe = (items: ReportLocationItem[]) => {
     const seen = new Set<string>();
     return items.filter((item) => {
@@ -315,7 +341,15 @@ export function projectFactCardToReport(card: PropertyFactCard): PropertyReport 
     }
   }
 
-  return {
+  // Structural gaps from national adapter
+  const adapterSnap = card.meta.countryAdapter;
+  if (adapterSnap) {
+    for (const g of adapterSnap.structural_gaps) {
+      gaps.push(g);
+    }
+  }
+
+  const reportBody: Omit<PropertyReport, "narrative" | "compliance"> = {
     request: {
       input_address: card.identity.rawAddress,
       normalized_address: normalized,
@@ -349,6 +383,23 @@ export function projectFactCardToReport(card: PropertyFactCard): PropertyReport 
             notes: match.notes,
           }
         : null,
+      adapter: adapterSnap
+        ? {
+            id: adapterSnap.id,
+            units: {
+              area: adapterSnap.units.area,
+              currency: adapterSnap.units.currency,
+            },
+            available_data_types: adapterSnap.available_data_types,
+            providers_preferred: adapterSnap.providers_preferred,
+            providers_disabled: adapterSnap.providers_disabled,
+            structural_gaps: adapterSnap.structural_gaps,
+            legal_notices: adapterSnap.legal_notices,
+            fee_label: adapterSnap.fee_label,
+            fee_label_zh: adapterSnap.fee_label_zh,
+            localized_labels: adapterSnap.localized_labels,
+          }
+        : null,
     },
     property: {
       property_type:
@@ -376,6 +427,7 @@ export function projectFactCardToReport(card: PropertyFactCard): PropertyReport 
       shopping: dedupe(shopping),
       medical: dedupe(medical),
       parks: dedupe(parks),
+      dining: dedupe(dining),
       walkability: null,
     },
     risks: {
@@ -389,5 +441,24 @@ export function projectFactCardToReport(card: PropertyFactCard): PropertyReport 
     },
     evidence,
     disclaimer: PROPERTY_REPORT_DISCLAIMER,
+  };
+
+  const compliance = buildReportCompliance(card);
+  const withCompliance = { ...reportBody, compliance };
+  const narrative = buildReportNarrative(withCompliance);
+  const allowedIds = reportBody.evidence.map((e) => e.id);
+  narrative.sections_zh = filterNarrativeEvidenceIds(narrative.sections_zh, allowedIds);
+  const summaryCheck = filterNarrativeEvidenceIds(
+    [{ evidence_ids: [], body: narrative.summary_zh }],
+    allowedIds,
+  )[0];
+  narrative.summary_zh = summaryCheck.body;
+  narrative.source_snippets = narrative.source_snippets.filter((s) =>
+    allowedIds.includes(s.evidence_id),
+  );
+
+  return {
+    ...withCompliance,
+    narrative,
   };
 }

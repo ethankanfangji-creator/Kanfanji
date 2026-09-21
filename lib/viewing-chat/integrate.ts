@@ -1,4 +1,11 @@
 import OpenAI from "openai";
+import { sanitizeCitedStrings, assertCitations } from "@/lib/property-facts/citations";
+import {
+  buildLlmPropertyPayload,
+  llmPropertySystemRules,
+} from "@/lib/security/llm-redact";
+import { recordPropertyAudit } from "@/lib/property-domain/audit";
+import type { PropertyReport } from "@/lib/property-facts/report-types";
 import {
   createAiMessage,
   createUserMessage,
@@ -159,33 +166,36 @@ export async function buildChatReport(input: {
     .slice(0, 12_000);
 
   const propertyFactsBlock = input.propertyReport
-    ? JSON.stringify(
-        {
-          request: input.propertyReport.request,
-          property: input.propertyReport.property,
-          costs: input.propertyReport.costs,
-          market: input.propertyReport.market,
-          location: {
-            schools: input.propertyReport.location.schools.slice(0, 5),
-            transit: input.propertyReport.location.transit.slice(0, 5),
-          },
-          risks: input.propertyReport.risks,
-          evidence: input.propertyReport.evidence
-            .filter((e) => e.status === "found")
-            .slice(0, 40)
-            .map((e) => ({
-              id: e.id,
-              field: e.field,
-              value: e.value,
-              source_type: e.source_type,
-              confidence: e.confidence,
-            })),
-          data_gaps: input.propertyReport.risks.data_gaps.slice(0, 30),
-          disclaimer: input.propertyReport.disclaimer,
-        },
-        null,
-        0,
-      ).slice(0, 10_000)
+    ? (() => {
+        const payload = buildLlmPropertyPayload(input.propertyReport as PropertyReport, {
+          includeRawEvidence: false,
+        });
+        void recordPropertyAudit({
+          actor: "system",
+          action: "llm_export",
+          country: payload.country,
+          meta: { evidenceCount: payload.evidence.length, redacted: true },
+        });
+        const untrusted =
+          payload.untrusted_blocks.length > 0
+            ? `\nUNTRUSTED_SNIPPETS:\n${payload.untrusted_blocks.join("\n")}`
+            : "";
+        return (
+          JSON.stringify(
+            {
+              redacted: payload.redacted,
+              address: payload.address,
+              country: payload.country,
+              evidence: payload.evidence,
+              data_gaps: payload.data_gaps,
+              narrative_summary_zh: payload.narrative_summary_zh,
+              disclaimer: payload.disclaimer,
+            },
+            null,
+            0,
+          ).slice(0, 8_000) + untrusted
+        );
+      })()
     : "(no structured property evidence — use chat only; do not invent listing facts)";
 
   const completion = await openai.chat.completions.create(
@@ -200,9 +210,11 @@ export async function buildChatReport(input: {
           content: `Create a concise open-house report.
 Rules:
 - Chat observations and structured PROPERTY_EVIDENCE are the only sources.
+- ${llmPropertySystemRules()}
 - Any numeric or listing fact in the summary/pros/risks MUST cite an evidence id from PROPERTY_EVIDENCE (e.g. [ev_3_year_built]).
 - If a field is in data_gaps or needs_human, say it is unconfirmed — never invent.
-- Do not invent flood/earthquake/tax/HOA/price when evidence is missing.`,
+- Do not invent flood/earthquake/tax/HOA/price when evidence is missing.
+- Prefer aligning with narrative_summary_zh when present; keep original EN/FR snippets untranslated when quoting fenced sources.`,
         },
         {
           role: "user",
@@ -263,12 +275,23 @@ Return JSON:
     })
     .filter(Boolean) as ChatReportSnapshot["checklist"];
 
+  const allowedEvidenceIds = (input.propertyReport?.evidence ?? []).map((e) => e.id);
+
   const report: ChatReportSnapshot = {
-    pros: asStringList(parsed.pros, ["採光／格局待確認", "社區機能待確認", "現場感覺待補充"]),
-    risks: asStringList(parsed.risks, ["屋況細節未足", "費用文件未核對", "噪音／鄰居未知"]),
+    pros: sanitizeCitedStrings(
+      asStringList(parsed.pros, ["採光／格局待確認", "社區機能待確認", "現場感覺待補充"]),
+      allowedEvidenceIds,
+    ).values,
+    risks: sanitizeCitedStrings(
+      asStringList(parsed.risks, ["屋況細節未足", "費用文件未核對", "噪音／鄰居未知"]),
+      allowedEvidenceIds,
+    ).values,
     checklist:
       checklist.length > 0
-        ? checklist
+        ? checklist.map((row) => ({
+            ...row,
+            answer: assertCitations(row.answer, allowedEvidenceIds).strippedText || row.answer,
+          }))
         : DEFAULT_QUESTION_BANK.map((item) => {
             const hit = bank.find((b) => b.id === item.id);
             return {
@@ -278,7 +301,10 @@ Return JSON:
               status: (hit?.answer ? "ok" : "unknown") as "ok" | "unknown",
             };
           }),
-    summary: typeof parsed.summary === "string" ? parsed.summary : undefined,
+    summary:
+      typeof parsed.summary === "string"
+        ? assertCitations(parsed.summary, allowedEvidenceIds).strippedText || parsed.summary
+        : undefined,
     generatedAt: new Date().toISOString(),
   };
 

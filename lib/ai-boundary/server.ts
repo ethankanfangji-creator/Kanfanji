@@ -39,6 +39,7 @@ async function authenticatedUserId(): Promise<string | null> {
 export async function authorizeAiRequest(
   request: Request,
   assertion: AiConsentAssertion,
+  options?: { consumeQuota?: boolean },
 ): Promise<AiBoundaryContext> {
   const userId = await authenticatedUserId();
   const verified = verifyGuestIdentityCookie(cookieValue(request, AI_GUEST_COOKIE));
@@ -51,16 +52,18 @@ export async function authorizeAiRequest(
     throw new AiInputError("ai_identity_mismatch", 401);
   }
 
-  const quota = await consumeAiQuota(
-    request,
-    userId
-      ? { kind: "user", userId, deviceId: guest.deviceId }
-      : { kind: "guest", guest },
-  );
-  if (!quota.allowed) {
-    const error = new AiInputError(quota.code, quota.code === "ai_quota_exceeded" ? 429 : 503);
-    Object.assign(error, { retryAfter: quota.retryAfter });
-    throw error;
+  if (options?.consumeQuota !== false) {
+    const quota = await consumeAiQuota(
+      request,
+      userId
+        ? { kind: "user", userId, deviceId: guest.deviceId }
+        : { kind: "guest", guest },
+    );
+    if (!quota.allowed) {
+      const error = new AiInputError(quota.code, quota.code === "ai_quota_exceeded" ? 429 : 503);
+      Object.assign(error, { retryAfter: quota.retryAfter });
+      throw error;
+    }
   }
 
   return {

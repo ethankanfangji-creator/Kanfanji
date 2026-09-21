@@ -1,5 +1,6 @@
 import { enrichMetroOpenData } from "@/lib/metro-opendata";
 import { isBcMetroMunicipality, jurisdictionKey } from "../jurisdiction";
+import { gateProvider } from "../providers/registry";
 import { fetchAttomOnce } from "./attom-shared";
 import { makeEvidence } from "../evidence";
 import type { Evidence, LaneContext, LaneResult } from "../types";
@@ -20,6 +21,14 @@ export async function runParcelLane(ctx: LaneContext): Promise<LaneResult> {
       return stubLane("parcel", adapterId);
     }
     return runLane("parcel", adapterId, ctx, async () => {
+      if (
+        !gateProvider("metro_vancouver_open", {
+          region: ctx.region,
+          audit: ctx.providerAudit,
+        })
+      ) {
+        return [];
+      }
       const open = await enrichMetroOpenData(ctx.city ?? undefined, ctx.lng!, ctx.lat!);
       if (!open) return [];
       const now = ctx.now;
@@ -53,7 +62,10 @@ export async function runParcelLane(ctx: LaneContext): Promise<LaneResult> {
 
   if (ctx.region === "US") {
     return runLane("parcel", adapterId, ctx, async () => {
-      const attom = await fetchAttomOnce(ctx.displayAddress || ctx.normalizedQuery);
+      const attom = await fetchAttomOnce(ctx.displayAddress || ctx.normalizedQuery, {
+        region: ctx.region,
+        audit: ctx.providerAudit,
+      });
       if (!attom.sources.length || !attom.history.assessed) return [];
       return [
         makeEvidence({
@@ -82,6 +94,14 @@ export async function runZoningLane(ctx: LaneContext): Promise<LaneResult> {
   }
 
   return runLane("zoning", adapterId, ctx, async () => {
+    if (
+      !gateProvider("metro_vancouver_open", {
+        region: ctx.region,
+        audit: ctx.providerAudit,
+      })
+    ) {
+      return [];
+    }
     const open = await enrichMetroOpenData(ctx.city ?? undefined, ctx.lng!, ctx.lat!);
     if (!open) return [];
     const now = ctx.now;

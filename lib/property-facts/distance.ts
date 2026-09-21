@@ -1,5 +1,7 @@
 import { walkingMinutesFromMeters } from "@/lib/property-intel/types";
-import type { AmenityFact } from "./types";
+import type { AmenityFact, PropertyRegion } from "./types";
+import { gateProvider } from "./providers/registry";
+import type { ProviderAudit } from "./providers/types";
 
 function googleKey(): string | null {
   return (
@@ -19,6 +21,7 @@ export async function enrichAmenityDistances(
   originLat: number,
   originLng: number,
   amenities: AmenityFact[],
+  opts?: { audit?: ProviderAudit; region?: PropertyRegion },
 ): Promise<AmenityFact[]> {
   if (!amenities.length) return amenities;
 
@@ -33,7 +36,11 @@ export async function enrichAmenityDistances(
     };
   });
 
-  const key = googleKey();
+  const googleOk = gateProvider("google_maps", {
+    region: opts?.region,
+    audit: opts?.audit,
+  });
+  const key = googleOk ? googleKey() : null;
   const destinations = withStraight.filter((a) => a.lat != null && a.lng != null).slice(0, 12);
   if (!key || destinations.length === 0) {
     return withStraight.map((a) => ({

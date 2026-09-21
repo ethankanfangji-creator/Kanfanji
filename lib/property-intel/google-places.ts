@@ -104,14 +104,16 @@ export async function enrichGooglePlaces(
   if (!key) return { location: {}, sources: [] };
 
   try {
-    const [schools, markets, transit, parks, buses, hospitals] = await Promise.all([
-      nearbySearch(lat, lng, "school", key),
-      nearbySearch(lat, lng, "supermarket", key),
-      nearbySearch(lat, lng, "transit_station", key, 3000),
-      nearbySearch(lat, lng, "park", key),
-      nearbySearch(lat, lng, "bus_station", key, 1200),
-      nearbySearch(lat, lng, "hospital", key, 2500),
-    ]);
+    const [schools, markets, transit, parks, buses, hospitals, restaurants] =
+      await Promise.all([
+        nearbySearch(lat, lng, "school", key),
+        nearbySearch(lat, lng, "supermarket", key),
+        nearbySearch(lat, lng, "transit_station", key, 3000),
+        nearbySearch(lat, lng, "park", key),
+        nearbySearch(lat, lng, "bus_station", key, 1200),
+        nearbySearch(lat, lng, "hospital", key, 2500),
+        nearbySearch(lat, lng, "restaurant", key, 1500),
+      ]);
 
     const schoolNames = schools.slice(0, 3).map((s) => s.name);
     const amenities = [
@@ -121,6 +123,7 @@ export async function enrichGooglePlaces(
       ...toAmenities("park", lat, lng, parks),
       ...toAmenities("bus", lat, lng, buses),
       ...toAmenities("hospital", lat, lng, hospitals),
+      ...toAmenities("restaurant", lat, lng, restaurants),
     ];
 
     return {

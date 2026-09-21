@@ -100,7 +100,13 @@ export function defaultSourceType(sourceClass: SourceClass): SourceType {
   }
 }
 
-export const FIELD_STATUSES = ["found", "not_found", "needs_human", "expired"] as const;
+export const FIELD_STATUSES = [
+  "found",
+  "not_found",
+  "needs_human",
+  "conflict",
+  "expired",
+] as const;
 export type FieldStatus = (typeof FIELD_STATUSES)[number];
 
 export const CONFIDENCE_LEVELS = ["high", "medium", "low"] as const;
@@ -170,6 +176,8 @@ export type ProvenancedField<T> = {
   confidence: number | null;
   evidence: string | null;
   limitations: string | null;
+  /** True for model/area estimates — never treat as confirmed fact. */
+  estimated?: boolean;
   conflicts?: Evidence<T>[];
   rawRef?: string | null;
 };
@@ -347,6 +355,10 @@ export type PropertyFactCard = {
     /** Adapter routing key, e.g. us:wa:king:seattle */
     jurisdictionKey: string | null;
     match: AddressMatchResult | null;
+    providersUsed?: Array<{ id: string; kind: string; auth_scope: string }>;
+    providersSkipped?: Array<{ id: string; reason: string }>;
+    /** National adapter snapshot (US/CA/TW/OTHER). */
+    countryAdapter?: import("./adapters/country/types").CountryAdapterSnapshot | null;
   };
   /** Public-web snippets kept as evidence only (never auto-promoted to found facts). */
   publicWebEvidence: Evidence<string>[];
@@ -366,6 +378,8 @@ export type LaneContext = {
   lat: number | null;
   lng: number | null;
   now: string;
+  /** Optional per-assemble provider audit (licensed API gating). */
+  providerAudit?: import("./providers/types").ProviderAudit;
 };
 
 export type LaneResult = {

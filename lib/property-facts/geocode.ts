@@ -2,6 +2,8 @@ import { geocodeWithGoogle } from "@/lib/property-intel/google-places";
 import { normalizeAddress } from "@/lib/normalize-address";
 import { makeEvidence, ttlHoursForLane } from "./evidence";
 import { deriveJurisdiction, jurisdictionKey } from "./jurisdiction";
+import { gateProvider, getProviderDef } from "./providers/registry";
+import type { ProviderAudit } from "./providers/types";
 import type { Evidence, Jurisdiction, PropertyRegion } from "./types";
 
 export type GeocodeResult = {
@@ -64,7 +66,10 @@ function mapCountryCode(country: string | null | undefined, explicit?: string | 
 /**
  * Geocoding stage: BC/Nominatim first, then Google for place_id + components.
  */
-export async function geocodeForFacts(normalizedQuery: string): Promise<GeocodeResult> {
+export async function geocodeForFacts(
+  normalizedQuery: string,
+  opts?: { audit?: ProviderAudit },
+): Promise<GeocodeResult> {
   const now = new Date().toISOString();
   const ttl = ttlHoursForLane("identity");
   const identityEvidence: Evidence<unknown>[] = [];
@@ -110,11 +115,17 @@ export async function geocodeForFacts(normalizedQuery: string): Promise<GeocodeR
         : "geocoder";
     sourceLabel = normalized.source;
     sourceClass = sourceId === "bc_geocoder" ? "official" : "public_web";
+    if (sourceId === "bc_geocoder" || sourceId === "nominatim" || sourceId === "geocoder") {
+      const osmDef = getProviderDef("osm_nominatim");
+      if (osmDef) opts?.audit?.markUsed(osmDef);
+    }
   } catch {
     // continue
   }
 
-  const g = await geocodeWithGoogle(normalizedQuery);
+  const g = gateProvider("google_maps", { audit: opts?.audit })
+    ? await geocodeWithGoogle(normalizedQuery)
+    : null;
   if (g) {
     if (lat == null || lng == null) {
       lat = g.lat;

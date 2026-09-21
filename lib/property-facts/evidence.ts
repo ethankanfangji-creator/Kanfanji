@@ -9,7 +9,8 @@ import type {
   SourceClass,
   SourceType,
 } from "./types";
-import { SOURCE_TYPE_PRIORITY, defaultSourceType, sourceClassOf } from "./types";
+import { defaultSourceType, sourceClassOf } from "./types";
+import { compareEvidence } from "./conflict-policy";
 
 const DEFAULT_TTL_HOURS: Record<string, number> = {
   identity: 168,
@@ -127,6 +128,8 @@ export function needsHumanField<T>(opts?: {
   sourceUrl?: string | null;
   retrievedAt?: string | null;
   effectiveDate?: string | null;
+  estimated?: boolean;
+  conflicts?: Evidence<T>[];
 }): ProvenancedField<T> {
   return {
     ...blankField<T>("needs_human"),
@@ -144,7 +147,40 @@ export function needsHumanField<T>(opts?: {
     confidence: opts?.confidence ?? null,
     evidence: opts?.evidence ?? null,
     limitations: opts?.limitations ?? null,
+    estimated: opts?.estimated,
+    conflicts: opts?.conflicts,
     rawRef: opts?.rawRef ?? null,
+  };
+}
+
+/** Unresolved multi-source conflict — no single confirmed value. */
+export function conflictField<T>(opts: {
+  candidates: Evidence<T>[];
+  confidence?: number | null;
+  limitations?: string | null;
+}): ProvenancedField<T> {
+  const first = opts.candidates[0];
+  return {
+    ...blankField<T>("conflict"),
+    value: null,
+    unit: first?.unit ?? null,
+    sourceType: first?.sourceType ?? null,
+    sourceClass: first?.sourceClass ?? null,
+    sourceId: first?.sourceId ?? null,
+    sourceName: first?.sourceName ?? first?.sourceLabel ?? null,
+    sourceLabel: first?.sourceLabel ?? null,
+    sourceUrl: first?.sourceUrl ?? null,
+    retrievedAt: first?.retrievedAt ?? null,
+    fetchedAt: first?.fetchedAt ?? null,
+    effectiveDate: first?.effectiveDate ?? null,
+    matchLevel: first?.matchLevel ?? null,
+    confidence: opts.confidence ?? null,
+    evidence: null,
+    limitations:
+      opts.limitations ??
+      "Multiple equally ranked sources disagree; both retained as conflict — no automatic pick.",
+    estimated: false,
+    conflicts: opts.candidates,
   };
 }
 
@@ -166,6 +202,7 @@ export function foundField<T>(
     limitations?: string | null;
     conflicts?: Evidence<T>[];
     rawRef?: string | null;
+    estimated?: boolean;
   },
 ): ProvenancedField<T> {
   return {
@@ -186,6 +223,7 @@ export function foundField<T>(
     confidence: meta.confidence,
     evidence: meta.evidence ?? null,
     limitations: meta.limitations ?? null,
+    estimated: meta.estimated ?? false,
     conflicts: meta.conflicts,
     rawRef: meta.rawRef ?? null,
   };
@@ -206,10 +244,7 @@ export function valuesEqual(a: unknown, b: unknown): boolean {
 }
 
 export function rankEvidence(a: Evidence<unknown>, b: Evidence<unknown>): number {
-  const pa = SOURCE_TYPE_PRIORITY[a.sourceType];
-  const pb = SOURCE_TYPE_PRIORITY[b.sourceType];
-  if (pa !== pb) return pa - pb;
-  return new Date(b.retrievedAt).getTime() - new Date(a.retrievedAt).getTime();
+  return compareEvidence(a, b);
 }
 
 export function isExpired(expiresAt: string | null | undefined, now = Date.now()): boolean {

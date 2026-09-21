@@ -3,6 +3,7 @@ import { enrichOsmOverpass } from "@/lib/property-intel/osm-overpass";
 import { enrichAmenityDistances } from "../distance";
 import { jurisdictionKey } from "../jurisdiction";
 import { makeEvidence } from "../evidence";
+import { gateProvider } from "../providers/registry";
 import type { AmenityFact, Evidence, LaneContext, LaneResult } from "../types";
 import { runLane, stubLane } from "./types";
 
@@ -14,8 +15,30 @@ export async function runPoiLane(ctx: LaneContext): Promise<LaneResult> {
   }
 
   return runLane("poi", adapterId, ctx, async () => {
+    const googleOk = gateProvider("google_maps", {
+      region: ctx.region,
+      audit: ctx.providerAudit,
+    });
     const [places, osm] = await Promise.all([
-      enrichGooglePlaces(ctx.lat!, ctx.lng!),
+      googleOk
+        ? enrichGooglePlaces(ctx.lat!, ctx.lng!)
+        : Promise.resolve({
+            location: {
+              schools: [] as string[],
+              supermarket: null as string | null,
+              park: null as string | null,
+              hospital: null as string | null,
+              amenities: [] as {
+                kind: AmenityFact["kind"];
+                name: string;
+                minutesWalk: number | null;
+                lat?: number | null;
+                lng?: number | null;
+                straightLineMeters?: number | null;
+              }[],
+            },
+            sources: [] as string[],
+          }),
       enrichOsmOverpass(ctx.lat!, ctx.lng!),
     ]);
     const now = ctx.now;
@@ -50,7 +73,10 @@ export async function runPoiLane(ctx: LaneContext): Promise<LaneResult> {
       if (amenities.length >= 30) break;
     }
 
-    const enriched = await enrichAmenityDistances(ctx.lat!, ctx.lng!, amenities);
+    const enriched = await enrichAmenityDistances(ctx.lat!, ctx.lng!, amenities, {
+      audit: ctx.providerAudit,
+      region: ctx.region,
+    });
 
     const hasGoogle = places.sources.length > 0;
     const sourceType = hasGoogle ? "licensed_vendor" : "public_web";

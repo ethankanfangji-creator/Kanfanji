@@ -1,11 +1,9 @@
-import { geocodeForFacts } from "./geocode";
-import { jurisdictionKey } from "./jurisdiction";
-import { normalizeAddressQuery } from "./normalize-address";
-import { runBuildingLane, runHoaLane, runListingLane, runMarketLane } from "./lanes/listing-building";
-import { runParcelLane, runZoningLane } from "./lanes/parcel-zoning";
-import { runPoiLane, runRiskLane, runTransitLane } from "./lanes/poi-transit-risk";
-import { collectPublicWebEvidence } from "./lanes/public-web";
-import { emptyFactCard, resolveFactCard } from "./resolve";
+import { makeEvidence } from "./evidence";
+import type { PropertyFactsPipelineDeps } from "./interfaces";
+import { auditAllProviders, getProviderDef } from "./providers/registry";
+import { createProviderAudit } from "./providers/types";
+import { createDefaultPipelineDeps } from "./services/defaults";
+import { emptyFactCard } from "./resolve";
 import type {
   AdapterRun,
   Evidence,
@@ -13,50 +11,50 @@ import type {
   LaneResult,
   PropertyFactCard,
 } from "./types";
-import { makeEvidence } from "./evidence";
 
 export type AssemblePropertyFactsInput = {
   address: string;
-  /** Skip shared DB cache */
+  /** Skip shared evidence store */
   bypassCache?: boolean;
+  /** Injectable pipeline (tests / alternate providers). */
+  deps?: Partial<PropertyFactsPipelineDeps>;
 };
 
-async function getCached(address: string): Promise<PropertyFactCard | null> {
-  try {
-    const { getCachedPropertyFacts } = await import("./cache");
-    return await getCachedPropertyFacts(address);
-  } catch {
-    return null;
-  }
-}
-
-async function setCached(address: string, card: PropertyFactCard): Promise<void> {
-  try {
-    const { setCachedPropertyFacts } = await import("./cache");
-    await setCachedPropertyFacts(address, card);
-  } catch {
-    // ignore
-  }
-}
-
 /**
- * Country-specific Data Orchestrator — runs nine lanes in parallel after geocode.
+ * Country-aware orchestrator — depends only on pipeline interfaces.
+ * Vendor SDKs are reached via GeocodingProvider / domain provider implementations.
  */
 export async function assemblePropertyFacts(
   input: AssemblePropertyFactsInput,
 ): Promise<PropertyFactCard> {
-  const { rawAddress, normalizedQuery, unitHint } = normalizeAddressQuery(input.address);
+  const deps = createDefaultPipelineDeps(input.deps);
+  const { rawAddress, normalizedQuery, unitHint } = deps.addressNormalization.normalize(
+    input.address,
+  );
   if (!rawAddress) {
     return emptyFactCard("", "OTHER");
   }
 
   if (!input.bypassCache) {
-    const cached = await getCached(normalizedQuery);
+    const cached = await deps.evidenceStore.get(normalizedQuery);
     if (cached) return cached;
   }
 
   const now = new Date().toISOString();
-  const geo = await geocodeForFacts(normalizedQuery);
+  const providerAudit = createProviderAudit();
+  const geo = await deps.geocoding.geocode(normalizedQuery, { audit: providerAudit });
+  const country = deps.countryAdapter.resolve(geo);
+
+  // Mark adapter-disabled providers as skipped before lanes run
+  for (const id of country.adapter.providers_disabled) {
+    const def = getProviderDef(id);
+    if (def) {
+      providerAudit.markSkipped(
+        def,
+        def.stubOnly ? "stub_only" : "out_of_region",
+      );
+    }
+  }
 
   const identityEvidence: Evidence<unknown>[] = [...geo.identityEvidence];
   if (unitHint) {
@@ -73,7 +71,6 @@ export async function assemblePropertyFacts(
       }),
     );
   }
-  // Ensure normalizedAddress always present
   if (!identityEvidence.some((e) => e.field === "normalizedAddress")) {
     identityEvidence.push(
       makeEvidence({
@@ -92,59 +89,50 @@ export async function assemblePropertyFacts(
   const ctx: LaneContext = {
     rawAddress,
     normalizedQuery,
-    region: geo.region,
+    region: country.region,
     displayAddress: geo.displayAddress,
     countryCode: geo.countryCode,
     admin1: geo.admin1,
     city: geo.city,
     postalCode: geo.postalCode,
-    jurisdiction: geo.jurisdiction,
-    jurisdictionKey: geo.jurisdictionKey,
+    jurisdiction: country.jurisdiction,
+    jurisdictionKey: country.jurisdictionKey,
     lat: geo.lat,
     lng: geo.lng,
     now,
+    providerAudit,
   };
-
-  // Fix postal from geocode if normalizeAddress returned it — re-read from geo
-  // (geocodeForFacts should push postal when available)
-  // Enrich geocode with postal from normalizeAddress — update geocode.ts
 
   let laneResults: LaneResult[] = [];
   let publicWebEvidence: Evidence<string>[] = [];
 
-  if (!geo.geocodeOk) {
-    // Degrade: most lanes skip; still record runs as geocode_required stubs via parallel stubs
-    laneResults = await Promise.all([
-      runListingLane(ctx),
-      runParcelLane(ctx),
-      runBuildingLane(ctx),
-      runHoaLane(ctx),
-      runZoningLane(ctx),
-      runPoiLane(ctx),
-      runTransitLane(ctx),
-      runRiskLane(ctx),
-      runMarketLane(ctx),
+  const runAllLanes = () =>
+    Promise.all([
+      deps.listing.fetchListing(ctx),
+      deps.publicRecord.fetchParcel(ctx),
+      deps.listing.fetchBuilding(ctx),
+      deps.listing.fetchHoa(ctx),
+      deps.publicRecord.fetchZoning(ctx),
+      deps.poiTransit.fetchPoi(ctx),
+      deps.poiTransit.fetchTransit(ctx),
+      deps.risk.fetchRisk(ctx),
+      deps.listing.fetchMarket(ctx),
     ]);
+
+  if (!geo.geocodeOk) {
+    laneResults = await runAllLanes();
   } else {
     const [lanes, publicWeb] = await Promise.all([
-      Promise.all([
-        runListingLane(ctx),
-        runParcelLane(ctx),
-        runBuildingLane(ctx),
-        runHoaLane(ctx),
-        runZoningLane(ctx),
-        runPoiLane(ctx),
-        runTransitLane(ctx),
-        runRiskLane(ctx),
-        runMarketLane(ctx),
-      ]),
-      collectPublicWebEvidence(ctx),
+      runAllLanes(),
+      deps.poiTransit.fetchPublicWeb(ctx),
     ]);
     laneResults = lanes;
     publicWebEvidence = publicWeb;
   }
 
-  const laneEvidence: Evidence<unknown>[] = laneResults.flatMap((r) => r.evidence);
+  const laneEvidence = deps.dataNormalizer.normalizeEvidence(
+    laneResults.flatMap((r) => r.evidence),
+  );
   const adapterRuns: AdapterRun[] = [
     {
       lane: "listing",
@@ -156,21 +144,46 @@ export async function assemblePropertyFacts(
     ...laneResults.flatMap((r) => r.runs),
   ];
 
-  const card = resolveFactCard({
+  auditAllProviders(country.region, providerAudit);
+  const providerSnap = providerAudit.snapshot();
+
+  const card = deps.conflictResolver.resolve({
     rawAddress,
-    region: geo.region,
-    identityEvidence,
+    region: country.region,
+    identityEvidence: deps.dataNormalizer.normalizeEvidence(identityEvidence),
     laneEvidence,
     publicWebEvidence,
     adapterRuns,
     geocodeOk: geo.geocodeOk,
-    jurisdictionKey: jurisdictionKey(geo.jurisdiction),
+    jurisdictionKey: country.jurisdictionKey,
     assembledAt: now,
+    providersUsed: providerSnap.used,
+    providersSkipped: providerSnap.skipped,
+    countryAdapter: country.adapter,
   });
 
+  // Confidence scorer is used inside resolve via scoreConfidence; keep dep for injection/tests.
+  void deps.confidenceScorer;
+
   if (!input.bypassCache) {
-    await setCached(normalizedQuery, card);
+    await deps.evidenceStore.set(normalizedQuery, card);
   }
 
   return card;
+}
+
+/** Project FactCard → legacy PropertyReport via injectable report generator. */
+export function projectFactCardViaGenerator(
+  card: PropertyFactCard,
+  deps?: Partial<PropertyFactsPipelineDeps>,
+) {
+  return createDefaultPipelineDeps(deps).reportGenerator.fromFactCard(card);
+}
+
+/** @deprecated Use projectFactCardViaGenerator or generatePropertyReport(address). */
+export function generatePropertyReportFromCard(
+  card: PropertyFactCard,
+  deps?: Partial<PropertyFactsPipelineDeps>,
+) {
+  return projectFactCardViaGenerator(card, deps);
 }

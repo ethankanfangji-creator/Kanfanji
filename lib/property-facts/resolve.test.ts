@@ -72,7 +72,7 @@ describe("resolveFactCard precedence + conflicts", () => {
     expect(card.building.yearBuilt.conflicts?.[0]?.value).toBe(1990);
   });
 
-  it("never promotes model_estimate to found", () => {
+  it("never promotes model_estimate to found — marks estimated needs_human", () => {
     const evidence: Evidence<unknown>[] = [
       makeEvidence({
         lane: "building",
@@ -94,8 +94,9 @@ describe("resolveFactCard precedence + conflicts", () => {
       adapterRuns: [],
       geocodeOk: false,
     });
-    expect(card.building.yearBuilt.status).toBe("not_found");
-    expect(card.building.yearBuilt.value).toBeNull();
+    expect(card.building.yearBuilt.status).toBe("needs_human");
+    expect(card.building.yearBuilt.estimated).toBe(true);
+    expect(card.building.yearBuilt.value).toBe(2001);
   });
 
   it("marks missing fields not_found explicitly", () => {

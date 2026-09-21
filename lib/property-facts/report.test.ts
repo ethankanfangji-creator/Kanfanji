@@ -108,6 +108,10 @@ describe("projectFactCardToReport", () => {
       true,
     );
     expect(report.disclaimer).toMatch(/informational/);
+    expect(report.narrative.locale).toBe("zh-Hant");
+    expect(report.narrative.summary_zh).toMatch(/看房摘要/);
+    // Without countryAdapter on card, request.adapter is null in unit fixture
+    expect(report.request.adapter === null || report.request.adapter?.id).toBeTruthy();
   });
 
   it("keeps listing-claim HOA as needs_human with basis, not a confirmed cost", () => {

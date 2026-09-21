@@ -14,7 +14,10 @@ export async function runListingLane(ctx: LaneContext): Promise<LaneResult> {
     return stubLane("listing", adapterId);
   }
   return runLane("listing", adapterId, ctx, async () => {
-    const attom = await fetchAttomOnce(ctx.displayAddress || ctx.normalizedQuery);
+    const attom = await fetchAttomOnce(ctx.displayAddress || ctx.normalizedQuery, {
+      region: ctx.region,
+      audit: ctx.providerAudit,
+    });
     if (!attom.sources.length) return [];
     const now = ctx.now;
     const out: Evidence<unknown>[] = [];
@@ -51,7 +54,10 @@ export async function runBuildingLane(ctx: LaneContext): Promise<LaneResult> {
     return stubLane("building", adapterId);
   }
   return runLane("building", adapterId, ctx, async () => {
-    const attom = await fetchAttomOnce(ctx.displayAddress || ctx.normalizedQuery);
+    const attom = await fetchAttomOnce(ctx.displayAddress || ctx.normalizedQuery, {
+      region: ctx.region,
+      audit: ctx.providerAudit,
+    });
     if (!attom.sources.length) return [];
     const now = ctx.now;
     const out: Evidence<unknown>[] = [];
@@ -99,7 +105,10 @@ export async function runMarketLane(ctx: LaneContext): Promise<LaneResult> {
   const adapterId = jurisdictionKey(ctx.jurisdiction, "market");
   if (ctx.region === "US") {
     return runLane("market", adapterId, ctx, async () => {
-      const attom = await fetchAttomOnce(ctx.displayAddress || ctx.normalizedQuery);
+      const attom = await fetchAttomOnce(ctx.displayAddress || ctx.normalizedQuery, {
+      region: ctx.region,
+      audit: ctx.providerAudit,
+    });
       if (!attom.sources.length) return [];
       const now = ctx.now;
       const out: Evidence<unknown>[] = [];

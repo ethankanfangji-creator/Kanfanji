@@ -1,12 +1,12 @@
 import { claimCannotConfirm, scoreConfidence } from "./confidence";
+import { decideEvidenceWinner, isEstimatedSource } from "./conflict-policy";
 import {
+  conflictField,
   fieldStatusFromEvidence,
   foundField,
   isExpired,
   needsHumanField,
   notFoundField,
-  rankEvidence,
-  valuesEqual,
 } from "./evidence";
 import { buildAddressMatch } from "./match";
 import type {
@@ -55,17 +55,62 @@ function resolveField<T>(
     };
   }
 
+  const estimates = forField.filter(
+    (e) => !isExpired(e.expiresAt) && isEstimatedSource(e.sourceType),
+  );
   const live = forField
     .filter((e) => !isExpired(e.expiresAt))
-    .filter((e) => e.sourceType !== "model_estimate" && e.sourceClass !== "model_estimate")
-    .sort(rankEvidence);
+    .filter((e) => !isEstimatedSource(e.sourceType) && e.sourceType !== "model_estimate");
 
   if (live.length === 0) {
+    if (estimates.length > 0) {
+      const est = estimates[0]!;
+      return needsHumanField<T>({
+        value: est.value,
+        sourceType: est.sourceType,
+        sourceLabel: est.sourceLabel,
+        rawRef: est.rawRef ?? est.evidence,
+        sourceUrl: est.sourceUrl,
+        confidence: scoreConfidence({
+          sourceType: est.sourceType,
+          matchLevel: est.matchLevel,
+          retrievedAt: est.retrievedAt,
+          effectiveDate: est.effectiveDate,
+        }),
+        limitations:
+          est.limitations ?? "Estimated value — not a confirmed property fact.",
+        evidence: est.evidence,
+        unit: est.unit,
+        matchLevel: est.matchLevel,
+        retrievedAt: est.retrievedAt,
+        effectiveDate: est.effectiveDate,
+        estimated: true,
+        conflicts: estimates.slice(1),
+      });
+    }
     return notFoundField<T>();
   }
 
-  const winner = live[0]!;
-  const conflicts = live.slice(1).filter((e) => !valuesEqual(e.value, winner.value));
+  const decision = decideEvidenceWinner(live);
+
+  if (decision.kind === "empty") {
+    return notFoundField<T>();
+  }
+
+  if (decision.kind === "unresolved_conflict") {
+    return conflictField<T>({
+      candidates: decision.candidates,
+      confidence: scoreConfidence({
+        sourceType: decision.candidates[0]!.sourceType,
+        matchLevel: decision.candidates[0]!.matchLevel,
+        retrievedAt: decision.candidates[0]!.retrievedAt,
+        effectiveDate: decision.candidates[0]!.effectiveDate,
+        conflict: true,
+      }),
+    });
+  }
+
+  const { winner, conflicts } = decision;
   const confidence = scoreConfidence({
     sourceType: winner.sourceType,
     matchLevel: winner.matchLevel,
@@ -92,6 +137,8 @@ function resolveField<T>(
       matchLevel: winner.matchLevel,
       retrievedAt: winner.retrievedAt,
       effectiveDate: winner.effectiveDate,
+      estimated: isEstimatedSource(winner.sourceType),
+      conflicts: conflicts.length ? conflicts : undefined,
     });
   }
 
@@ -111,6 +158,7 @@ function resolveField<T>(
     limitations: winner.limitations,
     conflicts: conflicts.length ? conflicts : undefined,
     rawRef: winner.rawRef ?? null,
+    estimated: false,
   });
 }
 
@@ -245,7 +293,7 @@ function countCoverage(card: PropertyFactCard): CoverageSummary {
       const s = (obj as ProvenancedField<unknown>).status;
       if (s === "found") summary.found += 1;
       else if (s === "not_found") summary.notFound += 1;
-      else if (s === "needs_human") summary.needsHuman += 1;
+      else if (s === "needs_human" || s === "conflict") summary.needsHuman += 1;
       else if (s === "expired") summary.expired += 1;
       return;
     }
@@ -285,6 +333,9 @@ export function resolveFactCard(input: {
   geocodeOk: boolean;
   jurisdictionKey?: string | null;
   assembledAt?: string;
+  providersUsed?: Array<{ id: string; kind: string; auth_scope: string }>;
+  providersSkipped?: Array<{ id: string; reason: string }>;
+  countryAdapter?: import("./adapters/country/types").CountryAdapterSnapshot | null;
 }): PropertyFactCard {
   const assembledAt = input.assembledAt ?? new Date().toISOString();
   const idEv = input.identityEvidence;
@@ -383,6 +434,9 @@ export function resolveFactCard(input: {
       geocodeOk: input.geocodeOk,
       jurisdictionKey: input.jurisdictionKey ?? null,
       match: null,
+      providersUsed: input.providersUsed,
+      providersSkipped: input.providersSkipped,
+      countryAdapter: input.countryAdapter ?? null,
     },
     publicWebEvidence: input.publicWebEvidence,
   };

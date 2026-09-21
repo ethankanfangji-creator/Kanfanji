@@ -10,6 +10,7 @@ const en: Messages = {
     records: "Viewings",
     signIn: "Sign in",
     signOut: "Sign out",
+    contactSupport: "Contact support",
   },
   status: {
     loggedIn: "Signed in · uploads when you generate a card",

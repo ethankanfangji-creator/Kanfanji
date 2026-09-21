@@ -10,6 +10,7 @@ const th: Messages = {
     records: "ประวัติดูบ้าน",
     signIn: "เข้าสู่ระบบ",
     signOut: "ออกจากระบบ",
+    contactSupport: "ติดต่อฝ่ายสนับสนุน",
   },
   status: {
     loggedIn: "เข้าสู่ระบบแล้ว · อัปโหลดเมื่อสร้างการ์ด",

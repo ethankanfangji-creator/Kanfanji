@@ -10,6 +10,7 @@ const zhHant: Messages = {
     records: "看房紀錄",
     signIn: "登入",
     signOut: "登出",
+    contactSupport: "聯絡支援",
   },
   status: {
     loggedIn: "已登入 · 生成卡片時上傳",

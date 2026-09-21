@@ -8,6 +8,7 @@ export type Messages = {
     records: string;
     signIn: string;
     signOut: string;
+    contactSupport: string;
   };
   status: {
     loggedIn: string;

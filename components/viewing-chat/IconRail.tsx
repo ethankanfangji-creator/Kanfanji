@@ -6,6 +6,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Database,
   Globe,
+  LifeBuoy,
+  LogIn,
   LogOut,
   PanelLeft,
   Pin,
@@ -22,6 +24,21 @@ import { resetSyncEngineSingleton } from "@/lib/sync";
 import { setPersistenceAccountScope } from "@/lib/idb/draft-store";
 import type { ViewingChatThread } from "@/lib/viewing-chat/types";
 
+function supportMailto(locale: string, email?: string | null): string {
+  const to =
+    process.env.NEXT_PUBLIC_SUPPORT_EMAIL?.trim() || "support@kanfangji.app";
+  const subject = encodeURIComponent(`[Kanfangji] Support (${locale})`);
+  const body = encodeURIComponent(
+    [
+      email ? `Account: ${email}` : "Account: guest",
+      `Locale: ${locale}`,
+      "",
+      "Please describe the issue:",
+      "",
+    ].join("\n"),
+  );
+  return `mailto:${to}?subject=${subject}&body=${body}`;
+}
 function RailButton({
   label,
   active,
@@ -340,14 +357,6 @@ export function IconRail({
             <RailButton label="Supabase" expanded={expanded}>
               <UserRound className="h-5 w-5 text-[#991B1B]" />
             </RailButton>
-          ) : !user ? (
-            <RailButton
-              label={messages.nav.signIn}
-              href="/login"
-              expanded={expanded}
-            >
-              <UserRound className="h-5 w-5" strokeWidth={2} />
-            </RailButton>
           ) : (
             <>
               <RailButton
@@ -369,25 +378,46 @@ export function IconRail({
                       : "bottom-0 left-[calc(100%+8px)]"
                   }`}
                 >
-                  <p className="truncate px-2 py-1.5 text-[11px] text-[#6B7280]">
-                    {user.email}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const supabase = getSupabase();
-                      void supabase?.auth.signOut().then(() => {
-                        resetSyncEngineSingleton();
-                        setPersistenceAccountScope(null);
-                        setProfileOpen(false);
-                        router.replace("/login");
-                      });
-                    }}
+                  {user ? (
+                    <p className="truncate px-2 py-1.5 text-[11px] text-[#6B7280]">
+                      {user.email}
+                    </p>
+                  ) : null}
+                  <a
+                    href={supportMailto(locale, user?.email)}
+                    onClick={() => setProfileOpen(false)}
                     className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-[12px] font-bold hover:bg-[#FAF6F1]"
                   >
-                    <LogOut className="h-3.5 w-3.5" />
-                    {messages.nav.signOut}
-                  </button>
+                    <LifeBuoy className="h-3.5 w-3.5 shrink-0" />
+                    {messages.nav.contactSupport}
+                  </a>
+                  {user ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const supabase = getSupabase();
+                        void supabase?.auth.signOut().then(() => {
+                          resetSyncEngineSingleton();
+                          setPersistenceAccountScope(null);
+                          setProfileOpen(false);
+                          router.replace("/login");
+                        });
+                      }}
+                      className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-[12px] font-bold hover:bg-[#FAF6F1]"
+                    >
+                      <LogOut className="h-3.5 w-3.5 shrink-0" />
+                      {messages.nav.signOut}
+                    </button>
+                  ) : (
+                    <Link
+                      href="/login"
+                      onClick={() => setProfileOpen(false)}
+                      className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-[12px] font-bold hover:bg-[#FAF6F1]"
+                    >
+                      <LogIn className="h-3.5 w-3.5 shrink-0" />
+                      {messages.nav.signIn}
+                    </Link>
+                  )}
                 </div>
               ) : null}
             </>

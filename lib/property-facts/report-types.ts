@@ -1,7 +1,5 @@
 /**
  * External report DTO projected from PropertyFactCard.
- * Scalars are bare values when confirmed; missing stays null; listing claims
- * use { value, basis: "listing_claim" } and never look like confirmed facts.
  */
 
 export const PROPERTY_REPORT_DISCLAIMER =
@@ -48,8 +46,38 @@ export type ReportClaimable<T> = {
 export type ReportLocationItem = {
   name: string;
   kind: string;
-  minutes_walk: number | null;
+  /** Straight-line meters between property and POI */
+  straight_line_meters: number | null;
+  /** Estimated walking minutes */
+  walking_minutes: number | null;
+  /** Driving minutes without traffic emphasis */
+  driving_minutes: number | null;
+  /** Peak / traffic-aware driving minutes when available */
+  peak_driving_minutes: number | null;
   evidence_id: string | null;
+};
+
+export type ReportAddressComponents = {
+  street_number: string | null;
+  street_name: string | null;
+  city: string | null;
+  admin1: string | null;
+  county: string | null;
+  district: string | null;
+  section: string | null;
+  doorplate: string | null;
+  postal_code: string | null;
+  country: string | null;
+};
+
+export type ReportMatch = {
+  level: string;
+  place_id: string | null;
+  parcel_id: string | null;
+  building_id: string | null;
+  unit_id: string | null;
+  listing_id: string | null;
+  notes: string[];
 };
 
 export type PropertyReport = {
@@ -58,7 +86,10 @@ export type PropertyReport = {
     normalized_address: string;
     country: "US" | "CA" | "TW" | "OTHER";
     coordinates: { lat: number | null; lng: number | null };
+    place_id: string | null;
+    address_components: ReportAddressComponents;
     jurisdiction_key: string | null;
+    match: ReportMatch | null;
   };
   property: {
     property_type: string | null;
@@ -71,11 +102,11 @@ export type PropertyReport = {
     condition: { value: string | null; basis: ReportClaimBasis };
   };
   costs: {
-    listing_price: ReportClaimable<string> | null;
-    property_tax: ReportClaimable<string> | null;
-    hoa_or_management_fee: ReportClaimable<string> | null;
-    special_assessment: ReportClaimable<string> | null;
-    insurance_estimate: ReportClaimable<string> | null;
+    listing_price: ReportClaimable<string>;
+    property_tax: ReportClaimable<string>;
+    hoa_or_management_fee: ReportClaimable<string>;
+    special_assessment: ReportClaimable<string>;
+    insurance_estimate: ReportClaimable<string>;
   };
   market: {
     recent_comparables: [];
@@ -94,9 +125,9 @@ export type PropertyReport = {
     walkability: null;
   };
   risks: {
-    flood: null;
-    earthquake: null;
-    wildfire: null;
+    flood: string | null;
+    earthquake: string | null;
+    wildfire: string | null;
     noise: string | null;
     zoning: string | null;
     permit_or_violation: string | null;

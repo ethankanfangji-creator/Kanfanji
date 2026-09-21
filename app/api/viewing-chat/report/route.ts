@@ -6,6 +6,8 @@ import {
   authorizeAiRequest,
   validateConsent,
 } from "@/lib/ai-boundary/server-entry";
+import { assemblePropertyFacts } from "@/lib/property-facts/orchestrator";
+import { projectFactCardToReport } from "@/lib/property-facts/report";
 import { buildChatReport } from "@/lib/viewing-chat/integrate";
 import type { ChatMessage } from "@/lib/viewing-chat/types";
 import { createClient } from "@/utils/supabase/server";
@@ -28,11 +30,15 @@ export async function POST(request: Request) {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) throw new AiInputError("ai_unavailable", 503);
 
+    const card = await assemblePropertyFacts({ address });
+    const propertyReport = projectFactCardToReport(card);
+
     const { report, aiMessage } = await buildChatReport({
       apiKey,
       address,
       locale,
       messages,
+      propertyReport,
     });
     const nextMessages = [...messages, aiMessage];
 
@@ -56,7 +62,12 @@ export async function POST(request: Request) {
     }
 
     return boundary.applyCookie(
-      NextResponse.json({ report, aiMessage, messages: nextMessages }),
+      NextResponse.json({
+        report,
+        aiMessage,
+        messages: nextMessages,
+        propertyReport,
+      }),
     );
   } catch (error) {
     return aiErrorResponse(error);

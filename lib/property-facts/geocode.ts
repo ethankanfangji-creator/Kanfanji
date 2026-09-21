@@ -15,6 +15,9 @@ export type GeocodeResult = {
   jurisdictionKey: string;
   lat: number | null;
   lng: number | null;
+  placeId: string | null;
+  streetNumber: string | null;
+  streetName: string | null;
   geocodeOk: boolean;
   identityEvidence: Evidence<unknown>[];
   sourceId: string | null;
@@ -41,10 +44,7 @@ function regionFromAddressHeuristics(query: string): PropertyRegion {
   ) {
     return "CA";
   }
-  if (
-    /\b(USA|United States)\b/.test(query) ||
-    /,\s*[A-Z]{2}\s+\d{5}(-\d{4})?\b/.test(query)
-  ) {
+  if (/\b(USA|United States)\b/.test(query) || /,\s*[A-Z]{2}\s+\d{5}(-\d{4})?\b/.test(query)) {
     return "US";
   }
   return "OTHER";
@@ -62,7 +62,7 @@ function mapCountryCode(country: string | null | undefined, explicit?: string | 
 }
 
 /**
- * Geocoding stage: BC Geocoder → Nominatim → Google fallback.
+ * Geocoding stage: BC/Nominatim first, then Google for place_id + components.
  */
 export async function geocodeForFacts(normalizedQuery: string): Promise<GeocodeResult> {
   const now = new Date().toISOString();
@@ -79,6 +79,9 @@ export async function geocodeForFacts(normalizedQuery: string): Promise<GeocodeR
   let municipality: string | null = null;
   let district: string | null = null;
   let houseNumber: string | null = null;
+  let placeId: string | null = null;
+  let streetNumber: string | null = null;
+  let streetName: string | null = null;
   let lat: number | null = null;
   let lng: number | null = null;
   let sourceId: string | null = null;
@@ -98,6 +101,7 @@ export async function geocodeForFacts(normalizedQuery: string): Promise<GeocodeR
     municipality = normalized.municipality ?? null;
     district = normalized.district ?? null;
     houseNumber = normalized.houseNumber ?? null;
+    streetNumber = houseNumber;
     countryCode = mapCountryCode(normalized.country, normalized.countryCode);
     sourceId = normalized.source.includes("BC")
       ? "bc_geocoder"
@@ -107,15 +111,25 @@ export async function geocodeForFacts(normalizedQuery: string): Promise<GeocodeR
     sourceLabel = normalized.source;
     sourceClass = sourceId === "bc_geocoder" ? "official" : "public_web";
   } catch {
-    // continue to Google
+    // continue
   }
 
-  if (lat == null || lng == null) {
-    const g = await geocodeWithGoogle(normalizedQuery);
-    if (g) {
+  const g = await geocodeWithGoogle(normalizedQuery);
+  if (g) {
+    if (lat == null || lng == null) {
       lat = g.lat;
       lng = g.lng;
-      if (g.formattedAddress) displayAddress = g.formattedAddress;
+    }
+    if (g.formattedAddress) displayAddress = g.formattedAddress;
+    placeId = g.placeId ?? null;
+    streetNumber = g.streetNumber ?? streetNumber;
+    streetName = g.route ?? null;
+    city = city || g.city || null;
+    admin1 = admin1 || g.admin1 || null;
+    postalCode = postalCode || g.postalCode || null;
+    county = county || g.county || null;
+    if (g.countryCode) countryCode = g.countryCode;
+    if (!sourceId || sourceId === "nominatim" || lat == null) {
       sourceId = "google_geocoding";
       sourceLabel = "Google Geocoding";
       sourceClass = "licensed";
@@ -143,11 +157,11 @@ export async function geocodeForFacts(normalizedQuery: string): Promise<GeocodeR
     county,
     municipality,
     district,
-    houseNumber,
+    houseNumber: streetNumber || houseNumber,
   });
   const key = jurisdictionKey(jurisdiction);
   const matchLevel =
-    sourceId === "bc_geocoder" || houseNumber || jurisdiction.doorplate
+    sourceId === "bc_geocoder" || streetNumber || jurisdiction.doorplate
       ? "exact_parcel"
       : geocodeOk
         ? "street"
@@ -190,6 +204,9 @@ export async function geocodeForFacts(normalizedQuery: string): Promise<GeocodeR
     pushId("section", jurisdiction.section);
     pushId("doorplate", jurisdiction.doorplate);
     pushId("postalCode", postalCode);
+    pushId("streetNumber", streetNumber);
+    pushId("streetName", streetName);
+    pushId("placeId", placeId);
     pushId("lat", lat);
     pushId("lng", lng);
   } else {
@@ -197,6 +214,8 @@ export async function geocodeForFacts(normalizedQuery: string): Promise<GeocodeR
     pushId("district", jurisdiction.district);
     pushId("section", jurisdiction.section);
     pushId("doorplate", jurisdiction.doorplate);
+    pushId("streetNumber", streetNumber);
+    pushId("streetName", streetName);
   }
 
   return {
@@ -210,6 +229,9 @@ export async function geocodeForFacts(normalizedQuery: string): Promise<GeocodeR
     jurisdictionKey: key,
     lat,
     lng,
+    placeId,
+    streetNumber,
+    streetName,
     geocodeOk,
     identityEvidence,
     sourceId,

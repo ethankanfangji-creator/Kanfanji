@@ -26,6 +26,9 @@ export type AmenityHit = {
   name: string;
   minutesWalk: number | null;
   source: string;
+  lat?: number | null;
+  lng?: number | null;
+  straightLineMeters?: number | null;
 };
 
 export type PropertyIntelLocation = {

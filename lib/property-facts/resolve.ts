@@ -8,6 +8,7 @@ import {
   rankEvidence,
   valuesEqual,
 } from "./evidence";
+import { buildAddressMatch } from "./match";
 import type {
   CoverageSummary,
   Evidence,
@@ -127,6 +128,10 @@ function emptyIdentity(rawAddress: string): PropertyFactIdentity {
     section: notFoundField(),
     doorplate: notFoundField(),
     postalCode: notFoundField(),
+    streetNumber: notFoundField(),
+    streetName: notFoundField(),
+    placeId: notFoundField(),
+    listingId: notFoundField(),
     lat: notFoundField(),
     lng: notFoundField(),
     unitHint: notFoundField(),
@@ -206,6 +211,9 @@ function emptyRisk(): PropertyFactRisk {
   return {
     items: notFoundField(),
     noiseNote: notFoundField(),
+    flood: notFoundField(),
+    earthquake: notFoundField(),
+    wildfire: notFoundField(),
   };
 }
 
@@ -297,6 +305,10 @@ export function resolveFactCard(input: {
       section: resolveField(idEv, "section"),
       doorplate: resolveField(idEv, "doorplate"),
       postalCode: resolveField(idEv, "postalCode"),
+      streetNumber: resolveField(idEv, "streetNumber"),
+      streetName: resolveField(idEv, "streetName"),
+      placeId: resolveField(idEv, "placeId"),
+      listingId: resolveField(idEv, "listingId"),
       lat: resolveField(idEv, "lat"),
       lng: resolveField(idEv, "lng"),
       unitHint: resolveField(idEv, "unitHint"),
@@ -352,6 +364,9 @@ export function resolveFactCard(input: {
     risk: {
       items: resolveField(byLane(all, "risk"), "items"),
       noiseNote: resolveField(byLane(all, "risk"), "noiseNote"),
+      flood: resolveField(byLane(all, "risk"), "flood"),
+      earthquake: resolveField(byLane(all, "risk"), "earthquake"),
+      wildfire: resolveField(byLane(all, "risk"), "wildfire"),
     },
     market: {
       currency: resolveField(byLane(all, "market"), "currency"),
@@ -367,11 +382,13 @@ export function resolveFactCard(input: {
       evidenceCount: idEv.length + all.length + input.publicWebEvidence.length,
       geocodeOk: input.geocodeOk,
       jurisdictionKey: input.jurisdictionKey ?? null,
+      match: null,
     },
     publicWebEvidence: input.publicWebEvidence,
   };
 
   card.meta.coverageSummary = countCoverage(card);
+  card.meta.match = buildAddressMatch(card);
   return card;
 }
 
@@ -395,9 +412,11 @@ export function emptyFactCard(rawAddress: string, region: PropertyRegion = "OTHE
       evidenceCount: 0,
       geocodeOk: false,
       jurisdictionKey: null,
+      match: null,
     },
     publicWebEvidence: [],
   };
   card.meta.coverageSummary = countCoverage(card);
+  card.meta.match = buildAddressMatch(card);
   return card;
 }

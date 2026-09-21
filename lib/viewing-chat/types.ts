@@ -3,6 +3,7 @@
  */
 
 import type { PropertyIntel } from "@/lib/property-intel/types";
+import type { PropertyReport } from "@/lib/property-facts/report-types";
 
 export type ChatMessageRole = "user" | "ai";
 
@@ -75,6 +76,8 @@ export type ViewingChatThread = {
   messages: ChatMessage[];
   report: ChatReportSnapshot | null;
   metadata: PropertyIntel | null;
+  /** Structured property report for evidence-bound AI summaries */
+  propertyReport?: PropertyReport | null;
   /** Keep near top of sidebar history */
   pinned?: boolean;
 };

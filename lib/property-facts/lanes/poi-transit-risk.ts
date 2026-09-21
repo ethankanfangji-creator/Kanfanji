@@ -1,5 +1,6 @@
 import { enrichGooglePlaces } from "@/lib/property-intel/google-places";
 import { enrichOsmOverpass } from "@/lib/property-intel/osm-overpass";
+import { enrichAmenityDistances } from "../distance";
 import { jurisdictionKey } from "../jurisdiction";
 import { makeEvidence } from "../evidence";
 import type { AmenityFact, Evidence, LaneContext, LaneResult } from "../types";
@@ -42,9 +43,14 @@ export async function runPoiLane(ctx: LaneContext): Promise<LaneResult> {
         kind: hit.kind,
         name: hit.name,
         minutesWalk: hit.minutesWalk,
+        lat: hit.lat ?? null,
+        lng: hit.lng ?? null,
+        straightLineMeters: hit.straightLineMeters ?? null,
       });
       if (amenities.length >= 30) break;
     }
+
+    const enriched = await enrichAmenityDistances(ctx.lat!, ctx.lng!, amenities);
 
     const hasGoogle = places.sources.length > 0;
     const sourceType = hasGoogle ? "licensed_vendor" : "public_web";
@@ -73,7 +79,7 @@ export async function runPoiLane(ctx: LaneContext): Promise<LaneResult> {
     push("supermarket", supermarket);
     push("park", park);
     push("hospital", hospital);
-    push("amenities", amenities.length ? amenities : null);
+    push("amenities", enriched.length ? enriched : null);
     return out;
   });
 }

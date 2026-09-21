@@ -89,20 +89,41 @@ function gapIfMissing<T>(pf: ProvenancedField<T>, field: string, gaps: string[])
   if (pf.status === "needs_human") gaps.push(`${field}:needs_human`);
 }
 
-function amenityItems(
-  amenities: AmenityFact[] | null,
-  kinds: string[],
+function toLocationItem(
+  a: AmenityFact,
   evidenceId: string | null,
+): ReportLocationItem {
+  return {
+    name: a.name,
+    kind: a.kind,
+    straight_line_meters: a.straightLineMeters ?? null,
+    walking_minutes: a.minutesWalk,
+    driving_minutes: a.drivingMinutes ?? null,
+    peak_driving_minutes: a.peakDrivingMinutes ?? null,
+    evidence_id: evidenceId,
+  };
+}
+
+function namedLocation(
+  name: string | null,
+  kind: string,
+  evidenceId: string | null,
+  amenities: AmenityFact[] | null,
 ): ReportLocationItem[] {
-  if (!amenities?.length) return [];
-  return amenities
-    .filter((a) => kinds.includes(a.kind))
-    .map((a) => ({
-      name: a.name,
-      kind: a.kind,
-      minutes_walk: a.minutesWalk,
+  if (!name) return [];
+  const hit = amenities?.find((a) => a.name === name || name.startsWith(a.name));
+  if (hit) return [toLocationItem({ ...hit, kind }, evidenceId)];
+  return [
+    {
+      name,
+      kind,
+      straight_line_meters: null,
+      walking_minutes: null,
+      driving_minutes: null,
+      peak_driving_minutes: null,
       evidence_id: evidenceId,
-    }));
+    },
+  ];
 }
 
 /**
@@ -127,6 +148,9 @@ export function projectFactCardToReport(card: PropertyFactCard): PropertyReport 
   pushEvidence(evidence, "country", card.identity.countryCode);
   pushEvidence(evidence, "lat", card.identity.lat);
   pushEvidence(evidence, "lng", card.identity.lng);
+  pushEvidence(evidence, "place_id", card.identity.placeId);
+  pushEvidence(evidence, "street_number", card.identity.streetNumber);
+  pushEvidence(evidence, "street_name", card.identity.streetName);
 
   gapIfMissing(card.listing.propertyType, "property.property_type", gaps);
   gapIfMissing(card.building.yearBuilt, "property.year_built", gaps);
@@ -172,64 +196,70 @@ export function projectFactCardToReport(card: PropertyFactCard): PropertyReport 
   const parkId = pushEvidence(evidence, "parks", card.poi.park);
 
   const amenities = foundValue(card.poi.amenities);
-  const schools: ReportLocationItem[] = (foundValue(card.poi.schools) ?? []).map((name) => ({
-    name,
-    kind: "school",
-    minutes_walk: null,
-    evidence_id: schoolsId,
-  }));
+  const schools: ReportLocationItem[] = (foundValue(card.poi.schools) ?? []).map((name) => {
+    const hit = amenities?.find((a) => a.kind === "school" && a.name === name);
+    return hit
+      ? toLocationItem(hit, schoolsId)
+      : {
+          name,
+          kind: "school",
+          straight_line_meters: null,
+          walking_minutes: null,
+          driving_minutes: null,
+          peak_driving_minutes: null,
+          evidence_id: schoolsId,
+        };
+  });
 
-  const transit: ReportLocationItem[] = [];
-  const rail = foundValue(card.transit.rail);
-  if (rail) {
-    transit.push({ name: rail, kind: "rail", minutes_walk: null, evidence_id: railId });
-  }
-  const bus = foundValue(card.transit.bus);
-  if (bus) {
-    transit.push({ name: bus, kind: "bus", minutes_walk: null, evidence_id: busId });
-  }
-  transit.push(...amenityItems(amenities, ["transit", "bus"], amenitiesId ?? railId));
+  const transit: ReportLocationItem[] = [
+    ...namedLocation(foundValue(card.transit.rail), "rail", railId, amenities),
+    ...namedLocation(foundValue(card.transit.bus), "bus", busId, amenities),
+    ...(amenities ?? [])
+      .filter((a) => a.kind === "transit" || a.kind === "bus")
+      .map((a) => toLocationItem(a, amenitiesId ?? railId)),
+  ];
 
-  const shopping: ReportLocationItem[] = [];
-  const supermarket = foundValue(card.poi.supermarket);
-  if (supermarket) {
-    shopping.push({
-      name: supermarket,
-      kind: "supermarket",
-      minutes_walk: null,
-      evidence_id: shopId,
+  const shopping: ReportLocationItem[] = [
+    ...namedLocation(foundValue(card.poi.supermarket), "supermarket", shopId, amenities),
+    ...(amenities ?? [])
+      .filter((a) => a.kind === "supermarket")
+      .map((a) => toLocationItem(a, amenitiesId ?? shopId)),
+  ];
+
+  const medical: ReportLocationItem[] = [
+    ...namedLocation(foundValue(card.poi.hospital), "hospital", medicalId, amenities),
+    ...(amenities ?? [])
+      .filter((a) => a.kind === "hospital")
+      .map((a) => toLocationItem(a, amenitiesId ?? medicalId)),
+  ];
+
+  const parks: ReportLocationItem[] = [
+    ...namedLocation(foundValue(card.poi.park), "park", parkId, amenities),
+    ...(amenities ?? [])
+      .filter((a) => a.kind === "park")
+      .map((a) => toLocationItem(a, amenitiesId ?? parkId)),
+  ];
+
+  const dedupe = (items: ReportLocationItem[]) => {
+    const seen = new Set<string>();
+    return items.filter((item) => {
+      const key = `${item.kind}:${item.name}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
     });
-  }
-  shopping.push(...amenityItems(amenities, ["supermarket"], amenitiesId ?? shopId));
+  };
 
-  const medical: ReportLocationItem[] = [];
-  const hospital = foundValue(card.poi.hospital);
-  if (hospital) {
-    medical.push({
-      name: hospital,
-      kind: "hospital",
-      minutes_walk: null,
-      evidence_id: medicalId,
-    });
-  }
-  medical.push(...amenityItems(amenities, ["hospital"], amenitiesId ?? medicalId));
-
-  const parks: ReportLocationItem[] = [];
-  const park = foundValue(card.poi.park);
-  if (park) {
-    parks.push({ name: park, kind: "park", minutes_walk: null, evidence_id: parkId });
-  }
-  parks.push(...amenityItems(amenities, ["park"], amenitiesId ?? parkId));
-
-  gaps.push(
-    "location.walkability",
-    "risks.flood",
-    "risks.earthquake",
-    "risks.wildfire",
-  );
+  gaps.push("location.walkability");
 
   pushEvidence(evidence, "noise", card.risk.noiseNote);
+  pushEvidence(evidence, "flood", card.risk.flood);
+  pushEvidence(evidence, "earthquake", card.risk.earthquake);
+  pushEvidence(evidence, "wildfire", card.risk.wildfire);
   gapIfMissing(card.risk.noiseNote, "risks.noise", gaps);
+  gapIfMissing(card.risk.flood, "risks.flood", gaps);
+  gapIfMissing(card.risk.earthquake, "risks.earthquake", gaps);
+  gapIfMissing(card.risk.wildfire, "risks.wildfire", gaps);
 
   const zoningLabel =
     foundValue(card.zoning.zoningCode) || foundValue(card.zoning.zoningLabel);
@@ -248,6 +278,14 @@ export function projectFactCardToReport(card: PropertyFactCard): PropertyReport 
   const permits = foundValue(card.building.permits);
   const permitText = permits?.length ? permits.join("; ") : null;
   if (!permitText) gaps.push("risks.permit_or_violation");
+
+  // Distance layer gaps when amenities exist but drive times missing
+  if ((amenities ?? []).some((a) => a.drivingMinutes == null)) {
+    gaps.push("location.driving_minutes");
+  }
+  if ((amenities ?? []).some((a) => a.peakDrivingMinutes == null)) {
+    gaps.push("location.peak_driving_minutes");
+  }
 
   for (const snip of card.publicWebEvidence.slice(0, 10)) {
     evidence.push({
@@ -268,6 +306,15 @@ export function projectFactCardToReport(card: PropertyFactCard): PropertyReport 
     });
   }
 
+  const match = card.meta.match;
+  if (match) {
+    for (const note of match.notes) {
+      if (note.includes("not_found") && !gaps.includes(`match.${note}`)) {
+        gaps.push(`match.${note}`);
+      }
+    }
+  }
+
   return {
     request: {
       input_address: card.identity.rawAddress,
@@ -277,7 +324,31 @@ export function projectFactCardToReport(card: PropertyFactCard): PropertyReport 
         lat: foundValue(card.identity.lat),
         lng: foundValue(card.identity.lng),
       },
+      place_id: foundValue(card.identity.placeId),
+      address_components: {
+        street_number: foundValue(card.identity.streetNumber),
+        street_name: foundValue(card.identity.streetName),
+        city: foundValue(card.identity.city),
+        admin1: foundValue(card.identity.admin1),
+        county: foundValue(card.identity.county),
+        district: foundValue(card.identity.district),
+        section: foundValue(card.identity.section),
+        doorplate: foundValue(card.identity.doorplate),
+        postal_code: foundValue(card.identity.postalCode),
+        country: foundValue(card.identity.countryCode),
+      },
       jurisdiction_key: card.meta.jurisdictionKey,
+      match: match
+        ? {
+            level: match.level,
+            place_id: match.placeId,
+            parcel_id: match.parcelId,
+            building_id: match.buildingId,
+            unit_id: match.unitId,
+            listing_id: match.listingId,
+            notes: match.notes,
+          }
+        : null,
     },
     property: {
       property_type:
@@ -300,17 +371,17 @@ export function projectFactCardToReport(card: PropertyFactCard): PropertyReport 
       last_sold: foundValue(card.market.lastSold),
     },
     location: {
-      schools,
-      transit,
-      shopping,
-      medical,
-      parks,
+      schools: dedupe(schools),
+      transit: dedupe(transit),
+      shopping: dedupe(shopping),
+      medical: dedupe(medical),
+      parks: dedupe(parks),
       walkability: null,
     },
     risks: {
-      flood: null,
-      earthquake: null,
-      wildfire: null,
+      flood: foundValue(card.risk.flood),
+      earthquake: foundValue(card.risk.earthquake),
+      wildfire: foundValue(card.risk.wildfire),
       noise: foundValue(card.risk.noiseNote),
       zoning: zoningLabel,
       permit_or_violation: permitText,

@@ -142,6 +142,8 @@ export async function buildChatReport(input: {
   address: string;
   locale: string;
   messages: ChatMessage[];
+  /** Structured property report — LLM may only cite evidence values from this. */
+  propertyReport?: import("@/lib/property-facts/report-types").PropertyReport | null;
   signal?: AbortSignal;
 }): Promise<{ report: ChatReportSnapshot; aiMessage: ChatMessage }> {
   const openai = new OpenAI({ apiKey: input.apiKey });
@@ -156,6 +158,36 @@ export async function buildChatReport(input: {
     .join("\n")
     .slice(0, 12_000);
 
+  const propertyFactsBlock = input.propertyReport
+    ? JSON.stringify(
+        {
+          request: input.propertyReport.request,
+          property: input.propertyReport.property,
+          costs: input.propertyReport.costs,
+          market: input.propertyReport.market,
+          location: {
+            schools: input.propertyReport.location.schools.slice(0, 5),
+            transit: input.propertyReport.location.transit.slice(0, 5),
+          },
+          risks: input.propertyReport.risks,
+          evidence: input.propertyReport.evidence
+            .filter((e) => e.status === "found")
+            .slice(0, 40)
+            .map((e) => ({
+              id: e.id,
+              field: e.field,
+              value: e.value,
+              source_type: e.source_type,
+              confidence: e.confidence,
+            })),
+          data_gaps: input.propertyReport.risks.data_gaps.slice(0, 30),
+          disclaimer: input.propertyReport.disclaimer,
+        },
+        null,
+        0,
+      ).slice(0, 10_000)
+    : "(no structured property evidence — use chat only; do not invent listing facts)";
+
   const completion = await openai.chat.completions.create(
     {
       model: "gpt-4o-mini",
@@ -165,13 +197,19 @@ export async function buildChatReport(input: {
       messages: [
         {
           role: "system",
-          content:
-            "Create a concise open-house report from chat evidence only. Never invent facts not present in the chat.",
+          content: `Create a concise open-house report.
+Rules:
+- Chat observations and structured PROPERTY_EVIDENCE are the only sources.
+- Any numeric or listing fact in the summary/pros/risks MUST cite an evidence id from PROPERTY_EVIDENCE (e.g. [ev_3_year_built]).
+- If a field is in data_gaps or needs_human, say it is unconfirmed — never invent.
+- Do not invent flood/earthquake/tax/HOA/price when evidence is missing.`,
         },
         {
           role: "user",
           content: `Address: ${input.address}
 Write the report in the SAME language as the majority of user messages in the chat (not a fixed UI locale).
+PROPERTY_EVIDENCE:
+${propertyFactsBlock}
 Bank memory:
 ${bank.map((b) => `- ${b.question}: ${b.answer || "unknown"}`).join("\n")}
 Chat:

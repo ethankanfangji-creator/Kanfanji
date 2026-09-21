@@ -41,8 +41,16 @@ export {
   factCardPromptPayload,
 } from "./project";
 export { projectFactCardToReport } from "./report";
-export type { PropertyReport, ReportEvidenceItem, ReportClaimable } from "./report-types";
+export type {
+  PropertyReport,
+  ReportEvidenceItem,
+  ReportClaimable,
+  ReportLocationItem,
+  ReportMatch,
+} from "./report-types";
 export { PROPERTY_REPORT_DISCLAIMER } from "./report-types";
+export { buildAddressMatch } from "./match";
+export { enrichAmenityDistances } from "./distance";
 export { scoreConfidence } from "./confidence";
 export { deriveJurisdiction, jurisdictionKey, isBcMetroMunicipality } from "./jurisdiction";
 export { makeEvidence, notFoundField, needsHumanField, foundField } from "./evidence";

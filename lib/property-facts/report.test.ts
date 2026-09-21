@@ -95,6 +95,7 @@ describe("projectFactCardToReport", () => {
     expect(report.request.country).toBe("US");
     expect(report.request.coordinates.lat).toBe(47.6);
     expect(report.request.jurisdiction_key).toBe("us:wa:king-county:seattle");
+    expect(report.request.match?.level).toBeTruthy();
     expect(report.property.year_built).toBe(1998);
     expect(report.property.bedrooms).toBe(3);
     expect(report.property.lot_area).toBeNull();

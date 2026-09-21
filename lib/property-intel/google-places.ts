@@ -81,14 +81,18 @@ function toAmenities(
   originLng: number,
   hits: PlaceHit[],
 ): AmenityHit[] {
-  return hits.slice(0, 5).map((hit) => ({
-    kind,
-    name: hit.name,
-    minutesWalk: walkingMinutesFromMeters(
-      haversineMeters(originLat, originLng, hit.lat, hit.lng),
-    ),
-    source: "Google Places",
-  }));
+  return hits.slice(0, 5).map((hit) => {
+    const meters = haversineMeters(originLat, originLng, hit.lat, hit.lng);
+    return {
+      kind,
+      name: hit.name,
+      minutesWalk: walkingMinutesFromMeters(meters),
+      source: "Google Places",
+      lat: hit.lat,
+      lng: hit.lng,
+      straightLineMeters: Math.round(meters),
+    };
+  });
 }
 
 /** Google Places nearby enrichment. No-op when API key missing. */
@@ -139,9 +143,19 @@ export async function enrichGooglePlaces(
 }
 
 /** Optional Google Geocode refine — returns lat/lng if BC coords missing. */
-export async function geocodeWithGoogle(
-  address: string,
-): Promise<{ lat: number; lng: number; formattedAddress?: string } | null> {
+export async function geocodeWithGoogle(address: string): Promise<{
+  lat: number;
+  lng: number;
+  formattedAddress?: string;
+  placeId?: string;
+  streetNumber?: string;
+  route?: string;
+  city?: string;
+  admin1?: string;
+  postalCode?: string;
+  countryCode?: string;
+  county?: string;
+} | null> {
   const key = googleKey();
   if (!key) return null;
   try {
@@ -153,16 +167,36 @@ export async function geocodeWithGoogle(
     const data = (await res.json()) as {
       results?: Array<{
         formatted_address?: string;
+        place_id?: string;
         geometry?: { location?: { lat?: number; lng?: number } };
+        address_components?: Array<{
+          long_name?: string;
+          short_name?: string;
+          types?: string[];
+        }>;
       }>;
     };
     const row = data.results?.[0];
     const loc = row?.geometry?.location;
     if (loc?.lat == null || loc?.lng == null) return null;
+
+    const pick = (type: string, short = false) => {
+      const comp = row?.address_components?.find((c) => c.types?.includes(type));
+      return short ? comp?.short_name : comp?.long_name;
+    };
+
     return {
       lat: loc.lat,
       lng: loc.lng,
       formattedAddress: row?.formatted_address,
+      placeId: row?.place_id,
+      streetNumber: pick("street_number"),
+      route: pick("route"),
+      city: pick("locality") || pick("postal_town"),
+      admin1: pick("administrative_area_level_1", true),
+      postalCode: pick("postal_code"),
+      countryCode: pick("country", true)?.toUpperCase(),
+      county: pick("administrative_area_level_2"),
     };
   } catch {
     return null;

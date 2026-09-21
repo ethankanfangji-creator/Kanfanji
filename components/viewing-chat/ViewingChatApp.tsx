@@ -14,6 +14,7 @@ import { AI_CONSENT_VERSION } from "@/lib/ai-boundary/client";
 import type { AddressSuggestion } from "@/lib/address-suggest";
 import { formatIntelMessage } from "@/lib/property-intel/format";
 import type { PropertyIntel } from "@/lib/property-intel/types";
+import type { PropertyReport } from "@/lib/property-facts/report-types";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 import {
   createLocalThread,
@@ -115,6 +116,7 @@ export function ViewingChatApp() {
       });
       const data = (await response.json()) as {
         intel?: PropertyIntel;
+        report?: PropertyReport;
         error?: string;
         code?: string;
       };
@@ -126,7 +128,7 @@ export function ViewingChatApp() {
         text: formatIntelMessage(data.intel, locale),
         intel: data.intel,
       });
-      saveLocalMessages(thread.id, [intelMsg], null, data.intel);
+      saveLocalMessages(thread.id, [intelMsg], null, data.intel, data.report ?? null);
       refreshLocal();
       setStatus("");
     } catch (error) {

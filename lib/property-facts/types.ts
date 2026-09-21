@@ -196,6 +196,21 @@ export type AmenityFact = {
   kind: string;
   name: string;
   minutesWalk: number | null;
+  lat?: number | null;
+  lng?: number | null;
+  straightLineMeters?: number | null;
+  drivingMinutes?: number | null;
+  peakDrivingMinutes?: number | null;
+};
+
+export type AddressMatchResult = {
+  level: MatchLevel;
+  placeId: string | null;
+  parcelId: string | null;
+  buildingId: string | null;
+  unitId: string | null;
+  listingId: string | null;
+  notes: string[];
 };
 
 export type RiskFact = {
@@ -216,6 +231,10 @@ export type PropertyFactIdentity = {
   section: ProvenancedField<string>;
   doorplate: ProvenancedField<string>;
   postalCode: ProvenancedField<string>;
+  streetNumber: ProvenancedField<string>;
+  streetName: ProvenancedField<string>;
+  placeId: ProvenancedField<string>;
+  listingId: ProvenancedField<string>;
   lat: ProvenancedField<number>;
   lng: ProvenancedField<number>;
   unitHint: ProvenancedField<string>;
@@ -279,6 +298,9 @@ export type PropertyFactTransit = {
 export type PropertyFactRisk = {
   items: ProvenancedField<RiskFact[]>;
   noiseNote: ProvenancedField<string>;
+  flood: ProvenancedField<string>;
+  earthquake: ProvenancedField<string>;
+  wildfire: ProvenancedField<string>;
 };
 
 export type PropertyFactMarket = {
@@ -324,6 +346,7 @@ export type PropertyFactCard = {
     geocodeOk: boolean;
     /** Adapter routing key, e.g. us:wa:king:seattle */
     jurisdictionKey: string | null;
+    match: AddressMatchResult | null;
   };
   /** Public-web snippets kept as evidence only (never auto-promoted to found facts). */
   publicWebEvidence: Evidence<string>[];

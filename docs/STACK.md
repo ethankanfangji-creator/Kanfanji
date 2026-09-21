@@ -118,6 +118,16 @@ Canonical path: **Address Normalizer → Geocoding → Country Orchestrator (9 l
 
 Confirmed values are bare in `report.property` / `report.market`. Cost fields use `{ value, basis, status, confidence, evidence_id }` so listing claims stay `needs_human` and never look like official fees. Gaps appear in `risks.data_gaps`.
 
+Address → report pipeline stages:
+
+1. Normalize + geocode (`place_id`, street components when Google is available)
+2. Jurisdiction key selects adapters
+3. Parallel lanes → Evidence → resolve + confidence
+4. Address match (`exact_unit` / `exact_parcel` / `street` / …)
+5. Distance enrich (straight-line + walking always; driving / peak via Distance Matrix when keyed)
+6. Project `PropertyReport` DTO
+7. Chat report LLM may only cite `evidence` ids from that report (`/api/viewing-chat/report`)
+
 **Rules:** adapters write facts; Bing snippets are `public_web` evidence only; LLM must not invent listing fields; missing data is `not_found` / `needs_human`. Source precedence: `official > public_record > licensed_vendor > licensed_listing > crawl_service > public_web > listing_claim > area_statistic > user > model_estimate`. `listing_claim` and `model_estimate` never become a confirmed value. Confidence is a 0–1 score from source type, address match, freshness, and conflict — not a label the model assigns.
 
 Jurisdiction keys (not one national feed):

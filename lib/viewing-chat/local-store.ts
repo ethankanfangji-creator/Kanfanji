@@ -3,6 +3,7 @@
  */
 
 import type { PropertyIntel } from "@/lib/property-intel/types";
+import type { PropertyReport } from "@/lib/property-facts/report-types";
 import type { ChatMessage, ChatReportSnapshot, ViewingChatThread } from "./types";
 
 const STORAGE_KEY = "kanfangji.viewingChat.threads.v1";
@@ -17,6 +18,7 @@ function readAll(): ViewingChatThread[] {
     return (parsed as ViewingChatThread[]).map((thread) => ({
       ...thread,
       metadata: thread.metadata ?? null,
+      propertyReport: thread.propertyReport ?? null,
       messages: thread.messages ?? [],
       report: thread.report ?? null,
       pinned: Boolean(thread.pinned),
@@ -54,6 +56,7 @@ export function createLocalThread(
   address: string,
   initialMessages: ChatMessage[] = [],
   metadata: PropertyIntel | null = null,
+  propertyReport: PropertyReport | null = null,
 ): ViewingChatThread {
   const now = new Date().toISOString();
   const thread: ViewingChatThread = {
@@ -67,6 +70,7 @@ export function createLocalThread(
     messages: initialMessages,
     report: null,
     metadata,
+    propertyReport,
     pinned: false,
   };
   return upsertLocalThread(thread);
@@ -77,6 +81,7 @@ export function saveLocalMessages(
   messages: ChatMessage[],
   report?: ChatReportSnapshot | null,
   metadata?: PropertyIntel | null,
+  propertyReport?: PropertyReport | null,
 ): ViewingChatThread | null {
   const existing = getLocalThread(id);
   if (!existing) return null;
@@ -85,6 +90,8 @@ export function saveLocalMessages(
     messages,
     report: report === undefined ? existing.report : report,
     metadata: metadata === undefined ? existing.metadata : metadata,
+    propertyReport:
+      propertyReport === undefined ? existing.propertyReport : propertyReport,
     updatedAt: new Date().toISOString(),
   });
 }

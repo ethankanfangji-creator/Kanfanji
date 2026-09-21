@@ -9,6 +9,7 @@ import {
 import { AI_LIMITS } from "@/lib/ai-boundary/config";
 import { assemblePropertyFacts } from "@/lib/property-facts/orchestrator";
 import { projectFactCardToIntel } from "@/lib/property-facts/project";
+import { projectFactCardToReport } from "@/lib/property-facts/report";
 import { buildStreetViewUrl } from "@/lib/property-intel/street-view";
 import { createClient } from "@/utils/supabase/server";
 
@@ -34,6 +35,7 @@ export async function POST(request: Request) {
     const includeFactCard = body.includeFactCard !== false;
     const card = await assemblePropertyFacts({ address });
     const intel = projectFactCardToIntel(card);
+    const report = projectFactCardToReport(card);
     const lat = intel.location.lat;
     const lng = intel.location.lng;
     if (lat != null && lng != null) {
@@ -53,7 +55,11 @@ export async function POST(request: Request) {
         const { error } = await supabase
           .from("viewings")
           .update({
-            metadata: { intel, factCard: includeFactCard ? card : undefined },
+            metadata: {
+              intel,
+              factCard: includeFactCard ? card : undefined,
+              propertyReport: report,
+            },
             updated_at: new Date().toISOString(),
             client_updated_at: new Date().toISOString(),
           })
@@ -68,6 +74,7 @@ export async function POST(request: Request) {
     return boundary.applyCookie(
       NextResponse.json({
         intel,
+        report,
         ...(includeFactCard ? { factCard: card } : {}),
       }),
     );

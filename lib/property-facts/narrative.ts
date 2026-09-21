@@ -200,7 +200,13 @@ export function buildReportNarrative(
       if (line) lines.push(line);
       if (cond.basis) {
         lines.push(
-          `依據：${cond.basis === "official_record" ? "官方紀錄" : cond.basis === "listing" ? "房源描述" : "其他來源"}`,
+          `依據：${
+            cond.basis === "official" || cond.basis === "public_record"
+              ? "官方紀錄"
+              : cond.basis === "licensed_listing" || cond.basis === "listing_claim"
+                ? "房源描述"
+                : "其他來源"
+          }`,
         );
       }
     }

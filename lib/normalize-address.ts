@@ -6,6 +6,12 @@ export type NormalizedAddress = {
   city?: string;
   province?: string;
   country?: string;
+  countryCode?: string;
+  postalCode?: string;
+  county?: string;
+  municipality?: string;
+  district?: string;
+  houseNumber?: string;
   score?: number;
 };
 
@@ -29,6 +35,14 @@ type NominatimResult = {
     village?: string;
     state?: string;
     country?: string;
+    county?: string;
+    municipality?: string;
+    city_district?: string;
+    suburb?: string;
+    quarter?: string;
+    house_number?: string;
+    country_code?: string;
+    postcode?: string;
   };
 };
 
@@ -79,6 +93,7 @@ async function normalizeViaBc(query: string): Promise<NormalizedAddress | null> 
     city: props.localityName,
     province: props.provinceCode || "BC",
     country: "Canada",
+    countryCode: "CA",
     score: props.score,
   };
 }
@@ -114,5 +129,11 @@ async function normalizeViaNominatim(query: string): Promise<NormalizedAddress |
     city: addr.city || addr.town || addr.village,
     province: addr.state,
     country: addr.country,
+    countryCode: addr.country_code ? addr.country_code.toUpperCase() : undefined,
+    postalCode: addr.postcode,
+    county: addr.county,
+    municipality: addr.municipality,
+    district: addr.city_district || addr.suburb || addr.quarter,
+    houseNumber: addr.house_number,
   };
 }

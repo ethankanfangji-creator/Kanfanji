@@ -332,7 +332,7 @@ export function ClientPage() {
   const [propertyBasics, setPropertyBasics] = useState<PropertyBasicsSnapshot | null>(null);
   const [startingViewing, setStartingViewing] = useState(false);
   const [tags, setTags] = useState<string[]>([]);
-  const [marketCode, setMarketCode] = useState<"CA" | "TH" | "OTHER">("CA");
+  const [marketCode, setMarketCode] = useState<"CA" | "US" | "TW" | "TH" | "OTHER">("CA");
   const [questions, setQuestions] = useState<Question[]>([]);
   const [audioState, setAudioState] = useState<"idle" | "recording" | "processing">("idle");
   const [audioSeconds, setAudioSeconds] = useState(0);
@@ -412,7 +412,7 @@ export function ClientPage() {
   const [pendingAddressSwitch, setPendingAddressSwitch] = useState<{
     nextAddress: string;
     payload: {
-      market?: "CA" | "TH" | "OTHER";
+      market?: "CA" | "US" | "TW" | "TH" | "OTHER";
       displayAddress?: string;
       tags?: string[];
       source?: string;
@@ -440,7 +440,7 @@ export function ClientPage() {
   const draftSnapshotRef = useRef({
     address: "",
     tags: [] as string[],
-    marketCode: "CA" as "CA" | "TH" | "OTHER",
+    marketCode: "CA" as "CA" | "US" | "TW" | "TH" | "OTHER",
     identified: false,
     questions: [] as Question[],
     notes: [] as AudioNote[],
@@ -1018,7 +1018,7 @@ export function ClientPage() {
     patch?: Partial<{
       address: string;
       tags: string[];
-      marketCode: "CA" | "TH" | "OTHER";
+      marketCode: "CA" | "US" | "TW" | "TH" | "OTHER";
       identified: boolean;
       questions: Question[];
       notes: AudioNote[];
@@ -2910,7 +2910,7 @@ export function ClientPage() {
 
   type AddressLookupPayload = {
     error?: string;
-    market?: "CA" | "TH" | "OTHER";
+    market?: "CA" | "US" | "TW" | "TH" | "OTHER";
     displayAddress?: string;
     tags?: string[];
     source?: string;
@@ -3823,7 +3823,7 @@ export function ClientPage() {
 
   async function enrichAddressHighlightsWithAi(input: {
     address: string;
-    market: "CA" | "TH" | "OTHER";
+    market: "CA" | "US" | "TW" | "TH" | "OTHER";
     openData: {
       city?: string;
       zoningCode?: string;

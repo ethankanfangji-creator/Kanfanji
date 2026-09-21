@@ -31,7 +31,7 @@ export type SaveRemoteViewingInput = {
   userId: string;
   address: string;
   tags: string[];
-  market: "CA" | "TH" | "OTHER";
+  market: "CA" | "US" | "TW" | "TH" | "OTHER";
   questions: ViewingQuestion[];
   notes: unknown[];
   pros: string[];
@@ -123,7 +123,7 @@ export type ActiveDraftBridgeInput = {
   shareToken: string | null;
   address: string;
   tags: string[];
-  market: "CA" | "TH" | "OTHER" | null;
+  market: "CA" | "US" | "TW" | "TH" | "OTHER" | null;
   identified: boolean;
   questions: ViewingQuestion[];
   notes: Array<{

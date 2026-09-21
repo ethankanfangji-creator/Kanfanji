@@ -2,7 +2,7 @@ import { enrichMetroOpenData, type MetroOpenData } from "@/lib/metro-opendata";
 import { normalizeAddress } from "@/lib/normalize-address";
 import { findOrCreateProperty } from "@/lib/properties";
 
-export type Market = "CA" | "TH" | "OTHER";
+export type Market = "CA" | "US" | "TW" | "TH" | "OTHER";
 
 export type AddressLookupResult = {
   market: Market;
@@ -16,6 +16,7 @@ export type AddressLookupResult = {
     province?: string;
     neighborhood?: string;
     country?: string;
+    countryCode?: string;
     postalCode?: string;
     lat?: number;
     lng?: number;
@@ -47,9 +48,25 @@ type NominatimResult = {
   addresstype?: string;
 };
 
-function detectMarketHint(query: string, country?: string): Market {
+function detectMarketHint(query: string, country?: string, countryCode?: string): Market {
+  const code = (countryCode || "").toUpperCase();
+  if (code === "CA") return "CA";
+  if (code === "US") return "US";
+  if (code === "TW") return "TW";
+  if (code === "TH") return "TH";
+
   if (/bangkok|曼谷|sukhumvit|สุขุมวิท|thailand|泰國|กรุงเทพ/i.test(query)) {
     return "TH";
+  }
+  if (/台灣|臺灣|台北|臺北|新北|桃園|台中|臺中|高雄|台南|臺南|\bTW\b|Taiwan/i.test(query)) {
+    return "TW";
+  }
+  if (
+    /\b(USA|United States)\b/i.test(query) ||
+    /,\s*[A-Z]{2}\s+\d{5}(-\d{4})?\b/.test(query) ||
+    /united states|美國|美国/i.test(country || "")
+  ) {
+    return "US";
   }
   if (
     /\b(bc|b\.c\.|british columbia|vancouver|burnaby|richmond|surrey|coquitlam|port coquitlam|north vancouver|west vancouver|victoria|kelowna|abbotsford)\b/i.test(
@@ -233,11 +250,18 @@ async function withPropertyRegistry(result: AddressLookupResult): Promise<Addres
 
   try {
     const zoning = result.details.openData?.zoningCode || null;
+    const countryCode =
+      result.details.countryCode ||
+      (result.market === "OTHER" || result.market === "TH" ? null : result.market);
     const propertyId = await findOrCreateProperty({
       normalizedAddress: normalized,
       lat,
       lng,
       zoning,
+      countryCode,
+      admin1: result.details.province ?? null,
+      city: result.details.city ?? null,
+      postalCode: result.details.postalCode ?? null,
     });
 
     return {
@@ -263,7 +287,11 @@ export async function lookupAddressDetails(query: string): Promise<AddressLookup
 
   // 1) Normalize via Geocode API → lat/lng + formatted_address
   const normalized = await normalizeAddress(trimmed);
-  const market = detectMarketHint(normalized.formatted_address, normalized.country);
+  const market = detectMarketHint(
+    normalized.formatted_address,
+    normalized.country,
+    normalized.countryCode,
+  );
 
   let result: AddressLookupResult = {
     market,
@@ -274,6 +302,8 @@ export async function lookupAddressDetails(query: string): Promise<AddressLookup
       city: normalized.city,
       province: normalized.province,
       country: normalized.country,
+      countryCode: normalized.countryCode,
+      postalCode: normalized.postalCode,
       lat: normalized.lat,
       lng: normalized.lng,
       score: normalized.score,

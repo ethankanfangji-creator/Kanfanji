@@ -51,7 +51,7 @@ export type ViewingSession = SyncableFields & {
   remoteRevision: number | null;
   address: string;
   tags: string[];
-  market: "CA" | "TH" | "OTHER" | null;
+  market: "CA" | "US" | "TW" | "TH" | "OTHER" | null;
   questions: ViewingQuestion[];
   propertyDraft: Record<string, unknown>;
   identified: boolean;

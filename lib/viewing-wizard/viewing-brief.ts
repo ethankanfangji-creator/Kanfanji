@@ -34,7 +34,7 @@ export type ViewingBriefTicketDef = {
 
 export type ViewingBriefContext = {
   address: string;
-  market: "CA" | "TH" | "OTHER";
+  market: "CA" | "US" | "TW" | "TH" | "OTHER";
   place: string;
   propertyType: string | null;
   zoningCode: string | null;
@@ -46,7 +46,7 @@ export type ViewingBriefContext = {
 
 export type ViewingBriefInput = {
   address: string;
-  market: "CA" | "TH" | "OTHER";
+  market: "CA" | "US" | "TW" | "TH" | "OTHER";
   tags?: string[];
   openData?: {
     city?: string;

@@ -7,7 +7,9 @@ import {
   validateConsent,
 } from "@/lib/ai-boundary/server-entry";
 import { AI_LIMITS } from "@/lib/ai-boundary/config";
-import { buildPropertyIntel } from "@/lib/property-intel/build";
+import { assemblePropertyFacts } from "@/lib/property-facts/orchestrator";
+import { projectFactCardToIntel } from "@/lib/property-facts/project";
+import { buildStreetViewUrl } from "@/lib/property-intel/street-view";
 import { createClient } from "@/utils/supabase/server";
 
 export const runtime = "nodejs";
@@ -29,10 +31,18 @@ export async function POST(request: Request) {
       throw new AiInputError("viewing_invalid");
     }
 
-    const intel = await buildPropertyIntel({
-      address,
-      openaiApiKey: process.env.OPENAI_API_KEY ?? null,
-    });
+    const includeFactCard = body.includeFactCard !== false;
+    const card = await assemblePropertyFacts({ address });
+    const intel = projectFactCardToIntel(card);
+    const lat = intel.location.lat;
+    const lng = intel.location.lng;
+    if (lat != null && lng != null) {
+      intel.visuals.streetViewUrl = buildStreetViewUrl(lat, lng);
+      if (intel.visuals.streetViewUrl) {
+        intel.sources = [...new Set([...intel.sources, "Google Street View"])];
+        intel.compliance.streetViewNotice = true;
+      }
+    }
 
     if (viewingId) {
       const supabase = await createClient();
@@ -43,7 +53,7 @@ export async function POST(request: Request) {
         const { error } = await supabase
           .from("viewings")
           .update({
-            metadata: intel,
+            metadata: { intel, factCard: includeFactCard ? card : undefined },
             updated_at: new Date().toISOString(),
             client_updated_at: new Date().toISOString(),
           })
@@ -55,7 +65,12 @@ export async function POST(request: Request) {
       }
     }
 
-    return boundary.applyCookie(NextResponse.json({ intel }));
+    return boundary.applyCookie(
+      NextResponse.json({
+        intel,
+        ...(includeFactCard ? { factCard: card } : {}),
+      }),
+    );
   } catch (error) {
     return aiErrorResponse(error);
   }

@@ -10,7 +10,7 @@ export const ADDRESS_HIGHLIGHT_ID_BASE = 700_000;
 
 export type AddressHighlightInput = {
   address: string;
-  market: "CA" | "TH" | "OTHER";
+  market: "CA" | "US" | "TW" | "TH" | "OTHER";
   tags?: string[];
   openData?: {
     city?: string;

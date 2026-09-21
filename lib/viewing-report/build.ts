@@ -25,7 +25,7 @@ export type BuildViewingReportInput = {
   managementFeeLabel: string;
   listingUrl: string;
   setupNotes: string;
-  market: "CA" | "TH" | "OTHER";
+  market: "CA" | "US" | "TW" | "TH" | "OTHER";
   tags: string[];
   localSessionId: string | null;
   propertyBasics: PropertyBasicsSnapshot | null;

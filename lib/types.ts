@@ -50,4 +50,8 @@ export type Property = {
   year_built: number | null;
   zoning: string | null;
   view_count: number;
+  country_code?: string | null;
+  admin1?: string | null;
+  city?: string | null;
+  postal_code?: string | null;
 };

@@ -8,11 +8,14 @@ export type PropertyRecord = {
   year_built: number | null;
   zoning: string | null;
   view_count: number;
+  country_code?: string | null;
+  admin1?: string | null;
+  city?: string | null;
+  postal_code?: string | null;
 };
 
 /**
- * Dedupe only by exact canonical normalized address.
- * Returns a single property_id (no public aggregation UI yet).
+ * Dedupe by (country_code, canonical normalized address).
  */
 export async function findOrCreateProperty(input: {
   normalizedAddress: string;
@@ -20,6 +23,10 @@ export async function findOrCreateProperty(input: {
   lng: number;
   zoning?: string | null;
   yearBuilt?: number | null;
+  countryCode?: string | null;
+  admin1?: string | null;
+  city?: string | null;
+  postalCode?: string | null;
 }): Promise<string> {
   const normalizedAddress = input.normalizedAddress.trim().toLowerCase();
   if (
@@ -55,6 +62,10 @@ export async function findOrCreateProperty(input: {
     p_lng: input.lng,
     p_zoning: input.zoning ?? null,
     p_year_built: input.yearBuilt ?? null,
+    p_country_code: input.countryCode ?? null,
+    p_admin1: input.admin1 ?? null,
+    p_city: input.city ?? null,
+    p_postal_code: input.postalCode ?? null,
   });
 
   if (error) {

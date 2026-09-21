@@ -14,7 +14,7 @@ Last updated: 2026-09-19. Living inventory for agents and humans.
 | Local draft | IndexedDB (`lib/idb`, `lib/draft-db`) | Guests can create/read without login |
 | AI | OpenAI (`gpt-4o-mini`, Whisper) | **Server routes only** via `lib/ai-boundary` + `AiService` |
 | Geocoding | BC Address Geocoder + OSM Nominatim | **Server only** via `AddressService` |
-| Property intel | BC + Google Places/Street View + OSM + Bing (+ optional ATTOM); DB cache by canonical address | `/api/property-intel` — no crawling; privacy notices on card |
+| Property intel | Property facts pipeline → projected intel; BC/Google/OSM/Bing evidence (+ optional ATTOM); DB cache | `/api/property-facts`, `/api/property-intel` — no crawling; LLM does not invent facts |
 | Payments | Stripe Checkout + webhook | Server secrets only |
 | i18n | `zh-Hant` / `zh-Hans` / `en` / `th` | `lib/i18n/*` — no hardcoded product copy in new UI |
 | Tests | Vitest + Playwright | `npm test` / `npm run test:e2e` |
@@ -26,6 +26,7 @@ Last updated: 2026-09-19. Living inventory for agents and humans.
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
 - `NEXT_PUBLIC_SITE_URL`
+- `NEXT_PUBLIC_SUPPORT_EMAIL` (optional Contact support mailto)
 
 ### Server secrets (never ship to client)
 
@@ -95,6 +96,39 @@ Every user-triggered async flow should expose:
 - Free authenticated: `FREE_VIEWING_LIMIT` (3) cloud viewings before paywall
 - Share / export / Web Share: auth required (`loginGate.*`)
 - Step 2 requires `viewingStarted` (Start CTA / `viewingStartedAt`) — address confirm alone is not enough
+
+## Property facts pipeline (US / CA / TW)
+
+Canonical path: **Address Normalizer → Geocoding → Country Orchestrator (9 lanes) → Evidence → Confidence/Conflict → FactCard → LLM report (read-only)**.
+
+| Piece | Location |
+| --- | --- |
+| Types / ProvenancedField | `lib/property-facts/types.ts` |
+| Orchestrator | `lib/property-facts/orchestrator.ts` |
+| Resolve / merge | `lib/property-facts/resolve.ts` |
+| Lanes | `lib/property-facts/lanes/*` |
+| Project to legacy intel/basics | `lib/property-facts/project.ts` |
+| API | `POST /api/property-facts`, `POST /api/property-intel` (projects FactCard) |
+
+`POST /api/property-facts` returns:
+
+- `factCard` — internal provenance card
+- `report` — external DTO (`request` / `property` / `costs` / `market` / `location` / `risks` / `evidence` / `disclaimer`)
+- `promptPayload` — compact LLM-safe summary
+
+Confirmed values are bare in `report.property` / `report.market`. Cost fields use `{ value, basis, status, confidence, evidence_id }` so listing claims stay `needs_human` and never look like official fees. Gaps appear in `risks.data_gaps`.
+
+**Rules:** adapters write facts; Bing snippets are `public_web` evidence only; LLM must not invent listing fields; missing data is `not_found` / `needs_human`. Source precedence: `official > public_record > licensed_vendor > licensed_listing > crawl_service > public_web > listing_claim > area_statistic > user > model_estimate`. `listing_claim` and `model_estimate` never become a confirmed value. Confidence is a 0–1 score from source type, address match, freshness, and conflict — not a label the model assigns.
+
+Jurisdiction keys (not one national feed):
+
+- US: `us:{state}:{county}:{city}:{lane}`
+- CA: `ca:{province}:{municipality}:{lane}` — Metro Vancouver open data only for BC metro municipalities
+- TW: `tw:{縣市}:{行政區}:{地段}:{lane}`
+
+Markets: property region `CA|US|TW|OTHER`; viewing/AI markets also allow `TH` (locale product).
+
+Migration: `supabase/migrate-properties-multicountry.sql` (`country_code`, `admin1`, `city`, `postal_code`).
 
 ## Min vertical slice (done)
 

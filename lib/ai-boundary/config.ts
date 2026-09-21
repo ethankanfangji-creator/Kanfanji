@@ -3,7 +3,7 @@ export const AI_CONSENT_VERSION = "2026-09-15";
 export const AI_LOCALES = ["en", "th", "zh-Hans", "zh-Hant"] as const;
 export type AiLocale = (typeof AI_LOCALES)[number];
 
-export const AI_MARKETS = ["CA", "TH", "OTHER"] as const;
+export const AI_MARKETS = ["CA", "US", "TW", "TH", "OTHER"] as const;
 export type AiMarket = (typeof AI_MARKETS)[number];
 
 export const AI_LIMITS = {

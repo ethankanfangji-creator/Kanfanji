@@ -5,7 +5,7 @@ import { toStoragePath } from "./media-paths";
 export type ViewingSyncPayload = {
   address: string;
   tags: string[];
-  market: "CA" | "TH" | "OTHER";
+  market: "CA" | "US" | "TW" | "TH" | "OTHER";
   questions: unknown[];
   notes: unknown[];
   pros: string[];

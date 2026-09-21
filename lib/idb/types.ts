@@ -72,7 +72,7 @@ export type ViewingDraftRecord = {
   shareToken: string | null;
   address: string;
   tags: string[];
-  market: "CA" | "TH" | "OTHER";
+  market: "CA" | "US" | "TW" | "TH" | "OTHER";
   identified: boolean;
   questions: DraftQuestion[];
   notes: DraftAudioNote[];

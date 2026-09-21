@@ -15,14 +15,14 @@ export function ChatMessageList({
 }) {
   if (messages.length === 0) {
     return (
-      <div className="flex flex-1 items-center justify-center px-6 py-16 text-center text-[14px] text-[#6B7280]">
+      <div className="px-6 py-16 text-center text-[14px] text-[#6B7280]">
         {emptyHint}
       </div>
     );
   }
 
   return (
-    <div className="flex-1 space-y-3 overflow-y-auto px-3 py-4">
+    <div className="space-y-3 px-3 py-4">
       {messages.map((message) => {
         const isUser = message.role === "user";
         return (

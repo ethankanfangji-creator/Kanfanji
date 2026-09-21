@@ -65,19 +65,30 @@ export function ViewingChatComposer({
   const [multiline, setMultiline] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function resizeTextarea() {
+  function resizeTextarea(nextText = text) {
     const el = textareaRef.current;
     if (!el) return;
-    el.style.height = "0px";
+
+    // Empty composer: lock single-line height. Measuring placeholder wrap on a
+    // narrow phone otherwise toggles multiline layout forever (visible zooming).
+    if (!nextText.trim() && !nextText.includes("\n")) {
+      el.style.height = `${SINGLE_LINE_PX}px`;
+      setMultiline((prev) => (prev ? false : prev));
+      return;
+    }
+
+    el.style.height = "auto";
     const raw = el.scrollHeight;
     el.style.height = `${Math.min(Math.max(raw, SINGLE_LINE_PX), TEXTAREA_MAX_PX)}px`;
-    const nextMulti = raw > SINGLE_LINE_PX + 4;
-    setMultiline((prev) => (prev === nextMulti ? prev : nextMulti));
+    setMultiline((prev) => {
+      if (prev) return raw > SINGLE_LINE_PX + 1 || nextText.includes("\n");
+      return raw > SINGLE_LINE_PX + 10 || nextText.includes("\n");
+    });
   }
 
   useEffect(() => {
-    resizeTextarea();
-  }, [text, multiline]);
+    resizeTextarea(text);
+  }, [text]);
 
   useEffect(() => {
     return () => {
@@ -183,7 +194,7 @@ export function ViewingChatComposer({
     setImage(null);
     setFile(null);
     setMultiline(false);
-    requestAnimationFrame(resizeTextarea);
+    requestAnimationFrame(() => resizeTextarea(""));
   }
 
   const canSend = Boolean(text.trim() || audioBlob || image || file);

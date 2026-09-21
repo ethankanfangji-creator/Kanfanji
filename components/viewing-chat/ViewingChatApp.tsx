@@ -1,7 +1,7 @@
 "use client";
 
 import { Sparkles } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AddressAutocomplete } from "@/components/viewing-wizard/AddressAutocomplete";
 import { useI18n } from "@/components/I18nProvider";
 import { ChatMessageList } from "@/components/viewing-chat/ChatMessageList";
@@ -39,10 +39,17 @@ function consentSessionId(): string {
   return next;
 }
 
+function isTextEditingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable;
+}
+
 export function ViewingChatApp() {
   const { messages: t, locale } = useI18n();
   const c = t.chat;
   const configured = isSupabaseConfigured();
+  const shellRef = useRef<HTMLDivElement>(null);
 
   const [threads, setThreads] = useState<ViewingChatThread[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -77,6 +84,47 @@ export function ViewingChatApp() {
       setUserId(session?.user?.id ?? null);
     });
     return () => subscription.unsubscribe();
+  }, []);
+
+  // Lock shell to svh so Safari chrome show/hide does not reflow the page.
+  // Only follow visualViewport while a text field is focused (soft keyboard).
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!shell) return;
+    const vv = window.visualViewport;
+
+    const clearShellOffset = () => {
+      shell.style.height = "";
+      shell.style.transform = "";
+    };
+
+    const syncShellToKeyboard = () => {
+      if (!vv || !isTextEditingTarget(document.activeElement)) {
+        clearShellOffset();
+        return;
+      }
+      shell.style.height = `${Math.round(vv.height)}px`;
+      shell.style.transform = vv.offsetTop ? `translateY(${Math.round(vv.offsetTop)}px)` : "";
+    };
+
+    const onFocusIn = (event: FocusEvent) => {
+      if (isTextEditingTarget(event.target)) syncShellToKeyboard();
+    };
+    const onFocusOut = () => {
+      window.setTimeout(() => {
+        if (!isTextEditingTarget(document.activeElement)) clearShellOffset();
+      }, 0);
+    };
+
+    window.addEventListener("focusin", onFocusIn);
+    window.addEventListener("focusout", onFocusOut);
+    vv?.addEventListener("resize", syncShellToKeyboard);
+    return () => {
+      window.removeEventListener("focusin", onFocusIn);
+      window.removeEventListener("focusout", onFocusOut);
+      vv?.removeEventListener("resize", syncShellToKeyboard);
+      clearShellOffset();
+    };
   }, []);
 
   function refreshLocal() {
@@ -331,7 +379,10 @@ export function ViewingChatApp() {
   }
 
   return (
-    <div className="flex h-[100dvh] w-full overflow-hidden bg-[#FAF6F1] text-[#1A1A1A]">
+    <div
+      ref={shellRef}
+      className="fixed inset-0 flex h-[100svh] max-h-[100svh] w-full overflow-hidden bg-[#FAF6F1] text-[#1A1A1A]"
+    >
       <IconRail
         sidebarOpen={historyOpen}
         onToggleSidebar={() => {
@@ -361,7 +412,7 @@ export function ViewingChatApp() {
         onTogglePinThread={togglePinThread}
       />
 
-      <section className="mx-auto flex min-w-0 max-w-[900px] flex-1 flex-col">
+      <section className="mx-auto flex min-h-0 min-w-0 max-w-[900px] flex-1 flex-col">
         {active ? (
           <>
             <header className="flex shrink-0 items-center justify-end gap-3 border-b border-black/8 bg-[#FAF6F1]/95 px-3 py-2.5 pt-[max(0.65rem,env(safe-area-inset-top))] backdrop-blur">
@@ -375,65 +426,69 @@ export function ViewingChatApp() {
                 {busy ? c.generatingReport : c.generateReport}
               </button>
             </header>
-            {active.metadata ? (
-              <PropertyIntelCard
-                intel={active.metadata}
-                labels={{
-                  title: c.intelCardTitle,
-                  year: c.intelYear,
-                  type: c.intelType,
-                  sold: c.intelSold,
-                  strata: c.intelStrata,
-                  risks: c.intelRisks,
-                  unknown: c.intelUnknown,
-                  transit: c.intelTransit,
-                  schools: c.intelSchools,
-                  market: c.intelMarket,
-                  streetViewNotice: c.intelStreetViewNotice,
-                  unitLevelNotice: c.intelUnitLevelNotice,
-                }}
-              />
-            ) : intelLoading ? (
-              <div className="border-b border-black/8 bg-white px-4 py-3 text-center text-[13px] font-semibold text-[#6B7280]">
-                {c.intelLoading}
-              </div>
-            ) : null}
-            <div className="shrink-0 border-b border-black/8 bg-white/80 px-4 py-2.5">
-              <p className="truncate text-center text-[14px] font-bold">{active.address}</p>
-              {status ? (
-                <p
-                  className="mt-1 text-center text-[12px] font-semibold text-[#92400E]"
-                  role="status"
-                >
-                  {status}
-                </p>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+              {active.metadata ? (
+                <PropertyIntelCard
+                  intel={active.metadata}
+                  labels={{
+                    title: c.intelCardTitle,
+                    year: c.intelYear,
+                    type: c.intelType,
+                    sold: c.intelSold,
+                    strata: c.intelStrata,
+                    risks: c.intelRisks,
+                    unknown: c.intelUnknown,
+                    transit: c.intelTransit,
+                    schools: c.intelSchools,
+                    market: c.intelMarket,
+                    streetViewNotice: c.intelStreetViewNotice,
+                    unitLevelNotice: c.intelUnitLevelNotice,
+                  }}
+                />
+              ) : intelLoading ? (
+                <div className="border-b border-black/8 bg-white px-4 py-3 text-center text-[13px] font-semibold text-[#6B7280]">
+                  {c.intelLoading}
+                </div>
               ) : null}
+              <div className="sticky top-0 z-10 border-b border-black/8 bg-[#FAF6F1]/95 px-4 py-2.5 backdrop-blur">
+                <p className="truncate text-center text-[14px] font-bold">{active.address}</p>
+                {status ? (
+                  <p
+                    className="mt-1 text-center text-[12px] font-semibold text-[#92400E]"
+                    role="status"
+                  >
+                    {status}
+                  </p>
+                ) : null}
+              </div>
+              <ChatMessageList
+                messages={active.messages}
+                emptyHint={intelLoading ? c.intelLoading : c.emptyChat}
+                onShareReport={requestShare}
+                shareLabel={c.shareReport}
+              />
             </div>
-            <ChatMessageList
-              messages={active.messages}
-              emptyHint={intelLoading ? c.intelLoading : c.emptyChat}
-              onShareReport={requestShare}
-              shareLabel={c.shareReport}
-            />
-            <ViewingChatComposer
-              busy={busy || intelLoading}
-              labels={{
-                placeholder: c.composerPlaceholder,
-                send: c.send,
-                recording: c.recording,
-                stop: c.stop,
-                attach: c.attach,
-                camera: c.attachCamera,
-                uploadImage: c.attachImage,
-                uploadFile: c.attachFile,
-                empty: c.emptyComposer,
-                micDenied: c.micDenied,
-              }}
-              onSubmit={submitTurn}
-            />
+            <div className="shrink-0 border-t border-black/8 bg-[#FAF6F1]">
+              <ViewingChatComposer
+                busy={busy || intelLoading}
+                labels={{
+                  placeholder: c.composerPlaceholder,
+                  send: c.send,
+                  recording: c.recording,
+                  stop: c.stop,
+                  attach: c.attach,
+                  camera: c.attachCamera,
+                  uploadImage: c.attachImage,
+                  uploadFile: c.attachFile,
+                  empty: c.emptyComposer,
+                  micDenied: c.micDenied,
+                }}
+                onSubmit={submitTurn}
+              />
+            </div>
           </>
         ) : (
-          <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-5 py-8 pt-[max(2rem,env(safe-area-inset-top))]">
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto overscroll-contain px-5 py-8 pt-[max(2rem,env(safe-area-inset-top))]">
             <div className="w-full max-w-md space-y-5">
               <div className="text-center">
                 <h1 className="text-[22px] font-black tracking-tight sm:text-[26px]">

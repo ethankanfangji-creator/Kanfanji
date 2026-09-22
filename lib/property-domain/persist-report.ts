@@ -44,6 +44,7 @@ type MemoryRow = {
   country_code: string;
   schema_version: string;
   report: PropertyReportApiEnvelope;
+  created_by: string | null;
   created_at: string;
   updated_at: string;
   expires_at: string;
@@ -85,18 +86,30 @@ export function resetPropertyReportMemoryStore(): void {
   memoryByCacheKey.clear();
 }
 
+function ownsMemoryRow(row: MemoryRow | undefined, createdBy?: string): boolean {
+  if (!row) return false;
+  if (!createdBy) return true;
+  return row.created_by === createdBy;
+}
+
 /** Selective in-memory erase for compliance tests / local fallback. */
 export function eraseMemoryReport(input: {
   reportId?: string;
   cacheKey?: string;
+  createdBy?: string;
 }): { reportIds: string[]; deletedReports: number; deletedEvidence: number } {
   const toDelete = new Set<string>();
-  if (input.reportId && memoryById.has(input.reportId)) {
-    toDelete.add(input.reportId);
+  if (input.reportId) {
+    const row = memoryById.get(input.reportId);
+    if (ownsMemoryRow(row, input.createdBy)) {
+      toDelete.add(input.reportId);
+    }
   }
   if (input.cacheKey) {
     for (const id of memoryByCacheKey.get(input.cacheKey) ?? []) {
-      toDelete.add(id);
+      if (ownsMemoryRow(memoryById.get(id), input.createdBy)) {
+        toDelete.add(id);
+      }
     }
   }
   let deletedEvidence = 0;
@@ -239,6 +252,7 @@ export async function persistPropertyReport(input: {
   address: string;
   envelope: PropertyReportApiEnvelope;
   evidence?: ReportEvidenceItem[];
+  createdBy?: string | null;
 }): Promise<PersistedPropertyReport> {
   const material = addressCacheMaterial(input.address) || input.envelope.normalizedAddress;
   const cacheKey = input.envelope.cacheKey || reportCacheKeyForAddress(input.address);
@@ -252,6 +266,11 @@ export async function persistPropertyReport(input: {
     normalizedAddress: input.envelope.normalizedAddress || material.slice(0, 500),
   };
 
+  const createdBy =
+    typeof input.createdBy === "string" && input.createdBy.trim()
+      ? input.createdBy.trim()
+      : null;
+
   const admin = tryAdmin();
   if (!admin) {
     const id = randomUUID();
@@ -262,6 +281,7 @@ export async function persistPropertyReport(input: {
       country_code: envelope.country,
       schema_version: PROPERTY_REPORT_API_SCHEMA,
       report: envelope,
+      created_by: createdBy,
       created_at: now,
       updated_at: now,
       expires_at: expiresAt,
@@ -285,6 +305,7 @@ export async function persistPropertyReport(input: {
         country_code: envelope.country,
         schema_version: PROPERTY_REPORT_API_SCHEMA,
         report: envelope,
+        created_by: createdBy,
         expires_at: expiresAt,
         updated_at: now,
       })
@@ -329,6 +350,7 @@ export async function persistPropertyReport(input: {
       country_code: envelope.country,
       schema_version: PROPERTY_REPORT_API_SCHEMA,
       report: envelope,
+      created_by: createdBy,
       created_at: now,
       updated_at: now,
       expires_at: expiresAt,

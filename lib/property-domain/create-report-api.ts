@@ -50,6 +50,8 @@ export type CreatePropertyReportApiOptions = GeneratePropertyReportOptions & {
   includeFactCard?: boolean;
   /** Skip L2 report snapshot reuse */
   bypassCache?: boolean;
+  /** Authenticated user who requested generation; stored as created_by. */
+  createdBy?: string | null;
 };
 
 export type CreatePropertyReportApiResult = {
@@ -113,6 +115,7 @@ export async function createPropertyReportApi(
 
   const persisted = await persistPropertyReport({
     address: trimmed,
+    createdBy: options.createdBy,
     envelope: {
       ...envelope,
       // Always persist full report when available for GET evidence; re-generate if stripped

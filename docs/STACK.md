@@ -122,7 +122,7 @@ Redis / PostGIS / Docker are **reserved** (interfaces only) — default stack st
 - `GET /api/property-report/:id` — read snapshot (expired → `200` + `cache.stale: true`); consent via body/headers/query; no generate quota
 - `GET /api/evidence/:id?reportId=` — single evidence row from that report
 - `GET /api/providers/availability?country=US` — registry availability (no secrets, no generate quota)
-- `POST /api/property-report/erase` — delete report/evidence/intel cache by `reportId` / `address` / `cacheKey`; writes audit
+- `POST /api/property-report/erase` — authenticated users only; deletes **their** report/evidence snapshots by `reportId` / `address` / `cacheKey` (`created_by`). Guests receive `ai_auth_required`. Shared intel cache is not wiped. Writes audit.
 - `POST /api/property-facts` — thin alias: same pipeline + `reportId` / `promptPayload` (factCard on by default)
 
 ### Data security & compliance

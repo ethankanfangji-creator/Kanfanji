@@ -42,6 +42,7 @@ export async function POST(request: Request) {
       includeLegacyReport: body.includeLegacyReport !== false,
       includeDomainReport: body.includeDomainReport !== false,
       includeFactCard: body.includeFactCard === true,
+      createdBy: boundary.userId,
       locale:
         body.locale === "zh-Hans" || body.locale === "en" || body.locale === "th"
           ? body.locale

@@ -1,43 +1,42 @@
 import { describe, expect, it, beforeEach } from "vitest";
-import { deriveJurisdiction, jurisdictionKey } from "@/lib/property-facts/jurisdiction";
-import type { GeocodingProvider } from "@/lib/property-facts/interfaces";
-import type { GeocodeResult } from "@/lib/property-facts/geocode";
-import { MemoryEvidenceStore } from "@/lib/property-facts/services/evidence-store";
-import { createPropertyReportApi } from "./create-report-api";
-import { erasePropertyData } from "./erasure";
-import { getReportById, resetPropertyReportMemoryStore } from "./persist-report";
+import { erasePropertyData, requireAuthenticatedEraseUser } from "./erasure";
+import {
+  persistPropertyReport,
+  getReportById,
+  reportCacheKeyForAddress,
+  PROPERTY_REPORT_API_SCHEMA,
+  resetPropertyReportMemoryStore,
+  type PropertyReportApiEnvelope,
+} from "./persist-report";
 import { getPropertyAuditMemory, resetPropertyAuditMemory } from "./audit";
 
-function fakeUsGeocoder(): GeocodingProvider {
+function stubEnvelope(address: string): PropertyReportApiEnvelope {
   return {
-    async geocode(query): Promise<GeocodeResult> {
-      const jurisdiction = deriveJurisdiction({
-        region: "US",
-        query,
-        admin1: "WA",
-        city: "Seattle",
-        county: "King",
-      });
-      return {
-        region: "US",
-        displayAddress: "1 Main St, Seattle, WA",
-        countryCode: "US",
-        admin1: "WA",
-        city: "Seattle",
-        postalCode: null,
-        jurisdiction,
-        jurisdictionKey: jurisdictionKey(jurisdiction),
-        lat: 47.6,
-        lng: -122.3,
-        placeId: null,
-        streetNumber: "1",
-        streetName: "Main St",
-        geocodeOk: true,
-        identityEvidence: [],
-        sourceId: "fake_geocoder",
-      };
+    schemaVersion: PROPERTY_REPORT_API_SCHEMA,
+    stages: {
+      normalized: true,
+      geocoded: true,
+      country: "US",
+      providersUsed: [],
+      providersSkipped: [],
+      dataGapCount: 0,
+      domainValid: false,
     },
+    report: null,
+    domainReport: null,
+    markdown: null,
+    normalizedAddress: address,
+    country: "US",
+    cacheKey: reportCacheKeyForAddress(address),
   };
+}
+
+async function persistStub(address: string, createdBy?: string) {
+  return persistPropertyReport({
+    address,
+    createdBy,
+    envelope: stubEnvelope(address),
+  });
 }
 
 describe("erasePropertyData", () => {
@@ -47,22 +46,53 @@ describe("erasePropertyData", () => {
   });
 
   it("deletes a persisted report and records audit", async () => {
-    const created = await createPropertyReportApi("42 Erase Ave, Seattle, WA", {
-      bypassCache: true,
-      deps: {
-        geocoding: fakeUsGeocoder(),
-        evidenceStore: new MemoryEvidenceStore(),
-      },
-    });
-    expect(await getReportById(created.body.reportId)).toBeTruthy();
+    const created = await persistStub("42 Erase Ave, Seattle, WA");
+    expect(await getReportById(created.reportId)).toBeTruthy();
 
     const erased = await erasePropertyData({
-      reportId: created.body.reportId,
+      reportId: created.reportId,
       actor: "user",
     });
     expect(erased.deletedReports).toBe(1);
-    expect(await getReportById(created.body.reportId)).toBeNull();
+    expect(await getReportById(created.reportId)).toBeNull();
     expect(getPropertyAuditMemory().some((a) => a.action === "erase")).toBe(true);
-    expect(getPropertyAuditMemory().some((a) => a.action === "generate")).toBe(true);
+  });
+
+  it("rejects guest HTTP erase without a signed-in user", () => {
+    expect(() => requireAuthenticatedEraseUser(null)).toThrow(/ai_auth_required/);
+    expect(() => requireAuthenticatedEraseUser("")).toThrow(/ai_auth_required/);
+    expect(requireAuthenticatedEraseUser("user-a")).toBe("user-a");
+  });
+
+  it("does not let another user erase by address or stolen reportId", async () => {
+    const address = "99 Owner St, Seattle, WA";
+    const owner = await persistStub(address, "user-a");
+    const stranger = await persistStub(address, "user-b");
+
+    await expect(
+      erasePropertyData({
+        reportId: owner.reportId,
+        actor: "user",
+        actorUserId: "user-b",
+      }),
+    ).rejects.toMatchObject({ code: "report_not_found", status: 404 });
+
+    const byAddress = await erasePropertyData({
+      address,
+      actor: "user",
+      actorUserId: "user-b",
+    });
+    expect(byAddress.reportIds).toContain(stranger.reportId);
+    expect(byAddress.reportIds).not.toContain(owner.reportId);
+    expect(await getReportById(owner.reportId)).toBeTruthy();
+    expect(await getReportById(stranger.reportId)).toBeNull();
+
+    const ownerErase = await erasePropertyData({
+      reportId: owner.reportId,
+      actor: "user",
+      actorUserId: "user-a",
+    });
+    expect(ownerErase.deletedReports).toBe(1);
+    expect(await getReportById(owner.reportId)).toBeNull();
   });
 });

@@ -549,7 +549,7 @@ const en: Messages = {
     declined: "Saved locally. No AI request was sent.",
     queued: "AI analysis queued on this device",
     processing: "AI analysis in progress…",
-    quota: "AI limit reached. Try again later.",
+    quota: "Daily AI limit reached. Try again later, or upgrade to Pro for a higher allowance. Your notes and media stay on this device.",
     unavailable: "AI is unavailable safely; your media remains local.",
     failed: "AI analysis failed; your media remains saved.",
   },

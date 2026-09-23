@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { limitFor, resolveAiTier, type AiTier } from "@/lib/ai-quota";
+import { createAdminClient } from "@/utils/supabase/admin";
 import { createClient } from "@/utils/supabase/server";
 import {
   AI_GUEST_COOKIE,
@@ -11,6 +13,7 @@ import { AiInputError, type AiConsentAssertion } from "./validation";
 
 export type AiBoundaryContext = {
   identityKind: "guest" | "user";
+  tier: AiTier;
   applyCookie<T>(response: NextResponse<T>): NextResponse<T>;
 };
 
@@ -36,6 +39,22 @@ async function authenticatedUserId(): Promise<string | null> {
   }
 }
 
+/** Server-side subscription status for this user only. Never trust client isPro. */
+async function subscriptionStatusFor(userId: string): Promise<string | null> {
+  try {
+    const admin = createAdminClient();
+    const { data, error } = await admin
+      .from("subscriptions")
+      .select("status")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (error) return null;
+    return typeof data?.status === "string" ? data.status : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function authorizeAiRequest(
   request: Request,
   assertion: AiConsentAssertion,
@@ -52,22 +71,37 @@ export async function authorizeAiRequest(
     throw new AiInputError("ai_identity_mismatch", 401);
   }
 
+  const subscriptionStatus = userId ? await subscriptionStatusFor(userId) : null;
+  const tier = resolveAiTier({ userId, subscriptionStatus });
+
   if (options?.consumeQuota !== false) {
     const quota = await consumeAiQuota(
       request,
       userId
-        ? { kind: "user", userId, deviceId: guest.deviceId }
-        : { kind: "guest", guest },
+        ? {
+            kind: "user",
+            userId,
+            deviceId: guest.deviceId,
+            // Authenticated subjects are never guest-tier.
+            tier: tier === "pro" ? "pro" : "free",
+          }
+        : { kind: "guest", guest, tier: "guest" },
     );
     if (!quota.allowed) {
       const error = new AiInputError(quota.code, quota.code === "ai_quota_exceeded" ? 429 : 503);
-      Object.assign(error, { retryAfter: quota.retryAfter });
+      Object.assign(error, {
+        retryAfter: quota.retryAfter,
+        tier: quota.tier,
+        limit: quota.limit,
+        resetAt: quota.resetAt,
+      });
       throw error;
     }
   }
 
   return {
     identityKind: actualKind,
+    tier,
     applyCookie(response) {
       if (issued) {
         response.cookies.set(AI_GUEST_COOKIE, issued.value, guestCookieOptions(issued.maxAge));
@@ -77,23 +111,38 @@ export async function authorizeAiRequest(
   };
 }
 
+type QuotaErrorFields = {
+  retryAfter?: number;
+  tier?: AiTier;
+  limit?: number;
+  resetAt?: string;
+};
+
 export function aiErrorResponse(error: unknown): NextResponse {
   if (error instanceof AiInputError) {
-    const retryAfter = Number((error as AiInputError & { retryAfter?: number }).retryAfter);
-    return NextResponse.json(
-      { error: "AI request could not be completed.", code: error.code },
-      {
-        status: error.status,
-        headers:
-          Number.isFinite(retryAfter) && retryAfter > 0
-            ? { "Retry-After": String(Math.ceil(retryAfter)) }
-            : undefined,
-      },
-    );
+    const extra = error as AiInputError & QuotaErrorFields;
+    const retryAfter = Number(extra.retryAfter);
+    const body: Record<string, unknown> = {
+      error: "AI request could not be completed.",
+      code: error.code,
+    };
+    if (extra.tier) body.tier = extra.tier;
+    if (typeof extra.limit === "number") body.limit = extra.limit;
+    else if (extra.tier) body.limit = limitFor(extra.tier);
+    if (typeof extra.resetAt === "string") body.resetAt = extra.resetAt;
+    return NextResponse.json(body, {
+      status: error.status,
+      headers:
+        Number.isFinite(retryAfter) && retryAfter > 0
+          ? { "Retry-After": String(Math.ceil(retryAfter)) }
+          : undefined,
+    });
   }
   const timedOut =
     error instanceof Error &&
-    (error.name === "AbortError" || error.name === "TimeoutError" || /timed?\s*out/i.test(error.message));
+    (error.name === "AbortError" ||
+      error.name === "TimeoutError" ||
+      /timed?\s*out/i.test(error.message));
   return NextResponse.json(
     {
       error: "AI request could not be completed.",

@@ -1,4 +1,9 @@
--- Atomic server-only AI quota windows. Apply manually after review.
+-- Atomic server-only AI quota windows. Apply on both dev and prod.
+-- Day boundary: rolling window of p_window_seconds (app default 86400) from
+-- window_started_at (timestamptz / UTC). Not calendar midnight.
+-- Writes only via service_role RPC; anon/authenticated have no table access.
+-- Subject limits (guest/free/pro) are chosen in app code (lib/ai-quota.ts) and
+-- passed as p_limits — never trust client isPro.
 create schema if not exists private;
 revoke all on schema private from public, anon, authenticated;
 

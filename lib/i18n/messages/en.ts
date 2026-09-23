@@ -89,6 +89,13 @@ const en: Messages = {
     cta: "Upgrade Pro · Stripe Checkout",
     loading: "Opening Stripe...",
     footer: "Secure payments by Stripe · cancel anytime",
+    manage: "Manage subscription",
+    manageLoading: "Opening portal...",
+    sync: "Resync subscription",
+    syncLoading: "Syncing...",
+    syncSuccess: "Pro is active",
+    processing: "Activating Pro — refreshing shortly",
+    processingTimeout: "Still pending? Resync your subscription",
   },
   card: {
     close: "Close",

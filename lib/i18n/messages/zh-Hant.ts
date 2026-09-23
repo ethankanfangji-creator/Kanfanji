@@ -89,6 +89,13 @@ const zhHant: Messages = {
     cta: "升級 Pro · Stripe Checkout",
     loading: "前往 Stripe...",
     footer: "安全付款由 Stripe 處理 · 可隨時取消",
+    manage: "管理訂閱",
+    manageLoading: "開啟訂閱管理...",
+    sync: "重新同步訂閱",
+    syncLoading: "同步中...",
+    syncSuccess: "Pro 已啟用",
+    processing: "Pro 訂閱處理中，刷新後生效",
+    processingTimeout: "仍在處理？可手動重新同步訂閱",
   },
   card: {
     close: "關閉",

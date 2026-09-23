@@ -1,37 +1,12 @@
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
-import { isActiveSubscriptionStatus } from "@/lib/billing-status";
+import { persistSubscriptionEntitlement } from "@/lib/billing-persist";
+import { planIdFromSubscription } from "@/lib/billing-sync-select";
 import { getStripe } from "@/lib/stripe";
 import { throwOnSupabaseError } from "@/lib/supabase-write";
 import { createAdminClient } from "@/utils/supabase/admin";
 
 export const runtime = "nodejs";
-
-async function syncSubscription(
-  userId: string,
-  customerId: string | null,
-  status: string,
-  plan: string | null,
-) {
-  const admin = createAdminClient();
-  const { error: upsertError } = await admin.from("subscriptions").upsert(
-    {
-      user_id: userId,
-      stripe_customer_id: customerId,
-      status,
-      plan,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "user_id" },
-  );
-  throwOnSupabaseError(upsertError, "subscriptions upsert");
-
-  const { error: viewingError } = await admin
-    .from("viewings")
-    .update({ is_pro: isActiveSubscriptionStatus(status) })
-    .eq("user_id", userId);
-  throwOnSupabaseError(viewingError, "viewings is_pro sync");
-}
 
 async function resolveUserId(subscription: Stripe.Subscription, customerId?: string | null) {
   const fromMeta = subscription.metadata?.supabase_user_id;
@@ -73,16 +48,12 @@ export async function POST(request: Request) {
         const userId = session.metadata?.supabase_user_id;
         if (userId && session.subscription) {
           const sub = await stripe.subscriptions.retrieve(String(session.subscription));
-          const plan =
-            typeof sub.items.data[0]?.price?.id === "string"
-              ? sub.items.data[0].price.id
-              : "pro_monthly";
-          await syncSubscription(
+          await persistSubscriptionEntitlement({
             userId,
-            typeof session.customer === "string" ? session.customer : null,
-            sub.status,
-            plan,
-          );
+            customerId: typeof session.customer === "string" ? session.customer : null,
+            status: sub.status,
+            plan: planIdFromSubscription(sub) ?? "pro_monthly",
+          });
         }
         break;
       }
@@ -92,11 +63,12 @@ export async function POST(request: Request) {
         const customerId = typeof sub.customer === "string" ? sub.customer : null;
         const userId = await resolveUserId(sub, customerId);
         if (userId) {
-          const plan =
-            typeof sub.items.data[0]?.price?.id === "string"
-              ? sub.items.data[0].price.id
-              : "pro_monthly";
-          await syncSubscription(userId, customerId, sub.status, plan);
+          await persistSubscriptionEntitlement({
+            userId,
+            customerId,
+            status: sub.status,
+            plan: planIdFromSubscription(sub) ?? "pro_monthly",
+          });
         }
         break;
       }

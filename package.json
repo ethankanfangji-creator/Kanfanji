@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test lib/billing-status.test.ts lib/supabase-write.test.ts lib/http/safe-next.test.ts"
+    "test": "node --test lib/billing-status.test.ts lib/supabase-write.test.ts lib/http/safe-next.test.ts lib/viewing-entitlement.test.ts lib/billing-guards.test.ts lib/billing-sync-select.test.ts lib/rate-limit.test.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

@@ -89,6 +89,13 @@ const th: Messages = {
     cta: "อัปเกรด Pro · Stripe Checkout",
     loading: "กำลังเปิด Stripe...",
     footer: "ชำระเงินปลอดภัยด้วย Stripe · ยกเลิกได้ทุกเมื่อ",
+    manage: "จัดการการสมัคร",
+    manageLoading: "กำลังเปิดพอร์ทัล...",
+    sync: "ซิงก์การสมัครอีกครั้ง",
+    syncLoading: "กำลังซิงก์...",
+    syncSuccess: "เปิด Pro แล้ว",
+    processing: "กำลังเปิด Pro — รีเฟรชเร็วๆ นี้",
+    processingTimeout: "ยังไม่ขึ้น? ลองซิงก์การสมัครด้วยตนเอง",
   },
   card: {
     close: "ปิด",

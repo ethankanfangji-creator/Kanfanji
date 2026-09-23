@@ -86,6 +86,13 @@ export type Messages = {
     cta: string;
     loading: string;
     footer: string;
+    manage: string;
+    manageLoading: string;
+    sync: string;
+    syncLoading: string;
+    syncSuccess: string;
+    processing: string;
+    processingTimeout: string;
   };
   card: {
     close: string;

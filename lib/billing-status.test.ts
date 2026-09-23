@@ -19,7 +19,12 @@ describe("isProFromCheckoutReturn", () => {
 });
 
 describe("isActiveSubscriptionStatus", () => {
-  it("treats past_due and canceled as inactive", () => {
+  it("treats active and trialing as entitled", () => {
+    assert.equal(isActiveSubscriptionStatus("active"), true);
+    assert.equal(isActiveSubscriptionStatus("trialing"), true);
+  });
+
+  it("treats past_due, canceled, and undefined as inactive", () => {
     assert.equal(isActiveSubscriptionStatus("past_due"), false);
     assert.equal(isActiveSubscriptionStatus("canceled"), false);
     assert.equal(isActiveSubscriptionStatus(undefined), false);

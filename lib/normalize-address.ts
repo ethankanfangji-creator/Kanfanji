@@ -6,6 +6,12 @@ export type NormalizedAddress = {
   city?: string;
   province?: string;
   country?: string;
+  countryCode?: string;
+  postalCode?: string;
+  county?: string;
+  municipality?: string;
+  district?: string;
+  houseNumber?: string;
   score?: number;
 };
 
@@ -29,12 +35,21 @@ type NominatimResult = {
     village?: string;
     state?: string;
     country?: string;
+    county?: string;
+    municipality?: string;
+    city_district?: string;
+    suburb?: string;
+    quarter?: string;
+    house_number?: string;
+    country_code?: string;
+    postcode?: string;
   };
 };
 
 /**
  * Normalize a free-text address via Geocode APIs.
- * Prefers BC Address Geocoder, falls back to OpenStreetMap Nominatim.
+ * CA → BC first; otherwise Google (when keyed) then Nominatim.
+ * Never invent coordinates.
  */
 export async function normalizeAddress(address: string): Promise<NormalizedAddress> {
   const trimmed = address.trim();
@@ -42,13 +57,47 @@ export async function normalizeAddress(address: string): Promise<NormalizedAddre
     throw new Error("請輸入地址");
   }
 
-  const bc = await normalizeViaBc(trimmed);
-  if (bc) return bc;
+  const preferBc =
+    /\b(BC|B\.C\.|British Columbia|Vancouver|Burnaby|Richmond|Surrey|Canada)\b/i.test(
+      trimmed,
+    ) || /加拿大|溫哥華|本拿比|列治文/.test(trimmed);
+
+  if (preferBc) {
+    const bc = await normalizeViaBc(trimmed);
+    if (bc) return bc;
+  }
+
+  const google = await normalizeViaGoogle(trimmed);
+  if (google) return google;
+
+  if (!preferBc) {
+    const bc = await normalizeViaBc(trimmed);
+    if (bc) return bc;
+  }
 
   const osm = await normalizeViaNominatim(trimmed);
   if (osm) return osm;
 
   throw new Error("無法正規化這個地址，請換更完整的寫法再試");
+}
+
+async function normalizeViaGoogle(query: string): Promise<NormalizedAddress | null> {
+  const { geocodeWithGoogle } = await import("@/lib/property-intel/google-places");
+  const g = await geocodeWithGoogle(query);
+  if (!g) return null;
+  return {
+    lat: g.lat,
+    lng: g.lng,
+    formatted_address: g.formattedAddress || query,
+    source: "Google Geocoding",
+    city: g.city,
+    province: g.admin1,
+    country: g.countryCode === "US" ? "United States" : g.countryCode === "CA" ? "Canada" : g.countryCode === "TW" ? "Taiwan" : undefined,
+    countryCode: g.countryCode,
+    postalCode: g.postalCode,
+    county: g.county,
+    houseNumber: g.streetNumber,
+  };
 }
 
 async function normalizeViaBc(query: string): Promise<NormalizedAddress | null> {
@@ -79,6 +128,7 @@ async function normalizeViaBc(query: string): Promise<NormalizedAddress | null> 
     city: props.localityName,
     province: props.provinceCode || "BC",
     country: "Canada",
+    countryCode: "CA",
     score: props.score,
   };
 }
@@ -114,5 +164,11 @@ async function normalizeViaNominatim(query: string): Promise<NormalizedAddress |
     city: addr.city || addr.town || addr.village,
     province: addr.state,
     country: addr.country,
+    countryCode: addr.country_code ? addr.country_code.toUpperCase() : undefined,
+    postalCode: addr.postcode,
+    county: addr.county,
+    municipality: addr.municipality,
+    district: addr.city_district || addr.suburb || addr.quarter,
+    houseNumber: addr.house_number,
   };
 }

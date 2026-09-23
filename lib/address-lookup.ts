@@ -2,7 +2,7 @@ import { enrichMetroOpenData, type MetroOpenData } from "@/lib/metro-opendata";
 import { normalizeAddress } from "@/lib/normalize-address";
 import { findOrCreateProperty } from "@/lib/properties";
 
-export type Market = "CA" | "TH" | "OTHER";
+export type Market = "CA" | "US" | "TW" | "TH" | "OTHER";
 
 export type AddressLookupResult = {
   market: Market;
@@ -16,6 +16,7 @@ export type AddressLookupResult = {
     province?: string;
     neighborhood?: string;
     country?: string;
+    countryCode?: string;
     postalCode?: string;
     lat?: number;
     lng?: number;
@@ -47,9 +48,25 @@ type NominatimResult = {
   addresstype?: string;
 };
 
-function detectMarketHint(query: string, country?: string): Market {
+function detectMarketHint(query: string, country?: string, countryCode?: string): Market {
+  const code = (countryCode || "").toUpperCase();
+  if (code === "CA") return "CA";
+  if (code === "US") return "US";
+  if (code === "TW") return "TW";
+  if (code === "TH") return "TH";
+
   if (/bangkok|曼谷|sukhumvit|สุขุมวิท|thailand|泰國|กรุงเทพ/i.test(query)) {
     return "TH";
+  }
+  if (/台灣|臺灣|台北|臺北|新北|桃園|台中|臺中|高雄|台南|臺南|\bTW\b|Taiwan/i.test(query)) {
+    return "TW";
+  }
+  if (
+    /\b(USA|United States)\b/i.test(query) ||
+    /,\s*[A-Z]{2}\s+\d{5}(-\d{4})?\b/.test(query) ||
+    /united states|美國|美国/i.test(country || "")
+  ) {
+    return "US";
   }
   if (
     /\b(bc|b\.c\.|british columbia|vancouver|burnaby|richmond|surrey|coquitlam|port coquitlam|north vancouver|west vancouver|victoria|kelowna|abbotsford)\b/i.test(
@@ -108,6 +125,90 @@ async function enrichNeighborhood(result: AddressLookupResult): Promise<AddressL
   }
 }
 
+async function reverseGeocodeNominatim(
+  lat: number,
+  lng: number,
+): Promise<AddressLookupResult> {
+  const url = new URL("https://nominatim.openstreetmap.org/reverse");
+  url.searchParams.set("lat", String(lat));
+  url.searchParams.set("lon", String(lng));
+  url.searchParams.set("format", "json");
+  url.searchParams.set("zoom", "18");
+  url.searchParams.set("addressdetails", "1");
+
+  const res = await fetch(url, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "KanFangJi/0.1 (open-house recorder; contact@localhost)",
+    },
+    next: { revalidate: 0 },
+  });
+  if (!res.ok) {
+    throw new Error("無法從 GPS 反查地址");
+  }
+
+  const row = (await res.json()) as NominatimResult & {
+    error?: string;
+    display_name?: string;
+  };
+  if (row.error || !row.display_name) {
+    throw new Error("無法從 GPS 反查地址");
+  }
+
+  const city =
+    row.address?.city || row.address?.town || row.address?.village || undefined;
+  const province = row.address?.state;
+  const country = row.address?.country;
+  const countryCode = row.address?.country_code?.toUpperCase();
+  const market = detectMarketHint(row.display_name, country || countryCode);
+  const neighborhood = row.address?.suburb || row.address?.neighbourhood;
+
+  return {
+    market,
+    displayAddress: row.display_name,
+    tags: [city, province, country].filter(Boolean) as string[],
+    source: "EXIF GPS + OSM reverse",
+    details: {
+      city,
+      province,
+      country,
+      neighborhood,
+      postalCode: row.address?.postcode,
+      lat,
+      lng,
+      normalizedAddress: row.display_name.toLowerCase().trim(),
+      mlsNote: "建議來自照片 EXIF GPS，非影像辨識",
+    },
+  };
+}
+
+/**
+ * Reverse-geocode consented EXIF GPS coordinates.
+ * Does not accept or analyze photo bytes — coordinates only.
+ */
+export async function lookupAddressDetailsFromGps(
+  lat: number,
+  lng: number,
+): Promise<AddressLookupResult> {
+  if (
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lng) ||
+    lat < -90 ||
+    lat > 90 ||
+    lng < -180 ||
+    lng > 180
+  ) {
+    throw new Error("GPS 座標無效");
+  }
+
+  let result = await reverseGeocodeNominatim(lat, lng);
+  if (result.market === "CA") {
+    result = await withMetroOpenData(await enrichNeighborhood(result));
+  }
+  result = await withPropertyRegistry(result);
+  return result;
+}
+
 async function withMetroOpenData(result: AddressLookupResult): Promise<AddressLookupResult> {
   if (result.market !== "CA") return result;
 
@@ -149,11 +250,18 @@ async function withPropertyRegistry(result: AddressLookupResult): Promise<Addres
 
   try {
     const zoning = result.details.openData?.zoningCode || null;
+    const countryCode =
+      result.details.countryCode ||
+      (result.market === "OTHER" || result.market === "TH" ? null : result.market);
     const propertyId = await findOrCreateProperty({
       normalizedAddress: normalized,
       lat,
       lng,
       zoning,
+      countryCode,
+      admin1: result.details.province ?? null,
+      city: result.details.city ?? null,
+      postalCode: result.details.postalCode ?? null,
     });
 
     return {
@@ -179,7 +287,11 @@ export async function lookupAddressDetails(query: string): Promise<AddressLookup
 
   // 1) Normalize via Geocode API → lat/lng + formatted_address
   const normalized = await normalizeAddress(trimmed);
-  const market = detectMarketHint(normalized.formatted_address, normalized.country);
+  const market = detectMarketHint(
+    normalized.formatted_address,
+    normalized.country,
+    normalized.countryCode,
+  );
 
   let result: AddressLookupResult = {
     market,
@@ -190,6 +302,8 @@ export async function lookupAddressDetails(query: string): Promise<AddressLookup
       city: normalized.city,
       province: normalized.province,
       country: normalized.country,
+      countryCode: normalized.countryCode,
+      postalCode: normalized.postalCode,
       lat: normalized.lat,
       lng: normalized.lng,
       score: normalized.score,

@@ -1,109 +1,79 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
+import {
+  claimsToLegacyStrings,
+  extractJsonObject,
+  validateAndNormalizeSummary,
+  type ProcessRecordingLegacyPayload,
+} from "@/lib/ai-summary";
+import {
+  AiInputError,
+  aiErrorResponse,
+  aiTimeoutMs,
+  assertContentLength,
+  authorizeAiRequest,
+  validateRecordingForm,
+} from "@/lib/ai-boundary/server-entry";
 
 export const runtime = "nodejs";
 
-type QuestionInput = {
-  id: number;
-  text: string;
-};
-
-type AnalysisResult = {
-  answers: Array<{
-    id: number;
-    status: "answered" | "pending";
-    answer: string;
-  }>;
-  new_questions: Array<{
-    text: string;
-    status: "answered" | "pending";
-    answer: string;
-    reason?: string;
-    based_on?: string;
-  }>;
-  pros: string[];
-  risks: string[];
-};
-
-function extractJson(text: string): AnalysisResult {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const raw = (fenced?.[1] ?? text).trim();
-  const start = raw.indexOf("{");
-  const end = raw.lastIndexOf("}");
-  if (start === -1 || end === -1) {
-    throw new Error("模型沒有回傳 JSON");
-  }
-  return JSON.parse(raw.slice(start, end + 1)) as AnalysisResult;
-}
-
 export async function POST(request: Request) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json(
-      { error: "尚未設定 OPENAI_API_KEY，請加到 .env.local" },
-      { status: 500 },
-    );
-  }
-
   try {
+    assertContentLength(request);
     const form = await request.formData();
-    const audio = form.get("audio");
-    const questionsRaw = form.get("questions");
-    const address = String(form.get("address") ?? "");
-    const market = String(form.get("market") ?? "CA");
-    const locale = String(form.get("locale") ?? "zh-Hant");
-    const openDataRaw = form.get("openData");
-    const propertyContextRaw = form.get("propertyContext");
+    const input = validateRecordingForm(form);
+    const boundary = await authorizeAiRequest(request, input);
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) throw new AiInputError("ai_unavailable", 503);
+    const {
+      audio,
+      questions,
+      address,
+      market,
+      locale,
+      mediaId,
+      noteId,
+      markers,
+      openData,
+      propertyContext: property,
+    } = input;
 
-    if (!(audio instanceof File)) {
-      return NextResponse.json({ error: "缺少錄音檔" }, { status: 400 });
-    }
-    if (typeof questionsRaw !== "string") {
-      return NextResponse.json({ error: "缺少題庫" }, { status: 400 });
-    }
+    const markersContext = markers
+      .map((m) => {
+        const t = typeof m.t === "number" ? m.t.toFixed(1) : "?";
+        const tag = typeof m.tag === "string" ? m.tag : "other";
+        const note = typeof m.note === "string" && m.note.trim() ? ` (${m.note.trim()})` : "";
+        return `- ${t}s · ${tag}${note}`;
+      })
+      .join("\n");
 
-    const questions = JSON.parse(questionsRaw) as QuestionInput[];
-    let openDataContext = "";
-    try {
-      if (typeof openDataRaw === "string" && openDataRaw && openDataRaw !== "null") {
-        const od = JSON.parse(openDataRaw) as Record<string, unknown>;
-        const bits = [
-          od.city ? `城市：${od.city}` : "",
-          od.zoningCode ? `Zoning：${od.zoningCode}${od.zoningLabel ? `（${od.zoningLabel}）` : ""}` : "",
-          od.pid ? `PID：${od.pid}` : "",
-          od.planNumber ? `Plan：${od.planNumber}` : "",
-          od.lotNumber ? `Lot：${od.lotNumber}` : "",
-          od.legalDescription ? `Legal：${od.legalDescription}` : "",
-          od.source ? `資料來源：${od.source}` : "",
-        ].filter(Boolean);
-        openDataContext = bits.join("；");
-      }
-    } catch {
-      openDataContext = "";
-    }
-    let propertyContext = "";
-    try {
-      if (typeof propertyContextRaw === "string" && propertyContextRaw) {
-        const pc = JSON.parse(propertyContextRaw) as {
-          tags?: string[];
-          neighborhood?: string;
-          city?: string;
-        };
-        propertyContext = [
-          pc.city ? `城市：${pc.city}` : "",
-          pc.neighborhood ? `社區：${pc.neighborhood}` : "",
-          pc.tags?.length ? `標籤：${pc.tags.join(", ")}` : "",
-        ]
-          .filter(Boolean)
-          .join("；");
-      }
-    } catch {
-      propertyContext = "";
-    }
+    const od = openData ?? {};
+    const openDataContext = [
+      typeof od.city === "string" ? `城市：${od.city}` : "",
+      typeof od.zoningCode === "string"
+        ? `Zoning：${od.zoningCode}${
+            typeof od.zoningLabel === "string" ? `（${od.zoningLabel}）` : ""
+          }`
+        : "",
+      typeof od.pid === "string" ? `PID：${od.pid}` : "",
+      typeof od.planNumber === "string" ? `Plan：${od.planNumber}` : "",
+      typeof od.lotNumber === "string" ? `Lot：${od.lotNumber}` : "",
+      typeof od.legalDescription === "string" ? `Legal：${od.legalDescription}` : "",
+      typeof od.source === "string" ? `資料來源：${od.source}` : "",
+    ]
+      .filter(Boolean)
+      .join("；");
+
+    const propertyContext = [
+      typeof property?.city === "string" ? `城市：${property.city}` : "",
+      typeof property?.neighborhood === "string" ? `社區：${property.neighborhood}` : "",
+      Array.isArray(property?.tags) ? `標籤：${property.tags.join(", ")}` : "",
+    ]
+      .filter(Boolean)
+      .join("；");
 
     const openai = new OpenAI({ apiKey });
 
-    const audioFile = audio;
     const whisperLang = locale.startsWith("th")
       ? "th"
       : locale.startsWith("en")
@@ -117,43 +87,52 @@ export async function POST(request: Request) {
           ? "Simplified Chinese (简体中文)"
           : "Traditional Chinese (繁體中文)";
 
-    const transcription = await openai.audio.transcriptions.create({
-      file: audioFile,
-      model: "whisper-1",
-      language: whisperLang,
-    });
+    const transcription = await openai.audio.transcriptions.create(
+      {
+        file: audio,
+        model: "whisper-1",
+        language: whisperLang,
+      },
+      { signal: AbortSignal.timeout(aiTimeoutMs()) },
+    );
 
     const transcript = transcription.text?.trim() || "";
     if (!transcript) {
-      return NextResponse.json({ error: "Whisper 沒有辨識到內容" }, { status: 422 });
+      throw new AiInputError("ai_empty_transcript", 422);
     }
 
-    const questionList = questions
-      .map((q) => `- id:${q.id} ${q.text}`)
-      .join("\n");
+    const questionList = questions.map((q) => `- id:${q.id} ${q.text}`).join("\n");
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      temperature: 0.2,
-      response_format: { type: "json_object" },
-      messages: [
+    const completion = await openai.chat.completions.create(
+      {
+        model: "gpt-4o-mini",
+        temperature: 0.2,
+        response_format: { type: "json_object" },
+        messages: [
         {
           role: "system",
-          content: `You are a Metro Vancouver open-house advisor. Only fill answers from the recording; never invent facts. Municipal Open Data is background only — do not inject zoning/PID questions without dialogue triggers. Reply JSON string values in ${replyLanguage}.`,
+          content: `You are a Metro Vancouver open-house note structurer.
+Never invent facts. Guesses must use confidence "needs_verification", never as facts.
+Municipal Open Data is background only — do not inject zoning/PID questions without dialogue triggers.
+Reply JSON string values in ${replyLanguage}.`,
         },
         {
           role: "user",
-          content: `From this open-house dialogue and question bank:
-1) Fill answers for existing questions; unanswered → pending
-2) Create follow-ups from dialogue; if Open Data exists, weave zoning/PID/title/permit angles ONLY when dialogue touches related topics
-3) Summarize 3 pros and 3 risks
-Return JSON. All human-readable strings must be in ${replyLanguage}.
+          content: `Structure this open-house recording into verifiable claims.
+
+Also:
+1) Fill answers for existing question bank ids (unanswered → pending)
+2) Create followUps from dialogue (and Open Data only when dialogue touches related topics)
+3) Separate facts vs pros vs risks vs actionItems
+4) Attach sources with transcript timestamps when possible; use marker times as hints
 
 Address: ${address || "unknown"}
 Market: ${market}
 UI locale: ${locale}
 Property context: ${propertyContext || "none"}
 Municipal Open Data (background only): ${openDataContext || "none"}
+mediaId: ${mediaId || "unknown"}
+noteId: ${noteId ?? "unknown"}
 
 Question bank:
 ${questionList || "(empty)"}
@@ -161,50 +140,68 @@ ${questionList || "(empty)"}
 Dialogue transcript:
 ${transcript}
 
+User live markers (hints only):
+${markersContext || "(none)"}
+
 Strict JSON shape:
 {
-  "answers": [
-    { "id": 1, "status": "answered" | "pending", "answer": "..." }
-  ],
-  "new_questions": [
-    {
-      "text": "follow-up to ask agent/owner",
-      "status": "answered" | "pending",
-      "answer": "...",
-      "reason": "why ask now",
-      "based_on": "dialogue trigger; mention zoning/PID if used"
-    }
-  ],
-  "pros": ["...", "...", "..."],
-  "risks": ["...", "...", "..."]
+  "answers": [{ "id": 1, "status": "answered" | "pending", "answer": "..." }],
+  "facts": [{ "id": "f1", "text": "...", "confidence": "high"|"medium"|"low"|"needs_verification", "sources": [{ "kind": "transcript"|"marker"|"note"|"media", "timestampSec": 12.5, "quote": "..." }] }],
+  "pros": [ /* same claim shape */ ],
+  "risks": [ /* same claim shape; speculative risks MUST be needs_verification */ ],
+  "followUps": [ /* questions to ask agent/owner/inspector */ ],
+  "actionItems": [ /* next steps for the buyer */ ],
+  "new_questions": [ /* optional legacy; prefer followUps */ ]
 }
 
 Rules:
-1. new_questions must be dialogue-triggered, not a generic municipal checklist
-2. With Open Data: renovation/ADU/use → zoning fit; title/access → PID/easement/covenant; condo fees/levies → strata angle
-3. If dialogue never touches those themes, do not force Open Data questions
-4. Produce 2-5 follow-ups; no duplicates of existing bank
-5. Most follow-ups pending unless fully answered
-6. answers must cover every bank id; empty bank → answers=[]
-7. pros / risks exactly 3 short family-facing lines each`,
+1. facts = only statements clearly said by people on the recording
+2. Do not write guesses as facts — use needs_verification
+3. risks are preliminary AI judgments, not a professional inspection
+4. followUps 2-5 items; dialogue-triggered; no generic checklist dump
+5. answers must cover every bank id; empty bank → answers=[]
+6. Prefer 2-5 items per list; empty arrays allowed
+7. sources should cite timestampSec / quote when possible`,
         },
-      ],
-    });
+        ],
+      },
+      { signal: AbortSignal.timeout(aiTimeoutMs()) },
+    );
 
     const content = completion.choices[0]?.message?.content ?? "";
-    const analysis = extractJson(content);
-
-    if (!Array.isArray(analysis.answers) || !Array.isArray(analysis.pros) || !Array.isArray(analysis.risks)) {
-      throw new Error("JSON 格式不完整");
+    let raw: unknown;
+    try {
+      raw = extractJsonObject(content);
+    } catch {
+      throw new AiInputError("ai_response_invalid", 422);
     }
 
-    const newQuestions = Array.isArray(analysis.new_questions)
-      ? analysis.new_questions
+    const payload = {
+      ...(raw as ProcessRecordingLegacyPayload),
+      transcript,
+    };
+
+    const validated = validateAndNormalizeSummary(payload, {
+      mediaId,
+      noteId: Number.isFinite(noteId) ? noteId : null,
+    });
+
+    if (!validated.ok) {
+      throw new AiInputError("ai_schema_invalid", 422);
+    }
+
+    const summary = validated.value;
+    const legacyAnswers = Array.isArray((payload as ProcessRecordingLegacyPayload).answers)
+      ? (payload as ProcessRecordingLegacyPayload).answers!
+      : [];
+
+    const newQuestions = Array.isArray((payload as ProcessRecordingLegacyPayload).new_questions)
+      ? (payload as ProcessRecordingLegacyPayload).new_questions!
           .filter((q) => typeof q?.text === "string" && q.text.trim().length > 0)
           .slice(0, 5)
           .map((q) => ({
             text: q.text.trim(),
-            status: q.status === "answered" ? "answered" : "pending",
+            status: q.status === "answered" ? ("answered" as const) : ("pending" as const),
             answer:
               q.status === "answered" && q.answer?.trim()
                 ? q.answer.trim()
@@ -212,17 +209,26 @@ Rules:
             reason: q.reason?.trim() || "",
             based_on: q.based_on?.trim() || "",
           }))
-      : [];
+      : summary.followUps.slice(0, 5).map((item) => ({
+          text: item.text,
+          status: "pending" as const,
+          answer: "待確認",
+          reason: "",
+          based_on: item.sources[0]?.quote || "",
+        }));
 
-    return NextResponse.json({
-      transcript,
-      answers: analysis.answers,
+    return boundary.applyCookie(NextResponse.json({
+      transcript: summary.transcript || transcript,
+      answers: legacyAnswers,
       new_questions: newQuestions,
-      pros: analysis.pros.slice(0, 3),
-      risks: analysis.risks.slice(0, 3),
-    });
+      /** Legacy string arrays for existing card/sync paths. */
+      pros: claimsToLegacyStrings(summary.pros, 5),
+      risks: claimsToLegacyStrings(summary.risks, 5),
+      summary,
+      warnings: validated.warnings,
+      jobId: mediaId,
+    }));
   } catch (error) {
-    const message = error instanceof Error ? error.message : "處理錄音失敗";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return aiErrorResponse(error);
   }
 }

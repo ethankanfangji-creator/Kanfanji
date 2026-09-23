@@ -28,7 +28,7 @@ export function formatMessage(
 
 export function bankQuestions(
   locale: Locale,
-  market: "CA" | "TH" | "OTHER",
+  market: "CA" | "US" | "TW" | "TH" | "OTHER",
 ): Array<{ id: number; text: string }> {
   const messages = getMessages(locale);
   const list = market === "TH" ? messages.questions.th : messages.questions.ca;

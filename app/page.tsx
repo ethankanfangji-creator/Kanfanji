@@ -1,5 +1,5 @@
-import { ClientPage } from "@/components/ClientPage";
+import { ViewingChatApp } from "@/components/viewing-chat/ViewingChatApp";
 
 export default function Home() {
-  return <ClientPage />;
+  return <ViewingChatApp />;
 }

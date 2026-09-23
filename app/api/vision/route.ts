@@ -1,37 +1,46 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
+import {
+  AiInputError,
+  aiErrorResponse,
+  aiTimeoutMs,
+  assertContentLength,
+  authorizeAiRequest,
+  validateVisionBody,
+} from "@/lib/ai-boundary/server-entry";
+import { extractPropertyFromImage } from "@/lib/property-source/extract-vision";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json(
-      { error: "尚未設定 OPENAI_API_KEY，請加到 .env.local" },
-      { status: 500 },
-    );
-  }
-
   try {
-    const body = (await request.json()) as {
-      base64?: string;
-      tag?: string;
-      locale?: string;
-    };
-    const tag = (body.tag || "現場").trim();
-    const locale = (body.locale || "zh-Hant").trim();
-    let base64 = (body.base64 || "").trim();
+    assertContentLength(request);
+    const body = (await request.json()) as Record<string, unknown>;
+    const input = validateVisionBody(body);
+    const boundary = await authorizeAiRequest(request, input);
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) throw new AiInputError("ai_unavailable", 503);
+    const { tag, locale, base64, mime, mediaId } = input;
+    const mode = typeof body.mode === "string" ? body.mode : "question";
 
-    if (!base64) {
-      return NextResponse.json({ error: "缺少照片 base64" }, { status: 400 });
-    }
-
-    // Accept raw base64 or data URL
-    let mime = "image/jpeg";
-    const dataUrlMatch = base64.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
-    if (dataUrlMatch) {
-      mime = dataUrlMatch[1];
-      base64 = dataUrlMatch[2];
+    if (mode === "property_source") {
+      const extracted = await extractPropertyFromImage({
+        base64,
+        mime,
+        locale,
+        apiKey,
+      });
+      if (!extracted) {
+        throw new AiInputError("ai_empty_response", 422);
+      }
+      return boundary.applyCookie(
+        NextResponse.json({
+          mode: "property_source",
+          ...extracted,
+          tag,
+          jobId: mediaId,
+        }),
+      );
     }
 
     const languageHint =
@@ -44,29 +53,32 @@ export async function POST(request: Request) {
             : "繁體中文，尖銳";
 
     const openai = new OpenAI({ apiKey });
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      temperature: 0.3,
-      max_tokens: 120,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: `You are a BC home inspector. Looking at this "${tag}" photo, what risk do you see? Reply with ONLY one must-ask open-house question. ${languageHint}.`,
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:${mime};base64,${base64}`,
-                detail: "low",
+    const completion = await openai.chat.completions.create(
+      {
+        model: "gpt-4o-mini",
+        temperature: 0.3,
+        max_tokens: 120,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: `You are a home inspector for US/CA/TW markets. Looking at this "${tag}" photo, what risk do you see? Reply with ONLY one must-ask open-house question. ${languageHint}. Do not invent facts; phrase as a check question.`,
               },
-            },
-          ],
-        },
-      ],
-    });
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:${mime};base64,${base64}`,
+                  detail: "low",
+                },
+              },
+            ],
+          },
+        ],
+      },
+      { signal: AbortSignal.timeout(aiTimeoutMs()) },
+    );
 
     const question = (completion.choices[0]?.message?.content || "")
       .trim()
@@ -76,12 +88,11 @@ export async function POST(request: Request) {
       ?.trim();
 
     if (!question) {
-      return NextResponse.json({ error: "Vision 沒有回傳問題" }, { status: 422 });
+      throw new AiInputError("ai_empty_response", 422);
     }
 
-    return NextResponse.json({ question, tag });
+    return boundary.applyCookie(NextResponse.json({ question, tag, jobId: mediaId }));
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Vision 分析失敗";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return aiErrorResponse(error);
   }
 }

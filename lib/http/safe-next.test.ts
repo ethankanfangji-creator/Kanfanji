@@ -1,26 +1,33 @@
-import assert from "node:assert/strict";
-import { describe, it } from "node:test";
-import { safeInternalNextPath } from "./safe-next.ts";
+import { describe, expect, it } from "vitest";
+import { safeInternalNextPath } from "./safe-next";
 
 describe("safeInternalNextPath", () => {
-  it("allows in-app relative paths", () => {
-    assert.equal(safeInternalNextPath("/"), "/");
-    assert.equal(safeInternalNextPath("/viewings"), "/viewings");
-    assert.equal(safeInternalNextPath("/viewings/abc?tab=1"), "/viewings/abc?tab=1");
+  it("retains internal paths with query and hash", () => {
+    expect(safeInternalNextPath("/")).toBe("/");
+    expect(safeInternalNextPath("/viewings")).toBe("/viewings");
+    expect(safeInternalNextPath("/viewings/1?tab=notes#top")).toBe(
+      "/viewings/1?tab=notes#top",
+    );
   });
 
-  it("rejects open-redirect payloads that would leave the origin", () => {
-    assert.equal(safeInternalNextPath("@evil.com"), "/");
-    assert.equal(safeInternalNextPath("//evil.com"), "/");
-    assert.equal(safeInternalNextPath("/\\evil.com"), "/");
-    assert.equal(safeInternalNextPath("https://evil.com"), "/");
-    assert.equal(safeInternalNextPath("\\evil.com"), "/");
-    assert.equal(safeInternalNextPath("https://example.com@evil.com"), "/");
+  it.each([
+    "https://evil.example",
+    "//evil.example/path",
+    "/\\evil.com",
+    "\\evil.com",
+    "@evil.com",
+    "viewings/1",
+    "https://example.com@evil.com",
+    null,
+  ])("rejects non-internal redirect %s", (value) => {
+    expect(safeInternalNextPath(value)).toBe("/");
   });
 
   it("keeps post-login redirects on the same origin", () => {
     const origin = "https://kanfangji.example";
-    assert.equal(`${origin}${safeInternalNextPath("@evil.com")}`, `${origin}/`);
-    assert.equal(`${origin}${safeInternalNextPath("/viewings")}`, `${origin}/viewings`);
+    expect(`${origin}${safeInternalNextPath("@evil.com")}`).toBe(`${origin}/`);
+    expect(`${origin}${safeInternalNextPath("/viewings")}`).toBe(
+      `${origin}/viewings`,
+    );
   });
 });

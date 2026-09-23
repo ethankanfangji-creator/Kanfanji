@@ -1,5 +1,7 @@
 # Dual environment (prod + dev)
 
+Stack inventory, service interfaces, and env var roles: see [`docs/STACK.md`](./docs/STACK.md).
+
 ## Branches
 - `main` → Production (kanfangji-prod)
 - `dev` → Preview / testing (kanfangji-dev)

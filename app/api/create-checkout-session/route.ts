@@ -17,7 +17,11 @@ export async function POST() {
     const supabase = await createClient();
     const {
       data: { user },
+      error: authError,
     } = await supabase.auth.getUser();
+    if (authError) {
+      return NextResponse.json({ error: "AUTH_LOOKUP_FAILED" }, { status: 500 });
+    }
     if (!user) {
       return NextResponse.json({ error: "請先登入" }, { status: 401 });
     }
@@ -70,8 +74,7 @@ export async function POST() {
     }
 
     return NextResponse.json({ url: session.url });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Checkout 失敗";
-    return NextResponse.json({ error: message }, { status: 500 });
+  } catch {
+    return NextResponse.json({ error: "CHECKOUT_FAILED" }, { status: 500 });
   }
 }

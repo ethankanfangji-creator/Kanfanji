@@ -75,10 +75,8 @@ create policy "users can select own viewings"
   on public.viewings for select to authenticated
   using ((select auth.uid()) = user_id);
 
-drop policy if exists "users can insert own viewings" on public.viewings;
-create policy "users can insert own viewings"
-  on public.viewings for insert to authenticated
-  with check ((select auth.uid()) = user_id);
+-- Inserts go through POST /api/viewings (service role) so free-tier / Pro can be enforced server-side.
+-- Do not recreate an authenticated INSERT policy here.
 
 drop policy if exists "users can update own viewings" on public.viewings;
 create policy "users can update own viewings"

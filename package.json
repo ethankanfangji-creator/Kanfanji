@@ -13,7 +13,7 @@
     "test:e2e": "playwright test",
     "test:e2e:install": "playwright install chromium",
     "test:supabase:smoke": "node scripts/supabase-integration-smoke.mjs",
-    "test:node": "node --test lib/billing-status.test.ts lib/supabase-write.test.ts"
+    "test:node": "node --test lib/billing-status.test.ts lib/supabase-write.test.ts lib/http/safe-next.test.ts lib/viewing-entitlement.test.ts lib/billing-guards.test.ts lib/billing-sync-select.test.ts lib/rate-limit.test.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

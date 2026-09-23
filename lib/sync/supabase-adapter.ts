@@ -81,6 +81,43 @@ export function createSupabaseViewingSyncAdapter(): ViewingSyncAdapter {
         }
       }
 
+      // New cloud rows must go through POST /api/viewings (service-role gate).
+      // Authenticated INSERT on viewings is revoked by RLS.
+      if (!input.remoteViewingId) {
+        const response = await fetch("/api/viewings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            address: input.address,
+            tags: input.tags,
+            market: input.market,
+            questions: input.questions,
+            notes: input.notes,
+            pros: input.pros,
+            risks: input.risks,
+            property: input.property,
+            property_id: input.propertyId,
+            idempotency_key: input.idempotencyKey,
+            client_updated_at: input.clientUpdatedAt,
+          }),
+        });
+        const payload = (await response.json()) as {
+          id?: string;
+          revision?: number;
+          error?: string;
+          code?: string;
+        };
+        if (!response.ok || !payload.id) {
+          throw new Error(payload.error || "建立看房紀錄失敗");
+        }
+        return {
+          id: payload.id,
+          conflict: false,
+          skippedAsStale: false,
+          revision: payload.revision ?? 1,
+        };
+      }
+
       const result = await saveViewingRecord(
         supabase,
         input.userId,

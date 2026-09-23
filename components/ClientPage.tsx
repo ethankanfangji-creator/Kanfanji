@@ -373,6 +373,10 @@ export function ClientPage() {
   >(null);
   const [showPaywall, setShowPaywall] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [portalLoading, setPortalLoading] = useState(false);
+  const [billingSyncLoading, setBillingSyncLoading] = useState(false);
+  const [hasStripeCustomer, setHasStripeCustomer] = useState(false);
+  const [checkoutTimedOut, setCheckoutTimedOut] = useState(false);
   const [syncingCard, setSyncingCard] = useState(false);
   const [generateStage, setGenerateStage] = useState<GenerateStageId | null>(null);
   const [generateFailed, setGenerateFailed] = useState(false);
@@ -660,6 +664,7 @@ export function ClientPage() {
         if (cancelled) return;
         setFreeCount(0);
         setIsPro(false);
+        setHasStripeCustomer(false);
       });
       return () => {
         cancelled = true;
@@ -673,7 +678,8 @@ export function ClientPage() {
       queueMicrotask(() => {
         if (cancelled) return;
         setShowPaywall(false);
-        setSyncMessage("Pro 訂閱處理中，刷新後生效");
+        setCheckoutTimedOut(false);
+        setSyncMessage(messages.paywall.processing);
       });
     }
 
@@ -685,16 +691,18 @@ export function ClientPage() {
           .eq("user_id", user.id),
         supabase
           .from("subscriptions")
-          .select("status, plan")
+          .select("status, plan, stripe_customer_id")
           .eq("user_id", user.id)
           .maybeSingle(),
       ]);
       if (cancelled) return false;
       setFreeCount(count ?? 0);
+      setHasStripeCustomer(Boolean(sub?.stripe_customer_id));
       const pro = isActiveSubscriptionStatus(sub?.status);
       setIsPro(pro);
       if (awaitingCheckout && pro) {
-        setSyncMessage("Pro 已啟用");
+        setSyncMessage(messages.paywall.syncSuccess);
+        setCheckoutTimedOut(false);
       }
       return pro;
     };
@@ -709,6 +717,9 @@ export function ClientPage() {
         attempts += 1;
         if (attempts < 7) {
           timer = window.setTimeout(() => void tick(), 1500);
+        } else {
+          setCheckoutTimedOut(true);
+          setSyncMessage(messages.paywall.processingTimeout);
         }
       };
       timer = window.setTimeout(() => void tick(), 1500);
@@ -718,7 +729,7 @@ export function ClientPage() {
       cancelled = true;
       if (timer != null) window.clearTimeout(timer);
     };
-  }, [user]);
+  }, [user, messages.paywall.processing, messages.paywall.processingTimeout, messages.paywall.syncSuccess]);
 
   useEffect(() => {
     photosRef.current = photos;
@@ -3958,6 +3969,51 @@ export function ClientPage() {
     }
   }
 
+  async function openBillingPortal() {
+    setPortalLoading(true);
+    setSyncMessage("");
+    try {
+      const response = await fetch("/api/create-portal-session", { method: "POST" });
+      const payload = (await response.json()) as { url?: string; error?: string };
+      if (!response.ok || !payload.url) {
+        throw new Error(payload.error || "無法開啟訂閱管理");
+      }
+      window.location.href = payload.url;
+    } catch (error) {
+      setSyncMessage(error instanceof Error ? error.message : "Portal 失敗");
+      setPortalLoading(false);
+    }
+  }
+
+  async function resyncBilling() {
+    setBillingSyncLoading(true);
+    setSyncMessage("");
+    try {
+      const response = await fetch("/api/billing/sync", { method: "POST" });
+      const payload = (await response.json()) as {
+        status?: string;
+        isPro?: boolean;
+        plan?: string | null;
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error || "同步失敗");
+      }
+      const nextPro = Boolean(payload.isPro);
+      setIsPro(nextPro);
+      setHasStripeCustomer(true);
+      setCheckoutTimedOut(false);
+      setSyncMessage(
+        nextPro ? messages.paywall.syncSuccess : `訂閱狀態：${payload.status ?? "inactive"}`,
+      );
+      if (nextPro) setShowPaywall(false);
+    } catch (error) {
+      setSyncMessage(error instanceof Error ? error.message : "同步失敗");
+    } finally {
+      setBillingSyncLoading(false);
+    }
+  }
+
   async function handleLoginForCard(event: React.FormEvent) {
     event.preventDefault();
     setLoginError("");
@@ -4006,7 +4062,7 @@ export function ClientPage() {
             .eq("user_id", currentUser.id),
           supabase
             .from("subscriptions")
-            .select("status")
+            .select("status, stripe_customer_id")
             .eq("user_id", currentUser.id)
             .maybeSingle(),
         ]);
@@ -4014,6 +4070,7 @@ export function ClientPage() {
         const nextPro = isActiveSubscriptionStatus(sub?.status);
         setFreeCount(nextCount);
         setIsPro(nextPro);
+        setHasStripeCustomer(Boolean(sub?.stripe_customer_id));
         if (
           !canCreateCloudViewing({
             viewingId,
@@ -4832,6 +4889,30 @@ export function ClientPage() {
                   limit: FREE_VIEWING_LIMIT,
                 })}
               </p>
+            )}
+            {user && (hasStripeCustomer || checkoutTimedOut) && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {hasStripeCustomer && (
+                  <button
+                    type="button"
+                    onClick={() => void openBillingPortal()}
+                    disabled={portalLoading}
+                    className="h-7 px-2.5 rounded-full bg-white border border-black/10 text-[10px] font-bold disabled:opacity-60"
+                  >
+                    {portalLoading ? messages.paywall.manageLoading : messages.paywall.manage}
+                  </button>
+                )}
+                {(checkoutTimedOut || hasStripeCustomer) && !isPro && (
+                  <button
+                    type="button"
+                    onClick={() => void resyncBilling()}
+                    disabled={billingSyncLoading}
+                    className="h-7 px-2.5 rounded-full bg-white border border-black/10 text-[10px] font-bold disabled:opacity-60"
+                  >
+                    {billingSyncLoading ? messages.paywall.syncLoading : messages.paywall.sync}
+                  </button>
+                )}
+              </div>
             )}
           </div>
           <div className="flex flex-col items-start gap-2 sm:items-end sm:mt-1.5">
@@ -5911,6 +5992,26 @@ export function ClientPage() {
               >
                 {checkoutLoading ? messages.paywall.loading : messages.paywall.cta}
               </button>
+              {hasStripeCustomer && (
+                <button
+                  type="button"
+                  onClick={() => void openBillingPortal()}
+                  disabled={portalLoading}
+                  className="mt-2 w-full h-[44px] rounded-full bg-white border border-black/10 text-[13px] font-bold disabled:opacity-60"
+                >
+                  {portalLoading ? messages.paywall.manageLoading : messages.paywall.manage}
+                </button>
+              )}
+              {(checkoutTimedOut || hasStripeCustomer) && (
+                <button
+                  type="button"
+                  onClick={() => void resyncBilling()}
+                  disabled={billingSyncLoading}
+                  className="mt-2 w-full h-[44px] rounded-full bg-white border border-black/10 text-[13px] font-bold disabled:opacity-60"
+                >
+                  {billingSyncLoading ? messages.paywall.syncLoading : messages.paywall.sync}
+                </button>
+              )}
               <p className="mt-3 text-[11px] text-[#9CA3AF] text-center">
                 {messages.paywall.footer}
               </p>

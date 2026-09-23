@@ -444,6 +444,13 @@ const zhHans: Messages = {
     cta: "升级 Pro · Stripe Checkout",
     loading: "前往 Stripe...",
     footer: "安全付款由 Stripe 处理 · 可随时取消",
+    manage: "管理订阅",
+    manageLoading: "打开订阅管理...",
+    sync: "重新同步订阅",
+    syncLoading: "同步中...",
+    syncSuccess: "Pro 已启用",
+    processing: "Pro 订阅处理中，刷新后生效",
+    processingTimeout: "仍在处理？可手动重新同步订阅",
   },
   card: {
     close: "关闭",

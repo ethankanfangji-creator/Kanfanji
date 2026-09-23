@@ -3,10 +3,12 @@ import {
   type ChatMessage,
   type QuestionBankItem,
 } from "./types";
+import { resolveAgendaId } from "./agenda-catalog";
 
 /**
- * Project a read-only 6-card question bank from chat messages.
+ * Project a read-only question bank from chat messages.
  * Answers come from the latest AI `matched` / `new_card` turns.
+ * Legacy ids (q_panel, q_leak, …) map onto current agenda catalog ids.
  */
 export function projectQuestionBank(messages: ChatMessage[]): QuestionBankItem[] {
   const byId = new Map<string, QuestionBankItem>();
@@ -25,9 +27,10 @@ export function projectQuestionBank(messages: ChatMessage[]): QuestionBankItem[]
     if (message.role !== "ai") continue;
 
     if (message.type === "new_card" && message.question?.trim()) {
-      const id =
+      const rawId =
         message.matched?.[0]?.id ||
         `q_${message.id.replace(/[^a-zA-Z0-9]/g, "").slice(0, 10)}`;
+      const id = resolveAgendaId(rawId);
       byId.set(id, {
         id,
         category: message.category?.trim() || "新發現",
@@ -42,32 +45,34 @@ export function projectQuestionBank(messages: ChatMessage[]): QuestionBankItem[]
     if (message.matched?.length) {
       lastMatchedIds = new Set();
       for (const hit of message.matched) {
-        const existing = byId.get(hit.id);
+        const id = resolveAgendaId(hit.id);
+        const existing = byId.get(id);
         if (existing) {
-          byId.set(hit.id, {
+          byId.set(id, {
             ...existing,
             answer: hit.answer.trim() || existing.answer,
             justDiscussed: false,
           });
         } else {
-          byId.set(hit.id, {
-            id: hit.id,
+          byId.set(id, {
+            id,
             category: "新發現",
-            question: hit.id,
+            question: id,
             answer: hit.answer.trim(),
             justDiscussed: false,
           });
         }
-        lastMatchedIds.add(hit.id);
+        lastMatchedIds.add(id);
       }
     }
   }
 
   const items = [...byId.values()];
-  // Keep default six first, then any extras (new cards) after — still show up to ~12.
   const defaults = DEFAULT_QUESTION_BANK.map((d) => byId.get(d.id)!).filter(Boolean);
-  const extras = items.filter((item) => !DEFAULT_QUESTION_BANK.some((d) => d.id === item.id));
-  const ordered = [...defaults, ...extras].slice(0, 12);
+  const extras = items.filter(
+    (item) => !DEFAULT_QUESTION_BANK.some((d) => d.id === item.id),
+  );
+  const ordered = [...defaults, ...extras].slice(0, 16);
 
   return ordered.map((item) => ({
     ...item,

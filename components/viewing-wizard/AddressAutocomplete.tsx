@@ -207,7 +207,7 @@ export function AddressAutocomplete({
             id={listId}
             role="listbox"
             aria-label={copy.listLabel}
-            className="absolute z-30 mt-2 max-h-64 w-full overflow-auto rounded-[16px] border border-black/10 bg-white py-1 shadow-[0_12px_32px_rgba(0,0,0,0.12)]"
+            className="absolute z-30 mt-1.5 max-h-56 w-full overflow-auto rounded-xl border border-black/8 bg-white py-0.5 shadow-[0_8px_24px_rgba(0,0,0,0.1)]"
           >
             {suggest.status === "loading" ? (
               <li
@@ -228,13 +228,19 @@ export function AddressAutocomplete({
                 {suggest.message}
               </li>
             ) : null}
-            {items.map((item, index) => (
+            {items.map((item, index) => {
+              const title = item.title?.trim() || item.label;
+              const secondary =
+                item.secondary?.trim() && item.secondary.trim() !== title
+                  ? item.secondary.trim()
+                  : null;
+              return (
               <li
                 key={item.id}
                 id={`${listId}-option-${index}`}
                 role="option"
                 aria-selected={highlight === index}
-                className={`cursor-pointer px-3 py-2.5 text-left ${
+                className={`cursor-pointer px-3 py-2 text-left ${
                   highlight === index ? "bg-[#111] text-white" : "text-[#1A1A1A] hover:bg-[#F5F3F0]"
                 }`}
                 onMouseDown={(event) => {
@@ -243,18 +249,19 @@ export function AddressAutocomplete({
                 }}
                 onMouseEnter={() => setHighlight(index)}
               >
-                <p className="text-[13px] font-semibold leading-snug">{item.label}</p>
-                {item.secondary ? (
+                <p className="truncate text-[13px] font-medium leading-snug">{title}</p>
+                {secondary ? (
                   <p
-                    className={`mt-0.5 text-[11px] ${
-                      highlight === index ? "text-white/75" : "text-[#6B7280]"
+                    className={`truncate text-[11px] leading-snug ${
+                      highlight === index ? "text-white/70" : "text-[#6B7280]"
                     }`}
                   >
-                    {item.secondary}
+                    {secondary}
                   </p>
                 ) : null}
               </li>
-            ))}
+              );
+            })}
           </ul>
         ) : null}
       </div>

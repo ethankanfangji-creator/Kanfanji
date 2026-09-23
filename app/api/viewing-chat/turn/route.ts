@@ -59,6 +59,63 @@ export async function POST(request: Request) {
     }
 
     const hasPhoto = image instanceof File && image.size > 0;
+    let photoAnalysis: string | undefined;
+    if (hasPhoto && image instanceof File) {
+      try {
+        const buf = Buffer.from(await image.arrayBuffer());
+        if (buf.byteLength > 0 && buf.byteLength <= AI_LIMITS.imageBytes) {
+          const mime =
+            image.type === "image/png" || image.type === "image/webp"
+              ? image.type
+              : "image/jpeg";
+          const { extractPropertyFromImage } = await import(
+            "@/lib/property-source/extract-vision"
+          );
+          const extracted = await extractPropertyFromImage({
+            base64: buf.toString("base64"),
+            mime,
+            locale,
+            apiKey,
+          });
+          if (extracted) {
+            photoAnalysis = [
+              extracted.extractedText
+                ? `OCR: ${extracted.extractedText.slice(0, 400)}`
+                : "",
+              ...extracted.observedConditions.map((o) => `觀察（推測）：${o}`),
+              ...extracted.uncertainItems.map((u) => `未確認：${u}`),
+            ]
+              .filter(Boolean)
+              .join("\n")
+              .slice(0, 1500);
+          }
+        }
+      } catch {
+        // Vision is best-effort; chat turn still proceeds with hasPhoto flag
+      }
+    }
+    const replyRaw = form.get("replyTo");
+    let replyTo: ChatMessage["replyTo"];
+    if (typeof replyRaw === "string" && replyRaw.trim()) {
+      try {
+        const parsed = JSON.parse(replyRaw) as ChatMessage["replyTo"];
+        if (
+          parsed &&
+          typeof parsed.messageId === "string" &&
+          typeof parsed.preview === "string" &&
+          (parsed.role === "user" || parsed.role === "ai")
+        ) {
+          replyTo = {
+            messageId: parsed.messageId.slice(0, 120),
+            role: parsed.role,
+            preview: parsed.preview.slice(0, 200),
+          };
+        }
+      } catch {
+        // ignore malformed reply payload
+      }
+    }
+
     const result = await integrateChatTurn({
       apiKey,
       address,
@@ -67,6 +124,31 @@ export async function POST(request: Request) {
       userText: text,
       transcript,
       hasPhoto,
+      photoAnalysis,
+      replyTo,
+      agendaActiveId:
+        typeof form.get("agendaActiveId") === "string"
+          ? String(form.get("agendaActiveId")).trim() || null
+          : null,
+      agendaSkippedIds: (() => {
+        const raw = form.get("agendaSkippedIds");
+        if (typeof raw !== "string" || !raw.trim()) return [];
+        try {
+          const parsed = JSON.parse(raw) as unknown;
+          return Array.isArray(parsed)
+            ? parsed.filter((id): id is string => typeof id === "string").slice(0, 20)
+            : [];
+        } catch {
+          return [];
+        }
+      })(),
+      agendaMarket: (() => {
+        const raw = String(form.get("agendaMarket") ?? "").trim().toUpperCase();
+        if (raw === "US" || raw === "CA" || raw === "TW" || raw === "OTHER") {
+          return raw;
+        }
+        return null;
+      })(),
     });
 
     // Persist for authenticated owners when viewingId is provided.
@@ -97,6 +179,8 @@ export async function POST(request: Request) {
         userMessage: result.userMessage,
         aiMessage: result.aiMessage,
         messages: result.messages,
+        agendaActiveId: result.agendaActiveId,
+        agendaSkippedIds: result.agendaSkippedIds,
       }),
     );
   } catch (error) {

@@ -22,6 +22,17 @@ function readAll(): ViewingChatThread[] {
       messages: thread.messages ?? [],
       report: thread.report ?? null,
       pinned: Boolean(thread.pinned),
+      stage: thread.stage ?? undefined,
+      sources: thread.sources ?? [],
+      pipelineSteps: thread.pipelineSteps ?? [],
+      propertyData: thread.propertyData ?? null,
+      initialReport: thread.initialReport ?? null,
+      skippedSources: Boolean(thread.skippedSources),
+      agendaActiveId: thread.agendaActiveId ?? null,
+      agendaSkippedIds: Array.isArray(thread.agendaSkippedIds)
+        ? thread.agendaSkippedIds
+        : [],
+      agendaMarket: thread.agendaMarket ?? undefined,
     }));
   } catch {
     return [];
@@ -72,6 +83,15 @@ export function createLocalThread(
     metadata,
     propertyReport,
     pinned: false,
+    stage: "address_received",
+    sources: [],
+    pipelineSteps: [],
+    propertyData: null,
+    initialReport: null,
+    skippedSources: false,
+    agendaActiveId: null,
+    agendaSkippedIds: [],
+    agendaMarket: undefined,
   };
   return upsertLocalThread(thread);
 }
@@ -92,6 +112,21 @@ export function saveLocalMessages(
     metadata: metadata === undefined ? existing.metadata : metadata,
     propertyReport:
       propertyReport === undefined ? existing.propertyReport : propertyReport,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export function patchLocalThread(
+  id: string,
+  patch: Partial<ViewingChatThread>,
+): ViewingChatThread | null {
+  const existing = getLocalThread(id);
+  if (!existing) return null;
+  return upsertLocalThread({
+    ...existing,
+    ...patch,
+    id: existing.id,
+    createdAt: existing.createdAt,
     updatedAt: new Date().toISOString(),
   });
 }

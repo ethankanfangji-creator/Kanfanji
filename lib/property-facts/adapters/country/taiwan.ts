@@ -54,7 +54,7 @@ export class TaiwanAdapter extends BaseCountryAdapter {
         mls_crea_ddf: "Canadian MLS — not applicable",
         building_abstract:
           "建物謄本需官方通路或使用者上傳正本 — stub；禁止爬取",
-        hoa_condo_docs: "管理費／規約需使用者上傳或人工驗證 — stub",
+        hoa_condo_docs: "管理費／規約需使用者上傳文件後人工驗證（不爬取）",
       },
     };
   }

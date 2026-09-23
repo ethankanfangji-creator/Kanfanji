@@ -73,7 +73,7 @@ describe("compliance on report", () => {
 
     const report = projectFactCardToReport(card);
     expect(report.compliance.no_scraping).toBe(true);
-    expect(report.compliance.notices.some((n) => /不爬取|does not scrape/i.test(n))).toBe(true);
+    expect(report.compliance.notices.some((n) => /不(主動)?爬取|does not (proactively )?scrape/i.test(n))).toBe(true);
     expect(report.compliance.human_verification.required).toBe(true);
     expect(
       report.compliance.human_verification.checklist.some((c) => c.id === "verify_hoa_condo"),

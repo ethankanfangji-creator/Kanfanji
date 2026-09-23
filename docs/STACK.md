@@ -13,7 +13,7 @@ Last updated: 2026-09-19. Living inventory for agents and humans.
 | Storage | Supabase Storage `viewing-media` | Private objects + signed URLs |
 | Local draft | IndexedDB (`lib/idb`, `lib/draft-db`) | Guests can create/read without login |
 | AI | OpenAI (`gpt-4o-mini`, Whisper) | **Server routes only** via `lib/ai-boundary` + `AiService` |
-| Geocoding | BC Address Geocoder + OSM Nominatim | **Server only** via `AddressService` |
+| Geocoding | BC + Google Places/Geocode + OSM Nominatim | **Server only** via `AddressService` (US/TW prefer Google) |
 | Property intel | Property facts pipeline → projected intel; BC/Google/OSM/Bing evidence (+ optional ATTOM); DB cache | `/api/property-facts`, `/api/property-intel` — no crawling; LLM does not invent facts |
 | Payments | Stripe Checkout + webhook | Server secrets only |
 | i18n | `zh-Hant` / `zh-Hans` / `en` / `th` | `lib/i18n/*` — no hardcoded product copy in new UI |
@@ -101,6 +101,20 @@ Every user-triggered async flow should expose:
 
 Canonical path: **`generatePropertyReport(address)`** — Address Normalizer → Geocoding → Country Adapter → Domain Providers (parallel) → Data Normalizer → Conflict Resolver + Confidence → POI/transit distances → FactCard → legacy Report + Domain JSON (`property-domain/v1`) → zh-Hant Markdown.
 
+### User property sources (chat intake — advanced / optional)
+
+Product default is **Option A** (open-house recorder): address → on-site capture → viewing report. See `docs/product-scope-a.md`.
+
+Optional listing intake (hidden behind “Advanced: add listing”): Module `lib/property-source/` + `lib/viewing-chat/stage.ts`.
+
+- `POST /api/property-source/ingest` — user text / listing URL (SSRF-guarded single-page fetch) / image (vision OCR) / PDF (`unpdf` text extract; soft-fail to paste/screenshot) / HOA docs (`sourceRole=hoa_doc`)
+- Provider catalogue entry: `user_url_fetch` (`kind: user_upload`, not proactive scraping); `hoa_condo_docs` is user-upload (enabled, never scraped)
+- Enrich maps `PropertyFactCard` → `PropertyData` (POI / transit / costs / risks as unverified); provider skip reasons distinguish `missing_key` vs `stub_only`
+- Untrusted content always fenced; observations from photos are `inferred` only
+- Default stages: `address_received` → `viewing_preparation` → `report_ready`
+- Advanced stages: `awaiting_property_source` → `collecting_sources` → … → `report_ready`
+- Required for vision: `OPENAI_API_KEY`. Optional enrich: `GOOGLE_MAPS_API_KEY`, `BING_SEARCH_API_KEY`, `ATTOM_API_KEY` (see `.env.example`)
+
 Unified domain models (`lib/property-domain/`): `Address`, `GeocodingResult`, `Property`, `Listing`, `Transaction`, `BuildingPermit`, `Assessment`, `TaxRecord`, `HOAOrManagementFee`, `ZoningRecord`, `NearbyPlace`, `TransitStop`, `MarketComparable`, `RiskRecord`, `Evidence`, `DataGap`, `PropertyReport` — important fields use `ProvenancedValue` (`value`, `unit`, `source`, `sourceUrl`, `retrievedAt`, `effectiveDate`, `confidence`, `evidenceIds`, `limitations`, `status`). Zod: `DomainPropertyReportSchema` (`property-domain/v1`). Persistence: `supabase/migrate-property-domain.sql` (`private.property_evidence`, `private.property_domain_reports`).
 
 Module boundaries (`lib/property-facts/interfaces.ts` + `services/` + `providers/{listing,public-record,poi-transit,risk}/`):
@@ -178,16 +192,20 @@ Address confirm → property basics → Start viewing → Step 2 one text input 
 
 Contract tests: `lib/viewing-wizard/vertical-slice.test.ts`.
 
-## Viewing Chat Thread (2026-09-19)
+## Viewing Chat Thread (2026-09-19; A path 2026-09-22)
 
-Home UI is now Meta-AI style chat (`ViewingChatApp`):
+Home UI is Meta-AI style chat (`ViewingChatApp`):
 
+- Default (Option A): address → `viewing_preparation` → on-site text/voice/photo → `/api/viewing-chat/report`
+- Optional listing intake: “Advanced: add listing” → `property-source/ingest` chips
 - `viewings.messages` JSONB + `viewings.report` JSONB (migration `viewing_chat_messages`)
 - Guest threads in `localStorage`; authenticated can persist via `/api/viewing-chat/*`
 - Question bank = read-only projection from messages (`lib/viewing-chat/project-bank.ts`)
 - APIs: `POST /api/viewing-chat/turn` (Whisper + fill/new_card), `POST /api/viewing-chat/report`
 
 Legacy wizard `ClientPage` remains in repo but is no longer the home route.
+
+Scope: `docs/product-scope-a.md`.
 
 ## Quality TODOs (remaining / next slice)
 

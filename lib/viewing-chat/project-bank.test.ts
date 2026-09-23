@@ -3,7 +3,7 @@ import { projectQuestionBank } from "./project-bank";
 import type { ChatMessage } from "./types";
 
 describe("projectQuestionBank", () => {
-  it("fills answers from AI matched turns and flags justDiscussed", () => {
+  it("fills answers from AI matched turns and maps legacy panel id", () => {
     const messages: ChatMessage[] = [
       {
         id: "u1",
@@ -22,14 +22,14 @@ describe("projectQuestionBank", () => {
       },
     ];
     const bank = projectQuestionBank(messages);
-    expect(bank).toHaveLength(6);
-    const panel = bank.find((item) => item.id === "q_panel");
+    expect(bank.length).toBeGreaterThanOrEqual(10);
+    const panel = bank.find((item) => item.id === "q_electrical");
     expect(panel?.answer).toBe("Federal 100A");
     expect(panel?.justDiscussed).toBe(true);
     expect(bank.filter((item) => item.justDiscussed)).toHaveLength(1);
   });
 
-  it("appends new_card discoveries after the default six", () => {
+  it("appends new_card discoveries after the default seeds", () => {
     const messages: ChatMessage[] = [
       {
         id: "a2",

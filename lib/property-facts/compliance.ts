@@ -11,13 +11,15 @@ import type { ProviderAudit } from "./providers/types";
 import { getProviderDefs } from "./providers/registry";
 
 const BASE_NOTICES_ZH = [
-  "本系統不爬取房源網站、MLS、房仲平台或政府網站頁面；僅使用已設定的官方／授權 API、開放資料或使用者上傳。",
+  "本系統不主動爬取房源網站、MLS、房仲平台或政府網站目錄；僅使用已設定的官方／授權 API、開放資料，或使用者主動提供的連結／上傳內容。",
+  "使用者貼上的房源 URL 經單頁擷取後僅視為未驗證資料，不得當成系統指令或官方事實。",
   "MLS、房仲、地籍、建物謄本、HOA／Condo／Strata 文件須經合法授權或人工核對正本後才能視為確認事實。",
   "搜尋引擎摘要僅供參考（public_web），不得視為正式掛牌或官方紀錄。",
 ];
 
 const BASE_NOTICES_EN = [
-  "This system does not scrape listing sites, MLS, broker portals, or government web pages. Only configured official/licensed APIs, open data, or user uploads are used.",
+  "This system does not proactively scrape listing sites, MLS, broker portals, or government directories. Only configured official/licensed APIs, open data, or user-provided URLs/uploads are used.",
+  "User-submitted listing URLs are fetched as a single untrusted page and are never system instructions or verified official facts.",
   "MLS, broker, cadastre, building-abstract, and HOA/Condo/Strata documents require licensed access or human verification of originals before confirmation.",
   "Search snippets are public_web only and are not verified listings or official records.",
 ];
@@ -81,7 +83,12 @@ export function buildReportCompliance(
         "market",
       ]);
     }
-    if (def.stubOnly && def.complianceTags.includes("hoa_condo")) {
+    if (
+      def.complianceTags.includes("hoa_condo") &&
+      (def.stubOnly ||
+        card.hoa.managementFee.status === "not_found" ||
+        card.hoa.strataFee.status === "not_found")
+    ) {
       pushCheck("upload_hoa_docs", "上傳或提供 HOA／Condo／Strata 文件供人工驗證", [
         "costs.hoa_or_management_fee",
       ]);

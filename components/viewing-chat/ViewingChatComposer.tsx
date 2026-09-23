@@ -10,9 +10,10 @@ import {
   Square,
   X,
 } from "lucide-react";
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { selectSupportedAudioMimeType } from "@/components/media/useMediaCapture";
 import { createBrowserMediaPermissionAdapter } from "@/lib/media-permissions";
+import type { ChatReplyRef } from "@/lib/viewing-chat/types";
 
 export type ChatComposerLabels = {
   placeholder: string;
@@ -25,6 +26,8 @@ export type ChatComposerLabels = {
   uploadFile: string;
   empty: string;
   micDenied: string;
+  replyCancel?: string;
+  replyingTo?: string;
 };
 
 const TEXTAREA_MAX_PX = 168;
@@ -34,10 +37,14 @@ const SINGLE_LINE_PX = 36;
 export function ViewingChatComposer({
   labels,
   busy,
+  replyTo,
+  onClearReply,
   onSubmit,
 }: {
   labels: ChatComposerLabels;
   busy?: boolean;
+  replyTo?: ChatReplyRef | null;
+  onClearReply?: () => void;
   onSubmit: (payload: {
     text: string;
     audio: Blob | null;
@@ -45,7 +52,6 @@ export function ViewingChatComposer({
     file: File | null;
   }) => void | Promise<void>;
 }) {
-  const inputId = useId();
   const cameraRef = useRef<HTMLInputElement>(null);
   const imageRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -89,6 +95,11 @@ export function ViewingChatComposer({
   useEffect(() => {
     resizeTextarea(text);
   }, [text]);
+
+  useEffect(() => {
+    if (!replyTo) return;
+    textareaRef.current?.focus();
+  }, [replyTo]);
 
   useEffect(() => {
     return () => {
@@ -276,6 +287,26 @@ export function ViewingChatComposer({
 
   return (
     <div className="bg-transparent px-2.5 pb-[max(0.65rem,env(safe-area-inset-bottom))] pt-1.5">
+      {replyTo ? (
+        <div className="mb-1.5 flex items-start gap-2 rounded-2xl bg-[#EFF6FF] px-3 py-2">
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] font-bold text-[#1D4ED8]">
+              {labels.replyingTo || "Replying"}
+            </p>
+            <p className="mt-0.5 truncate text-[12px] text-[#1E3A8A]">
+              {replyTo.preview}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => onClearReply?.()}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[#1D4ED8] active:bg-white/70"
+            aria-label={labels.replyCancel || "Cancel reply"}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ) : null}
       {(audioBlob || image || file || recording) && (
         <div className="mb-1.5 flex flex-wrap items-center gap-1.5 px-1 text-[11px] font-medium text-[#6B7280]">
           {recording ? <span className="text-[#DC2626]">{labels.recording}…</span> : null}
@@ -363,13 +394,13 @@ export function ViewingChatComposer({
             : "flex items-center gap-0.5 rounded-[24px] bg-[#F3F4F6] px-1 py-1"
         }
       >
-        <label htmlFor={inputId} className="sr-only">
+        <label htmlFor="viewing-chat-composer" className="sr-only">
           {labels.placeholder}
         </label>
         {!multiline ? attachButton : null}
         <textarea
           ref={textareaRef}
-          id={inputId}
+          id="viewing-chat-composer"
           rows={1}
           value={text}
           disabled={busy}

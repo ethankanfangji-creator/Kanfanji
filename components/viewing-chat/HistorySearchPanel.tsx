@@ -3,6 +3,7 @@
 import { Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { ViewingChatThread } from "@/lib/viewing-chat/types";
+import { messageSearchHaystack } from "@/lib/viewing-chat/types";
 
 export function HistorySearchPanel({
   threads,
@@ -32,10 +33,9 @@ export function HistorySearchPanel({
     if (!q) return threads;
     return threads.filter((thread) => {
       if (thread.address.toLowerCase().includes(q)) return true;
-      return thread.messages.some((m) => {
-        const hay = `${m.text || ""} ${m.transcript || ""} ${m.question || ""}`.toLowerCase();
-        return hay.includes(q);
-      });
+      return thread.messages.some((m) =>
+        messageSearchHaystack(m).toLowerCase().includes(q),
+      );
     });
   }, [threads, query]);
 

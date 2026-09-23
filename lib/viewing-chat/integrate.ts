@@ -11,13 +11,21 @@ import {
   createConversationState,
   fieldIdToMatchedId,
   processUserTurn,
+  VIEWING_RECORDER_REPORT_RULES,
 } from "@/lib/viewing-chat/collection";
+import {
+  ChatReportLlmSchema,
+  parseLlmJson,
+} from "@/lib/viewing-chat/collection/llm-schemas";
 import type {
   PropertyCollectionRecord,
   PropertyFactEvidence,
   PropertyFieldId,
 } from "@/lib/viewing-chat/collection/types";
-import type { PropertyRecord } from "@/lib/viewing-chat/collection/orchestrator-types";
+import type {
+  ExtractionStatus,
+  PropertyRecord,
+} from "@/lib/viewing-chat/collection/orchestrator-types";
 import {
   createAiMessage,
   createUserMessage,
@@ -62,6 +70,41 @@ function fieldIdToAgendaSkip(fieldId: PropertyFieldId): string {
   return map[fieldId] ?? fieldId;
 }
 
+/** Remove「答案\n答案」echo from capture/message double-join. */
+function stripFiledChangesBlock(text: string): string {
+  const parts = text
+    .split(/\n\n+/)
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .filter(
+      (p) =>
+        !/^(這一輪新收到|剛記入的變更|What changed this turn|Here's what we just filed)/i.test(
+          p,
+        ),
+    );
+  return parts.join("\n\n").trim();
+}
+
+function collapseRepeatedAnswer(answer: string): string {
+  const trimmed = answer.trim();
+  if (!trimmed) return "";
+  const lines = trimmed
+    .split(/\n+/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length >= 2 && lines.every((l) => l === lines[0])) {
+    return lines[0]!;
+  }
+  // Exact doubled string without newline: "foo"+"foo"
+  if (trimmed.length % 2 === 0) {
+    const half = trimmed.length / 2;
+    const a = trimmed.slice(0, half);
+    const b = trimmed.slice(half);
+    if (a === b && a.length >= 2) return a;
+  }
+  return trimmed;
+}
+
 export async function integrateChatTurn(input: {
   apiKey: string;
   address: string;
@@ -72,6 +115,13 @@ export async function integrateChatTurn(input: {
   hasPhoto: boolean;
   /** Vision/OCR notes — treated as untrusted observations */
   photoAnalysis?: string;
+  /** Structured vision slots (inferred only) */
+  visionSlots?: Array<{
+    fieldId: string;
+    value: string;
+    confidence?: number;
+    note?: string;
+  }>;
   replyTo?: ChatMessage["replyTo"];
   agendaActiveId?: string | null;
   agendaSkippedIds?: string[];
@@ -79,7 +129,19 @@ export async function integrateChatTurn(input: {
   propertyRecord?: PropertyCollectionRecord | null;
   propertyEvidence?: PropertyFactEvidence[];
   collectionSkippedFields?: PropertyFieldId[];
+  /** Explicit (A) soft focus from prior AI reminder */
+  collectionFocusFieldIds?: PropertyFieldId[];
+  /** 招1 — pending yes/no candidate */
+  pendingConfirm?: import("@/lib/viewing-chat/collection/orchestrator-types").PendingConfirmState | null;
   signal?: AbortSignal;
+  /**
+   * Called after the raw user message is built and appended, before AI polish.
+   * Use to persist messages so a model failure cannot erase user input.
+   */
+  beforeExtraction?: (
+    userMessage: ChatMessage,
+    messagesWithUser: ChatMessage[],
+  ) => Promise<void>;
 }): Promise<{
   userMessage: ChatMessage;
   aiMessage: ChatMessage;
@@ -89,7 +151,16 @@ export async function integrateChatTurn(input: {
   propertyRecord: PropertyCollectionRecord;
   propertyEvidence: PropertyFactEvidence[];
   collectionSkippedFields: PropertyFieldId[];
+  changes: import("@/lib/viewing-chat/collection").RecordChange[];
+  conversationStatus: import("@/lib/viewing-chat/collection").ConversationStatus;
+  turnWarnings: string[];
+  suggestedQuestions: import("@/lib/viewing-chat/collection").SuggestedQuestion[];
+  extractionStatus: ExtractionStatus;
+  rawAiResponse?: string;
+  collectionFocusFieldIds: PropertyFieldId[];
+  pendingConfirm: import("@/lib/viewing-chat/collection/orchestrator-types").PendingConfirmState | null;
 }> {
+  // 1) Persist raw user message first — never wait for AI
   const userMessage = createUserMessage({
     type: input.hasPhoto ? "photo" : input.transcript.trim() ? "audio" : "text",
     text: input.userText.trim() || undefined,
@@ -97,6 +168,10 @@ export async function integrateChatTurn(input: {
     replyTo: input.replyTo,
     analysis: input.photoAnalysis || undefined,
   });
+  const messagesWithUser = [...input.messages, userMessage];
+  if (input.beforeExtraction) {
+    await input.beforeExtraction(userMessage, messagesWithUser);
+  }
 
   const priorSkipped = [
     ...new Set([
@@ -110,6 +185,8 @@ export async function integrateChatTurn(input: {
     input.address,
     priorSkipped,
   );
+  const priorEvidence = input.propertyEvidence ?? [];
+  const userTurnCount = input.messages.filter((m) => m.role === "user").length;
 
   const status =
     priorRecord.mode === "confirming" || priorRecord.mode === "reporting"
@@ -120,9 +197,12 @@ export async function integrateChatTurn(input: {
     conversation: {
       status,
       record: priorRecord,
-      evidence: input.propertyEvidence ?? [],
+      evidence: priorEvidence,
       address: input.address,
       locale: input.locale,
+      focusFieldIds: input.collectionFocusFieldIds ?? [],
+      pendingConfirm: input.pendingConfirm ?? null,
+      userTurnCount,
     },
     message: {
       id: userMessage.id,
@@ -138,6 +218,7 @@ export async function integrateChatTurn(input: {
             kind: "photo",
             messageId: userMessage.id,
             analysis: input.photoAnalysis,
+            visionSlots: input.visionSlots,
           },
         ]
       : undefined,
@@ -145,7 +226,7 @@ export async function integrateChatTurn(input: {
     signal: input.signal,
   });
 
-  const matched = turn.changes
+  const matchedRaw = turn.changes
     .filter(
       (c) =>
         c.kind === "added" ||
@@ -154,7 +235,7 @@ export async function integrateChatTurn(input: {
     )
     .map((c) => ({
       id: fieldIdToMatchedId(c.fieldId),
-      answer:
+      answer: collapseRepeatedAnswer(
         c.nextValue === null || c.nextValue === undefined
           ? c.rawText || ""
           : typeof c.nextValue === "number" &&
@@ -162,8 +243,16 @@ export async function integrateChatTurn(input: {
               c.nextValue % 10_000 === 0
             ? `${c.nextValue / 10_000}萬`
             : String(c.nextValue),
+      ),
     }))
     .filter((m) => m.answer);
+
+  // One chip per field — avoid duplicate「已記下」for the same slot
+  const matchedById = new Map<string, { id: string; answer: string }>();
+  for (const row of matchedRaw) {
+    if (!matchedById.has(row.id)) matchedById.set(row.id, row);
+  }
+  const matched = [...matchedById.values()];
 
   const kind =
     turn.intent === "finish"
@@ -172,19 +261,28 @@ export async function integrateChatTurn(input: {
         ? "fill"
         : "follow_up";
 
+  const extractionFailed = turn.extractionStatus === "extraction_failed";
+
+  // When UI renders matched chips, drop the prose「剛記入」block so facts aren't shown twice
+  const assistantText = matched.length
+    ? stripFiledChangesBlock(turn.assistantMessage)
+    : turn.assistantMessage;
+
   const aiMessage = createAiMessage({
     type: kind,
-    text: turn.assistantMessage,
+    text: assistantText,
     matched: matched.length ? matched : undefined,
-    analysis: turn.warnings.includes("pending_vision")
-      ? "影像辨識尚未完成（未當確定事實）"
-      : turn.changes.some((c) => c.kind === "conflict")
-        ? `欄位衝突待確認：${turn.changes
-            .filter((c) => c.kind === "conflict")
-            .map((c) => c.fieldId)
-            .slice(0, 3)
-            .join("、")}`
-        : undefined,
+    analysis: extractionFailed
+      ? "extraction_failed"
+      : turn.warnings.includes("pending_vision")
+        ? "影像辨識尚未完成（未當確定事實）"
+        : turn.changes.some((c) => c.kind === "conflict")
+          ? `欄位衝突待確認：${turn.changes
+              .filter((c) => c.kind === "conflict")
+              .map((c) => c.fieldId)
+              .slice(0, 3)
+              .join("、")}`
+          : undefined,
   });
 
   const agendaSkippedIds = [
@@ -214,12 +312,20 @@ export async function integrateChatTurn(input: {
   return {
     userMessage,
     aiMessage,
-    messages: [...input.messages, userMessage, aiMessage],
+    messages: [...messagesWithUser, aiMessage],
     agendaActiveId: focusMatchedId,
     agendaSkippedIds,
     propertyRecord,
     propertyEvidence: turn.updatedEvidence,
     collectionSkippedFields: skippedFields,
+    changes: turn.changes,
+    conversationStatus: turn.conversationStatus,
+    turnWarnings: turn.warnings,
+    suggestedQuestions: turn.suggestedQuestions,
+    extractionStatus: turn.extractionStatus,
+    rawAiResponse: turn.rawAiResponse,
+    collectionFocusFieldIds: turn.focusFieldIds,
+    pendingConfirm: turn.pendingConfirm,
   };
 }
 
@@ -231,7 +337,7 @@ export async function buildChatReport(input: {
   /** Structured property report — LLM may only cite evidence values from this. */
   propertyReport?: import("@/lib/property-facts/report-types").PropertyReport | null;
   signal?: AbortSignal;
-}): Promise<{ report: ChatReportSnapshot; aiMessage: ChatMessage }> {
+}): Promise<{ report: ChatReportSnapshot; aiMessage: ChatMessage; extractionStatus: "ok" | "extraction_failed"; rawAiResponse?: string }> {
   const openai = new OpenAI({ apiKey: input.apiKey });
   const bank = projectQuestionBank(input.messages);
   const transcript = input.messages
@@ -286,19 +392,19 @@ export async function buildChatReport(input: {
       messages: [
         {
           role: "system",
-          content: `Create a concise open-house report.
-Rules:
-- Chat observations and structured PROPERTY_EVIDENCE are the only sources.
+          content: `${VIEWING_RECORDER_REPORT_RULES}
+
+Create a concise open-house report from chat + PROPERTY_EVIDENCE only.
 - ${llmPropertySystemRules()}
 - Any numeric or listing fact in the summary/pros/risks MUST cite an evidence id from PROPERTY_EVIDENCE (e.g. [ev_3_year_built]).
 - If a field is in data_gaps or needs_human, say it is unconfirmed — never invent.
 - Do not invent flood/earthquake/tax/HOA/price when evidence is missing.
-- Prefer aligning with narrative_summary_zh when present; keep original EN/FR snippets untranslated when quoting fenced sources.`,
+- Prefer aligning with narrative_summary_zh when present; keep original EN/FR snippets untranslated when quoting fenced sources.
+- Write visible report text in 繁體中文 unless the chat majority is another language.`,
         },
         {
           role: "user",
           content: `Address: ${input.address}
-Write the report in the SAME language as the majority of user messages in the chat (not a fixed UI locale).
 PROPERTY_EVIDENCE:
 ${propertyFactsBlock}
 Bank memory:
@@ -320,39 +426,48 @@ Return JSON:
   );
 
   const raw = completion.choices[0]?.message?.content?.trim() || "{}";
-  let parsed: Record<string, unknown> = {};
-  try {
-    parsed = JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    parsed = {};
+  const llmParsed = parseLlmJson(raw, ChatReportLlmSchema);
+  if (!llmParsed.ok) {
+    // Schema failure: do not invent report fields from bad JSON; fall back to bank only
+    const report: ChatReportSnapshot = {
+      pros: ["採光／格局待確認", "社區機能待確認", "現場感覺待補充"],
+      risks: ["屋況細節未足", "費用文件未核對", "噪音／鄰居未知"],
+      checklist: DEFAULT_QUESTION_BANK.map((item) => {
+        const hit = bank.find((b) => b.id === item.id);
+        return {
+          id: item.id,
+          question: item.question,
+          answer: hit?.answer || "",
+          status: (hit?.answer ? "ok" : "unknown") as "ok" | "unknown",
+        };
+      }),
+      summary: "報告整理暫時失敗，對話內容已保留。可重試產生報告。",
+      generatedAt: new Date().toISOString(),
+    };
+    const aiMessage = createAiMessage({
+      type: "report",
+      text: report.summary,
+      report,
+      analysis: "extraction_failed",
+    });
+    return { report, aiMessage, extractionStatus: "extraction_failed" as const, rawAiResponse: llmParsed.raw };
   }
 
-  const asStringList = (value: unknown, fallback: string[]): string[] => {
-    if (!Array.isArray(value)) return fallback;
-    const list = value
-      .map((item) => (typeof item === "string" ? item.trim() : ""))
-      .filter(Boolean)
-      .slice(0, 3);
+  const parsed = llmParsed.data;
+
+  const asStringList = (value: string[] | undefined, fallback: string[]): string[] => {
+    if (!value) return fallback;
+    const list = value.map((item) => item.trim()).filter(Boolean).slice(0, 3);
     return list.length ? list : fallback;
   };
 
-  const checklistRaw = Array.isArray(parsed.checklist) ? parsed.checklist : [];
-  const checklist = checklistRaw
-    .map((item, index) => {
-      if (!item || typeof item !== "object") return null;
-      const row = item as Record<string, unknown>;
-      const status =
-        row.status === "ok" || row.status === "risk" || row.status === "unknown"
-          ? row.status
-          : "unknown";
-      return {
-        id: typeof row.id === "string" ? row.id : `c_${index}`,
-        question: typeof row.question === "string" ? row.question : `Item ${index + 1}`,
-        answer: typeof row.answer === "string" ? row.answer : "",
-        status,
-      };
-    })
-    .filter(Boolean) as ChatReportSnapshot["checklist"];
+  const checklist =
+    parsed.checklist?.map((row, index) => ({
+      id: row.id || `c_${index}`,
+      question: row.question,
+      answer: row.answer,
+      status: row.status,
+    })) ?? [];
 
   const allowedEvidenceIds = (input.propertyReport?.evidence ?? []).map((e) => e.id);
 
@@ -380,10 +495,9 @@ Return JSON:
               status: (hit?.answer ? "ok" : "unknown") as "ok" | "unknown",
             };
           }),
-    summary:
-      typeof parsed.summary === "string"
-        ? assertCitations(parsed.summary, allowedEvidenceIds).strippedText || parsed.summary
-        : undefined,
+    summary: parsed.summary
+      ? assertCitations(parsed.summary, allowedEvidenceIds).strippedText || parsed.summary
+      : undefined,
     generatedAt: new Date().toISOString(),
   };
 
@@ -393,5 +507,10 @@ Return JSON:
     report,
   });
 
-  return { report, aiMessage };
+  return {
+    report,
+    aiMessage,
+    extractionStatus: "ok" as const,
+    rawAiResponse: llmParsed.raw,
+  };
 }

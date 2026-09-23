@@ -52,6 +52,16 @@ export function classifyTurnIntent(input: {
     skippedFieldIds.push("floor");
   }
 
+  // Bare "不知道" / "不清楚" without a field → soft skip (do not stall dialogue)
+  if (
+    skippedFieldIds.length === 0 &&
+    /^(?:我也不知道|我不知道|不知道|不清楚|不確定|沒印象|沒注意到|暫時不清楚|i don'?t know|don'?t know|not sure|no idea)[.。.!！…]*$/iu.test(
+      text,
+    )
+  ) {
+    return { intent: "skip", skippedFieldIds };
+  }
+
   if (
     skippedFieldIds.length > 0 ||
     /^(跳過|略過|之後再補|先跳過)([。.!！…]*)$/i.test(text) ||

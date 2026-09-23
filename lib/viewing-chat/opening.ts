@@ -1,53 +1,72 @@
+/**
+ * Opening AI bubble after address confirm — natural dialogue, not a quiz list.
+ * Seeds one soft focus field for Explicit (A) collection.
+ */
+
 import type { Locale } from "@/lib/i18n/config";
 import { createAiMessage, type ChatMessage } from "@/lib/viewing-chat/types";
+import type { PropertyFieldId } from "@/lib/viewing-chat/collection/types";
+import { questionForField } from "@/lib/viewing-chat/collection/field-catalog";
 
-/** Opening AI prompts shown in chat after address confirm (UI locale = device language). */
-export function buildOpeningQuestions(address: string, locale: Locale): ChatMessage[] {
-  const lines =
-    locale === "en"
+/** First soft focus after address — high-value on-site cue, skippable. */
+export const OPENING_FOCUS_FIELD: PropertyFieldId = "odor";
+
+export type OpeningBubbleResult = {
+  message: ChatMessage;
+  focusFieldIds: PropertyFieldId[];
+};
+
+/**
+ * One composition: brand the assistant role, invite free talk (B),
+ * one optional explicit cue (A), mention photo/address helpers (C).
+ */
+export function buildOpeningBubble(
+  address: string,
+  locale: Locale | string,
+): OpeningBubbleResult {
+  const focus = OPENING_FOCUS_FIELD;
+  const focusQ = questionForField(focus, String(locale));
+  const loc = String(locale);
+
+  const text =
+    loc.startsWith("en")
       ? [
-          `We're at ${address}. I'll ask on-site questions here — answer with text, voice, or photos.`,
-          "1. Electrical panel brand / amperage?",
-          "2. Any leaks or water stains?",
-          "3. Noise sources (neighbors / street / HVAC)?",
-          "4. Light / orientation enough?",
-          "5. Strata / special fees / taxes?",
-          "6. What else should we ask the seller or agent?",
-        ]
-      : locale === "th"
+          `We're at ${address}. I'm your viewing note-taker — not an agent or appraiser.`,
+          "Say anything you notice in any order (text, voice, or photos). I'll file what I can in the background.",
+          `If useful: ${focusQ} — or skip and talk about something else.`,
+          "Photos and the address may add unverified hints (marked as inferred). You finish when you feel done — not when every field is full.",
+        ].join("\n\n")
+      : loc.startsWith("th")
         ? [
-            `เราอยู่ที่ ${address} ฉันจะถามคำถามหน้างานในแชทนี้ — ตอบด้วยข้อความ เสียง หรือรูปได้`,
-            "1. ตู้ไฟยี่ห้อ / แอมป์?",
-            "2. มีรอยรั่วหรือคราบน้ำไหม?",
-            "3. แหล่งเสียงรบกวน (เพื่อนบ้าน / ถนน / HVAC)?",
-            "4. แสง / ทิศทางเพียงพอไหม?",
-            "5. ค่าส่วนกลาง / ค่าพิเศษ / ภาษี?",
-            "6. ยังควรถามผู้ขายหรือนายหน้าอะไรอีก?",
-          ]
-        : locale === "zh-Hans"
+            `เราอยู่ที่ ${address} ฉันช่วยจดบันทึกการดูบ้าน — ไม่ใช่นายหน้าหรือผู้ประเมิน`,
+            "พูดสิ่งที่เห็นได้ตามลำดับใดก็ได้ (ข้อความ เสียง หรือรูป) ฉันจะจัดเก็บเบื้องหลัง",
+            `ถ้าสะดวก: ${focusQ} — หรือข้ามแล้วคุยอย่างอื่นได้`,
+            "รูปและที่อยู่อาจเติมข้อมูลแบบคาดการณ์ (ติดป้าย inferred) จบเมื่อคุณพร้อม ไม่ต้องกรอกครบทุกช่อง",
+          ].join("\n\n")
+        : loc.includes("Hans")
           ? [
-              `已确认地址：${address}。我会在对话里直接提问，请用文字、语音或照片回答。`,
-              "1. 电箱品牌／安培数？",
-              "2. 有无漏水／水渍？",
-              "3. 噪音来源？（邻居／马路／HVAC）",
-              "4. 采光／朝向够不够？",
-              "5. 管理费／特别费／税金？",
-              "6. 还要追问卖方／中介什么？",
-            ]
+              `已确认地址：${address}。我是看房纪录助理，不是中介或估价师。`,
+              "你想到什么就说什么（文字、语音或照片），我会在背后整理进摘要，不会逼你按表填写。",
+              `若方便可先提一句：${focusQ}——跳过、换话题都没问题。`,
+              "照片与地址情报可能自动补上「推测」栏位，需你确认后才算已确认。觉得可以结束时再说「整理一下／完成」即可。",
+            ].join("\n\n")
           : [
-              `已確認地址：${address}。我會在對話裡直接提問，請用文字、語音或照片回答。`,
-              "1. 電箱廠牌／安培數？",
-              "2. 有無漏水／水漬？",
-              "3. 噪音來源？（鄰居／馬路／HVAC）",
-              "4. 採光／朝向夠不夠？",
-              "5. 管理費／特別費／稅金？",
-              "6. 還要追問賣方／仲介什麼？",
-            ];
+              `已確認地址：${address}。我是看房紀錄助理，不是房仲或估價師。`,
+              "你想到什麼就說什麼（文字、語音或照片），我會在背後整理進摘要，不會逼你按表填寫。",
+              `若方便可先提一句：${focusQ}——跳過、換話題都沒問題。`,
+              "照片與地址情報可能自動補上「推測」欄位，需你確認後才算已確認。覺得可以結束時再說「整理一下／完成」即可。",
+            ].join("\n\n");
 
-  return [
-    createAiMessage({
+  return {
+    message: createAiMessage({
       type: "follow_up",
-      text: lines.join("\n"),
+      text,
     }),
-  ];
+    focusFieldIds: [focus],
+  };
+}
+
+/** @deprecated Use buildOpeningBubble — kept for any legacy callers */
+export function buildOpeningQuestions(address: string, locale: Locale): ChatMessage[] {
+  return [buildOpeningBubble(address, locale).message];
 }

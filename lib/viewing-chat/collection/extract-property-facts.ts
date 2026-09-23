@@ -6,6 +6,8 @@ import type {
   PropertyFieldId,
   PropertyFactStatus,
 } from "./types";
+import { fillFocusSlot } from "./fill-focus-slot";
+import { visionSlotsToInferredFacts, type VisionExtractParsed } from "./vision-slots";
 
 const NUMERIC_FACT_FIELDS = new Set<PropertyFieldId>([
   "price",
@@ -15,7 +17,70 @@ const NUMERIC_FACT_FIELDS = new Set<PropertyFieldId>([
 
 /** Vague distance / time phrases that must stay as raw wording (no numeric rewrite). */
 const VAGUE_TRANSIT_RE =
-  /離(?:捷運|地鐵|公交|公車|車站).{0,8}(?:不遠|不近|附近|旁邊|走一下|蠻近|有點遠)|(?:捷運|地鐵).{0,6}(?:不遠|附近|旁邊)|(?:not far|nearby|close to|walking distance).{0,20}(?:mrt|metro|subway|transit|station)/i;
+  /離(?:捷運|地鐵|公交|公車|車站).{0,8}(?:不遠|不近|附近|旁邊|走一下|蠻近|有點遠)|(?:捷運|地鐵|公車站?).{0,6}(?:不遠|附近|旁邊)|(?:not far|nearby|close to|walking distance).{0,20}(?:mrt|metro|subway|transit|station|bus)/i;
+
+/** Hedging around a number → keep as inferred, never pretend exact. */
+const FUZZY_NUMBER_HINT_RE =
+  /約|大概|左右|差不多|將近|快|上下|多一點|出頭|上下|around|about|roughly|approx/i;
+
+const CN_NUM: Record<string, number> = {
+  零: 0,
+  〇: 0,
+  一: 1,
+  二: 2,
+  兩: 2,
+  三: 3,
+  四: 4,
+  五: 5,
+  六: 6,
+  七: 7,
+  八: 8,
+  九: 9,
+  十: 10,
+};
+
+/** Parse 五 / 十五 / 二十 / 5 → number, else null */
+function parseLooseCount(raw: string): number | null {
+  const t = raw.trim();
+  if (/^\d+$/.test(t)) return parseInt(t, 10);
+  if (t === "十") return 10;
+  if (/^十[一二三四五六七八九]$/.test(t)) {
+    return 10 + (CN_NUM[t[1]!] ?? 0);
+  }
+  if (/^[一二三四五六七八九]十$/.test(t)) {
+    return (CN_NUM[t[0]!] ?? 0) * 10;
+  }
+  if (/^[一二三四五六七八九]十[一二三四五六七八九]$/.test(t)) {
+    return (CN_NUM[t[0]!] ?? 0) * 10 + (CN_NUM[t[2]!] ?? 0);
+  }
+  if (t.length === 1 && CN_NUM[t] != null) return CN_NUM[t]!;
+  return null;
+}
+
+/** True when the utterance is clearly about transit distance, not 公設/設備. */
+export function looksLikeTransitUtterance(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (
+    /(?:捷運|地鐵|公交|公車|公車站|車站|bus|mrt|metro|subway|transit)/i.test(t) &&
+    /(?:走路|步行|騎車|分鐘|分|遠|近|不遠|nearby|walk)/i.test(t)
+  ) {
+    return true;
+  }
+  if (
+    /(?:走路|步行)\s*[一二三四五六七八九十兩\d]+\s*分/.test(t) &&
+    /(?:站|捷運|地鐵|公車|公交)/.test(t)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function hasFuzzyNumberHint(text: string, matchIndex: number): boolean {
+  const windowStart = Math.max(0, matchIndex - 8);
+  const before = text.slice(windowStart, matchIndex);
+  return FUZZY_NUMBER_HINT_RE.test(before);
+}
 
 function createFact(input: {
   fieldId: PropertyFieldId;
@@ -44,10 +109,14 @@ function pickSourceText(input: ExtractPropertyFactsInput): {
   trustedText: string;
   analysisText: string;
   messageId: string | null;
+  /** Raw composer/transcript only — for focus-slot answers (no capture echo) */
+  primaryText: string;
 } {
   const parts: string[] = [];
   if (input.transcript?.trim()) parts.push(input.transcript.trim());
   if (input.text?.trim()) parts.push(input.text.trim());
+
+  const primaryText = uniqueTextParts(parts);
 
   let messageId = input.messageId?.trim() || null;
   const analysisParts: string[] = [];
@@ -72,10 +141,26 @@ function pickSourceText(input: ExtractPropertyFactsInput): {
   }
 
   return {
-    trustedText: parts.join("\n").trim(),
-    analysisText: analysisParts.join("\n").trim(),
+    // Captures often echo message.text (see normalizeCaptures) — dedupe so
+    // focus fills aren't stored as「答案\n答案」.
+    trustedText: uniqueTextParts(parts),
+    analysisText: uniqueTextParts(analysisParts),
     messageId,
+    primaryText,
   };
+}
+
+/** Drop identical segments so message.text + mirrored capture don't double the answer. */
+function uniqueTextParts(parts: string[]): string {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of parts) {
+    const t = part.trim();
+    if (!t || seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+  }
+  return out.join("\n").trim();
 }
 
 function classifyIntent(
@@ -181,7 +266,8 @@ function parseWanPrice(raw: string): number | null {
 export function extractPropertyFacts(
   input: ExtractPropertyFactsInput,
 ): ExtractPropertyFactsResult {
-  const { trustedText, analysisText, messageId } = pickSourceText(input);
+  const { trustedText, analysisText, messageId, primaryText } =
+    pickSourceText(input);
   const fields: ExtractedPropertyFact[] = [];
   const skippedFieldIds = detectSkippedFields(trustedText);
 
@@ -257,12 +343,14 @@ export function extractPropertyFacts(
       if (digits) {
         const raw = sliceMatch(trustedText, /\d+(?:\.\d+)?\s*萬/) || priceSimple[0];
         const value = parseWanPrice(`${digits}萬`);
+        const matchIndex = trustedText.indexOf(raw);
+        const fuzzy = hasFuzzyNumberHint(trustedText, Math.max(0, matchIndex));
         pushUnique(
           createFact({
             fieldId: "price",
-            value: value ?? `${digits}萬`,
-            status: "confirmed",
-            confidence: 0.88,
+            value: fuzzy ? raw.trim() : (value ?? `${digits}萬`),
+            status: fuzzy ? "inferred" : "confirmed",
+            confidence: fuzzy ? 0.45 : 0.88,
             sourceMessageId: messageId,
             rawText: raw,
           }),
@@ -308,18 +396,29 @@ export function extractPropertyFacts(
     );
   }
 
-  // --- Area (only with explicit number + unit) ---
+  // --- Area (only with explicit number + unit; fuzzy → inferred, keep raw) ---
   const areaMatch = trustedText.match(
     /(\d+(?:\.\d+)?)\s*坪|(?:約|大概)?\s*(\d+(?:\.\d+)?)\s*(?:平方英尺|sq\s*ft|sqft)/i,
   );
   if (areaMatch && !skippedFieldIds.includes("area")) {
     const n = parseFloat(areaMatch[1] || areaMatch[2]);
+    const matchIndex = trustedText.search(
+      /(\d+(?:\.\d+)?)\s*坪|(?:約|大概)?\s*(\d+(?:\.\d+)?)\s*(?:平方英尺|sq\s*ft|sqft)/i,
+    );
+    const fuzzy =
+      hasFuzzyNumberHint(trustedText, matchIndex) ||
+      /約|大概/.test(areaMatch[0]);
     pushUnique(
       createFact({
         fieldId: "area",
-        value: Number.isFinite(n) ? n : areaMatch[0],
-        status: "confirmed",
-        confidence: 0.9,
+        // Prefer raw span when fuzzy so we never present a fake exact number as confirmed
+        value: fuzzy
+          ? areaMatch[0].trim()
+          : Number.isFinite(n)
+            ? n
+            : areaMatch[0],
+        status: fuzzy ? "inferred" : "confirmed",
+        confidence: fuzzy ? 0.45 : 0.9,
         sourceMessageId: messageId,
         rawText: areaMatch[0],
       }),
@@ -375,17 +474,34 @@ export function extractPropertyFacts(
   }
 
   const preciseTransit = trustedText.match(
-    /(?:步行|走路|騎車)?\s*(\d+)\s*分鐘.{0,6}(?:捷運|地鐵|車站)|(?:捷運|地鐵).{0,6}(?:步行|走路)?\s*(\d+)\s*分鐘/,
+    /(?:(?:公車站|公交站|捷運站|地鐵站|車站|捷運|地鐵|公車|公交)[^。\n]{0,8})?(?:步行|走路|騎車)?\s*([一二三四五六七八九十兩\d]+)\s*分(?:鐘)?(?:[^。\n]{0,6}(?:捷運|地鐵|車站|公車|公交|公車站))?|(?:捷運|地鐵|公車|公交|公車站).{0,10}(?:步行|走路)?\s*([一二三四五六七八九十兩\d]+)\s*分(?:鐘)?/i,
   );
   if (preciseTransit && !vagueTransit) {
+    const countRaw = preciseTransit[1] || preciseTransit[2] || "";
+    const n = parseLooseCount(countRaw);
     pushUnique(
       createFact({
         fieldId: "transit",
         value: preciseTransit[0].trim(),
         status: "confirmed",
-        confidence: 0.9,
+        confidence: n != null ? 0.9 : 0.82,
         sourceMessageId: messageId,
         rawText: preciseTransit[0].trim(),
+      }),
+    );
+  } else if (
+    !vagueTransit &&
+    looksLikeTransitUtterance(trustedText) &&
+    !fields.some((f) => f.fieldId === "transit")
+  ) {
+    pushUnique(
+      createFact({
+        fieldId: "transit",
+        value: trustedText.slice(0, 80),
+        status: "confirmed",
+        confidence: 0.84,
+        sourceMessageId: messageId,
+        rawText: trustedText.slice(0, 80),
       }),
     );
   }
@@ -403,6 +519,23 @@ export function extractPropertyFacts(
         confidence: 0.86,
         sourceMessageId: messageId,
         rawText: noiseMatch[0].trim(),
+      }),
+    );
+  }
+
+  // --- Odor from trusted user wording (not only vision analysis) ---
+  const odorMatch = trustedText.match(
+    /(?:沒有|無|不見|不太有)[^。\n]{0,8}(?:特別的)?(?:氣味|味道|異味|怪味)|(?:氣味|味道|進門).{0,8}(?:霉|臭|菸|煙|寵物|污水|異味)|(?:有點|一股)?(?:霉味|臭味|菸味)|smell[^\n.]{0,20}/i,
+  );
+  if (odorMatch) {
+    pushUnique(
+      createFact({
+        fieldId: "odor",
+        value: odorMatch[0].trim(),
+        status: "confirmed",
+        confidence: 0.86,
+        sourceMessageId: messageId,
+        rawText: odorMatch[0].trim(),
       }),
     );
   }
@@ -444,6 +577,91 @@ export function extractPropertyFacts(
     );
   }
 
+  // --- Amenities / 公設 (common composite-slot answer) ---
+  // Do not treat 公車站／走路N分 as 公設.
+  const amenitiesNone = trustedText.match(
+    /(?:沒有|無|不見|不太有)[^。\n]{0,6}(?:公設|公共設施|社區設施)|(?:公設|公共設施)[^。\n]{0,6}(?:沒有|無)/i,
+  );
+  const amenitiesHit = trustedText.match(
+    /(?:公設|公共設施|社區設施|健身房|游泳池|管理室)[^。\n]{0,20}|(?:設備)(?:不錯|齊全|新|舊|還好)?/i,
+  );
+  const transitLike = looksLikeTransitUtterance(trustedText);
+  if (
+    amenitiesNone &&
+    !transitLike &&
+    !fields.some((f) => f.fieldId === "amenities")
+  ) {
+    pushUnique(
+      createFact({
+        fieldId: "amenities",
+        value: amenitiesNone[0].trim(),
+        status: "confirmed",
+        confidence: 0.88,
+        sourceMessageId: messageId,
+        rawText: amenitiesNone[0].trim(),
+      }),
+    );
+  } else if (
+    amenitiesHit &&
+    !amenitiesNone &&
+    !transitLike &&
+    !fields.some((f) => f.fieldId === "amenities")
+  ) {
+    pushUnique(
+      createFact({
+        fieldId: "amenities",
+        value: amenitiesHit[0].trim(),
+        status: "confirmed",
+        confidence: 0.84,
+        sourceMessageId: messageId,
+        rawText: amenitiesHit[0].trim(),
+      }),
+    );
+  }
+
+  // --- Water damage when mentioned in multi-slot replies ---
+  const waterHit = trustedText.match(
+    /(?:沒有|無|不見)[^。\n]{0,6}(?:水漬|壁癌|滲漏|漏水)|(?:有|看到)[^。\n]{0,8}(?:水漬|壁癌|滲漏|漏水)|(?:水漬|壁癌|滲漏|漏水)[^。\n]{0,12}/i,
+  );
+  if (waterHit && !fields.some((f) => f.fieldId === "water_damage")) {
+    pushUnique(
+      createFact({
+        fieldId: "water_damage",
+        value: waterHit[0].trim(),
+        status: "confirmed",
+        confidence: 0.86,
+        sourceMessageId: messageId,
+        rawText: waterHit[0].trim(),
+      }),
+    );
+  }
+
+  // --- Renovation / décor freeform (common "say what you see" remarks) ---
+  const renoHit = trustedText.match(
+    /(?:裝潢|裝修|翻新|裝修好了?)[^。\n！!]{0,16}/,
+  );
+  if (renoHit) {
+    const span = renoHit[0].trim();
+    const negative = /糟|醜|陽春|隨便|很舊|誇張|過頭|廉價|沒翻/.test(
+      trustedText,
+    );
+    const positive =
+      /狠心|漂亮|讚|高級|精緻|用心|很新|不錯|有品味|氣派/.test(trustedText);
+    const fieldId = negative ? "cons" : positive ? "pros" : "amenities";
+    if (!fields.some((f) => f.fieldId === fieldId)) {
+      pushUnique(
+        createFact({
+          fieldId,
+          value: span,
+          status: "confirmed",
+          confidence: 0.82,
+          sourceMessageId: messageId,
+          rawText: span,
+        }),
+      );
+    }
+  }
+
   // --- Light as separate signal when mentioned with 採光 ---
   if (/採光/.test(trustedText) && !fields.some((f) => f.fieldId === "light")) {
     const lightSpan = sliceMatch(trustedText, /採光[^。\n]{0,12}/);
@@ -477,6 +695,37 @@ export function extractPropertyFacts(
       );
     }
     // Explicitly do NOT parse price/area/floor from analysis alone
+  }
+
+  // Contextual (C): structured vision slots → inferred only
+  for (const capture of input.captures ?? []) {
+    if (!capture.visionSlots?.length) continue;
+    const parsed: VisionExtractParsed = {
+      extractedText: "",
+      observedConditions: [],
+      uncertainItems: [],
+      confidence: 0.45,
+      slots: capture.visionSlots.map((s) => ({
+        fieldId: s.fieldId,
+        value: s.value,
+        confidence: s.confidence,
+        note: s.note,
+      })),
+    };
+    for (const fact of visionSlotsToInferredFacts(parsed, messageId)) {
+      pushUnique(fact);
+    }
+  }
+
+  // Explicit (A): short answer to soft focus question — use primary utterance only
+  // (trustedText can still include media captions; never echo duplicated captures).
+  for (const fact of fillFocusSlot({
+    text: primaryText || trustedText,
+    focusFieldIds: input.focusFieldIds ?? [],
+    messageId,
+    alreadyExtractedFieldIds: fields.map((f) => f.fieldId),
+  })) {
+    pushUnique(fact);
   }
 
   // Mark skipped price/floor as unknown if requested

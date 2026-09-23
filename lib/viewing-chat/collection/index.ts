@@ -47,3 +47,42 @@ export {
   createConversationState,
   processUserTurn,
 } from "./process-user-turn";
+export {
+  VIEWING_RECORDER_SYSTEM_PROMPT,
+  VIEWING_RECORDER_POLISH_RULES,
+  VIEWING_RECORDER_REPORT_RULES,
+} from "./llm-prompt";
+export {
+  ChatReportLlmSchema,
+  PolishReplySchema,
+  parseLlmJson,
+} from "./llm-schemas";
+export {
+  resolveFieldDisplayStatus,
+  resolveRecordFieldDisplayStatus,
+} from "./field-display";
+export type { FieldDisplayStatus } from "./field-display";
+export type { ExtractionStatus } from "./orchestrator-types";
+export { fillFocusSlot } from "./fill-focus-slot";
+export { applyPropertyIntelInferences } from "./apply-intel-inferences";
+export {
+  extractPropertyFactsWithLlm,
+  mergeRuleAndLlmFacts,
+} from "./llm-extract";
+export {
+  visionSlotsToInferredFacts,
+  parseVisionExtractRaw,
+  VisionExtractSchema,
+} from "./vision-slots";
+export {
+  isVagueUtterance,
+  isYesUtterance,
+  isNoUtterance,
+  splitLeadingYesNo,
+  depthBandForTurn,
+  resolvePendingConfirm,
+  compositeQuestion,
+  confirmQuestion,
+  clarifyQuestionForField,
+} from "./dialogue-strategy";
+export type { PendingConfirmState } from "./orchestrator-types";

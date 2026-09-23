@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ChevronUp, Search, Sparkles, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Clipboard, Search, Sparkles, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AddressAutocomplete } from "@/components/viewing-wizard/AddressAutocomplete";
 import { useI18n } from "@/components/I18nProvider";
@@ -8,6 +8,8 @@ import { ChatMessageList } from "@/components/viewing-chat/ChatMessageList";
 import { HistorySearchPanel } from "@/components/viewing-chat/HistorySearchPanel";
 import { IconRail } from "@/components/viewing-chat/IconRail";
 import { MediaLibraryPanel } from "@/components/viewing-chat/MediaLibraryPanel";
+import { PropertySummaryPanel } from "@/components/viewing-chat/PropertySummaryPanel";
+import { ReviewCard, type ReviewFieldDraft } from "@/components/viewing-chat/ReviewCard";
 import { ViewingChatComposer } from "@/components/viewing-chat/ViewingChatComposer";
 import { AI_CONSENT_VERSION } from "@/lib/ai-boundary/client";
 import type { AddressSuggestion } from "@/lib/address-suggest";
@@ -31,7 +33,10 @@ import {
   type ViewingChatThread,
 } from "@/lib/viewing-chat/types";
 import { CollectionQuickActions } from "@/components/viewing-chat/CollectionQuickActions";
-import { ReportQuickActions } from "@/components/viewing-chat/ReportQuickActions";
+import {
+  ReportQuickActions,
+  type CollectionActionId,
+} from "@/components/viewing-chat/ReportQuickActions";
 import { ConflictingDataAlert } from "@/components/viewing-chat/ConflictingDataAlert";
 import type {
   PropertySource,
@@ -56,14 +61,17 @@ import {
   projectAgenda,
 } from "@/lib/viewing-chat/agenda";
 import { createAgendaLabelResolver } from "@/lib/viewing-chat/agenda-labels";
-import { applyCollectionSkip } from "@/lib/viewing-chat/collection";
+import { applyCollectionSkip, createEmptyPropertyRecord, mergePropertyFacts } from "@/lib/viewing-chat/collection";
+import { applyPropertyIntelInferences } from "@/lib/viewing-chat/collection/apply-intel-inferences";
 import type {
   PropertyCollectionRecord,
   PropertyFactEvidence,
   PropertyFieldId,
 } from "@/lib/viewing-chat/collection/types";
-import { createEmptyPropertyRecord } from "@/lib/viewing-chat/collection";
-
+import type { RecordChange } from "@/lib/viewing-chat/collection/orchestrator-types";
+import { buildOpeningBubble } from "@/lib/viewing-chat/opening";
+import type { PropertyIntel } from "@/lib/property-intel/types";
+import type { Locale } from "@/lib/i18n/config";
 function consentSessionId(): string {
   if (typeof window === "undefined") return "ssr";
   const key = "kanfangji.chat.consentSession";
@@ -110,6 +118,19 @@ export function ViewingChatApp() {
   const [chatSearchQuery, setChatSearchQuery] = useState("");
   const [chatMatchIndex, setChatMatchIndex] = useState(0);
   const [userId, setUserId] = useState<string | null>(null);
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const [turnError, setTurnError] = useState<string | null>(null);
+  const [lastTurnPayload, setLastTurnPayload] = useState<{
+    text: string;
+    audio: Blob | null;
+    image: File | null;
+    file: File | null;
+  } | null>(null);
+  /** Optimistic user message id — stripped on retry so input is not duplicated */
+  const [pendingUserMessageId, setPendingUserMessageId] = useState<string | null>(
+    null,
+  );
+  const [composerHint, setComposerHint] = useState<string | null>(null);
   const chatSearchInputRef = useRef<HTMLInputElement>(null);
 
   const active = useMemo(
@@ -246,53 +267,114 @@ export function ViewingChatApp() {
       return;
     }
     const market = inferAgendaMarket(trimmed);
-    const firstId = openingAgendaActiveId(market);
-    const resolveLabels = createAgendaLabelResolver(c);
-    const firstQuestion =
-      projectAgenda({
-        messages: [],
-        activeId: firstId,
-        market,
-        resolveLabels,
-      }).find((item) => item.id === firstId)?.question ?? firstId;
-    // Option A: address → on-site capture; seed only the first agenda question.
-    const guidance = createAiMessage({
-      type: "follow_up",
-      text: c.viewingGuidanceFirst.replace("{question}", firstQuestion),
+    const opening = buildOpeningBubble(trimmed, locale as Locale);
+    const seedRecord = createEmptyPropertyRecord({
+      address: trimmed,
+      mode: "collecting",
+      fields: {
+        address: {
+          fieldId: "address",
+          value: trimmed,
+          status: "confirmed",
+          confidence: 0.95,
+          sourceMessageId: null,
+          rawText: trimmed,
+          updatedAt: new Date().toISOString(),
+        },
+      },
     });
-    const thread = createLocalThread(trimmed, [guidance], null);
+    const thread = createLocalThread(trimmed, [opening.message], null);
     patchLocalThread(thread.id, {
       stage: "viewing_preparation",
       normalizedAddress: trimmed,
       skippedSources: true,
-      agendaActiveId: firstId,
+      agendaActiveId: fieldIdToAgenda(opening.focusFieldIds[0]),
       agendaSkippedIds: [],
       agendaMarket: market,
-      propertyRecord: createEmptyPropertyRecord({
-        address: trimmed,
-        mode: "collecting",
-        fields: {
-          address: {
-            fieldId: "address",
-            value: trimmed,
-            status: "confirmed",
-            confidence: 0.95,
-            sourceMessageId: null,
-            rawText: trimmed,
-            updatedAt: new Date().toISOString(),
-          },
-        },
-      }),
+      propertyRecord: seedRecord,
       propertyEvidence: [],
       collectionSkippedFields: [],
+      collectionFocusFieldIds: opening.focusFieldIds,
+      lastTurnChanges: [],
+      conversationStatus: "collecting",
+      turnWarnings: [],
     });
     refreshLocal();
     setActiveId(thread.id);
     setAddressDraft(trimmed);
     setStatus("");
+    setTurnError(null);
     setConflicts([]);
     setListingIntakeOpen(false);
     setSoftFailCtas(false);
+    // Summary is a top drawer — don't auto-open over the chat
+
+    // Contextual (C): address intel → inferred fields (best-effort, non-blocking)
+    void enrichAddressIntel(thread.id, trimmed, seedRecord);
+  }
+
+  function fieldIdToAgenda(fieldId: PropertyFieldId | undefined): string | null {
+    if (!fieldId) return openingAgendaActiveId(inferAgendaMarket(addressDraft || ""));
+    const map: Record<string, string> = {
+      odor: "q_odor",
+      layout: "q_layout",
+      noise: "q_noise",
+      light: "q_light",
+      water_damage: "q_water_damage",
+      electrical: "q_electrical",
+    };
+    return map[fieldId] ?? fieldId;
+  }
+
+  async function enrichAddressIntel(
+    threadId: string,
+    address: string,
+    baseRecord: PropertyCollectionRecord,
+  ) {
+    try {
+      setStatus(c.externalEnriching);
+      const response = await fetch("/api/property-intel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          address,
+          viewingId: threadId.startsWith("local_") ? null : threadId,
+          consentVersion: AI_CONSENT_VERSION,
+          consentSessionId: consentSessionId(),
+          identityKind: userId ? "user" : "guest",
+          includeFactCard: false,
+        }),
+      });
+      if (!response.ok) {
+        setStatus("");
+        return;
+      }
+      const data = (await response.json()) as {
+        intel?: PropertyIntel | null;
+      };
+      const facts = applyPropertyIntelInferences(data.intel);
+      if (!facts.length) {
+        setStatus("");
+        return;
+      }
+      const merged = mergePropertyFacts(baseRecord, facts);
+      const changes: RecordChange[] = facts.map((f) => ({
+        fieldId: f.fieldId,
+        kind: "added" as const,
+        nextValue: f.value,
+        rawText: f.rawText,
+      }));
+      patchLocalThread(threadId, {
+        propertyRecord: merged.record,
+        propertyEvidence: merged.evidence,
+        metadata: data.intel ?? null,
+        lastTurnChanges: changes,
+      });
+      refreshLocal();
+      setStatus("");
+    } catch {
+      setStatus("");
+    }
   }
 
   function skipActiveAgendaItem() {
@@ -301,8 +383,8 @@ export function ViewingChatApp() {
     const skipId =
       current?.id ||
       active.agendaActiveId ||
-      active.collectionSkippedFields?.[0] ||
       "area";
+    const beforeFields = { ...(active.propertyRecord?.fields ?? {}) };
     const skipped = applyCollectionSkip({
       record:
         active.propertyRecord ??
@@ -312,21 +394,115 @@ export function ViewingChatApp() {
       skipId,
       locale,
     });
+    // Do not delete field values — only extend skippedFields
+    const preservedRecord = {
+      ...skipped.record,
+      fields: {
+        ...beforeFields,
+        ...skipped.record.fields,
+      },
+    };
     const msg = createAiMessage({
       type: "follow_up",
       text: skipped.replyText,
     });
+    const change: RecordChange = {
+      fieldId: skipId.replace(/^q_/, "") as PropertyFieldId,
+      kind: "skipped",
+      previousValue: beforeFields[skipId.replace(/^q_/, "") as PropertyFieldId]?.value ?? null,
+      nextValue: null,
+    };
     patchLocalThread(active.id, {
       agendaActiveId: skipped.focusMatchedId,
       agendaSkippedIds: [
         ...new Set([...(active.agendaSkippedIds ?? []), skipId]),
       ],
       collectionSkippedFields: skipped.skippedFields,
-      propertyRecord: skipped.record,
+      propertyRecord: preservedRecord,
       propertyEvidence: skipped.evidence,
+      lastTurnChanges: [change],
       messages: [...active.messages, msg],
     });
     refreshLocal();
+  }
+
+  function enterReviewMode() {
+    if (!active) return;
+    const msg = createAiMessage({
+      type: "follow_up",
+      text: c.reviewHint,
+    });
+    patchLocalThread(active.id, {
+      conversationStatus: "reviewing",
+      propertyRecord: active.propertyRecord
+        ? { ...active.propertyRecord, mode: "confirming" }
+        : active.propertyRecord,
+      messages: [...active.messages, msg],
+    });
+    refreshLocal();
+    setSummaryOpen(true);
+  }
+
+  function applyReviewDrafts(drafts: ReviewFieldDraft[]) {
+    if (!active) return;
+    const base =
+      active.propertyRecord ??
+      createEmptyPropertyRecord({ address: active.address });
+    const fields = { ...base.fields };
+    const now = new Date().toISOString();
+    for (const draft of drafts) {
+      fields[draft.fieldId] = {
+        fieldId: draft.fieldId,
+        value: draft.value.trim() ? draft.value.trim() : null,
+        status: draft.status,
+        confidence: draft.status === "confirmed" ? 0.95 : 0.2,
+        sourceMessageId: null,
+        rawText: draft.value.trim() || draft.fieldId,
+        updatedAt: now,
+        hasConflict: false,
+      };
+    }
+    patchLocalThread(active.id, {
+      propertyRecord: {
+        ...base,
+        fields,
+        mode: "confirming",
+        updatedAt: now,
+      },
+      conversationStatus: "reviewing",
+    });
+    refreshLocal();
+    void generateReport();
+  }
+
+  function handleCollectionAction(id: CollectionActionId) {
+    if (!active) return;
+    if (id === "skip") {
+      skipActiveAgendaItem();
+      return;
+    }
+    if (id === "summarize") {
+      void submitTurn({
+        text: locale.startsWith("en") ? "summarize" : "整理一下",
+        audio: null,
+        image: null,
+        file: null,
+      });
+      return;
+    }
+    if (id === "finish") {
+      enterReviewMode();
+      return;
+    }
+    if (id === "supplement") {
+      setComposerHint(c.composerSupplementHint);
+      document.getElementById("viewing-chat-composer")?.focus();
+      return;
+    }
+    if (id === "correct") {
+      setComposerHint(c.composerCorrectHint);
+      document.getElementById("viewing-chat-composer")?.focus();
+    }
   }
 
   function openListingIntake() {
@@ -504,21 +680,49 @@ export function ViewingChatApp() {
       return;
     }
     setBusy(true);
-    setStatus("");
-    try {
-      const fileNote = payload.file
-        ? locale.startsWith("en")
-          ? `[Uploaded file: ${payload.file.name}]`
-          : `【已上傳檔案：${payload.file.name}】`
-        : "";
-      const textForAi = [payload.text, fileNote].filter(Boolean).join("\n");
+    setStatus(
+      payload.image || payload.file || payload.audio
+        ? c.uploadProcessing
+        : c.turnProcessing,
+    );
+    setTurnError(null);
+    setLastTurnPayload(payload);
+    setComposerHint(null);
 
+    // Save raw user message first (local) so refresh / AI failure cannot erase input
+    const priorMessages = pendingUserMessageId
+      ? active.messages.filter((m) => m.id !== pendingUserMessageId)
+      : active.messages;
+    const fileNote = payload.file
+      ? locale.startsWith("en")
+        ? `[Uploaded file: ${payload.file.name}]`
+        : `【已上傳檔案：${payload.file.name}】`
+      : "";
+    const textForAi = [payload.text, fileNote].filter(Boolean).join("\n");
+    const optimisticUser = createUserMessage({
+      type: payload.image
+        ? "photo"
+        : payload.audio
+          ? "audio"
+          : payload.file
+            ? "file"
+            : "text",
+      text: textForAi.trim() || undefined,
+      fileName: payload.file?.name,
+      replyTo: replyTo ?? undefined,
+    });
+    setPendingUserMessageId(optimisticUser.id);
+    saveLocalMessages(active.id, [...priorMessages, optimisticUser]);
+    refreshLocal();
+
+    try {
       const form = new FormData();
       form.append("address", active.address);
       form.append("locale", locale);
       form.append("viewingId", active.id.startsWith("local_") ? "" : active.id);
       form.append("text", textForAi);
-      form.append("messages", JSON.stringify(active.messages));
+      // Send prior messages only — server appends the canonical user message
+      form.append("messages", JSON.stringify(priorMessages));
       form.append("consentVersion", AI_CONSENT_VERSION);
       form.append("consentSessionId", consentSessionId());
       form.append("identityKind", userId ? "user" : "guest");
@@ -543,6 +747,14 @@ export function ViewingChatApp() {
         "collectionSkippedFields",
         JSON.stringify(active.collectionSkippedFields ?? []),
       );
+      form.append(
+        "collectionFocusFieldIds",
+        JSON.stringify(active.collectionFocusFieldIds ?? []),
+      );
+      form.append(
+        "pendingConfirm",
+        JSON.stringify(active.pendingConfirm ?? null),
+      );
       if (replyTo) {
         form.append("replyTo", JSON.stringify(replyTo));
       }
@@ -566,6 +778,12 @@ export function ViewingChatApp() {
         propertyRecord?: PropertyCollectionRecord | null;
         propertyEvidence?: PropertyFactEvidence[];
         collectionSkippedFields?: PropertyFieldId[];
+        changes?: RecordChange[];
+        conversationStatus?: ViewingChatThread["conversationStatus"];
+        turnWarnings?: string[];
+        extractionStatus?: "ok" | "extraction_failed";
+        collectionFocusFieldIds?: PropertyFieldId[];
+        pendingConfirm?: ViewingChatThread["pendingConfirm"];
         error?: string;
         code?: string;
       };
@@ -628,6 +846,7 @@ export function ViewingChatApp() {
       }
 
       saveLocalMessages(active.id, nextMessages);
+      setPendingUserMessageId(null);
       patchLocalThread(active.id, {
         agendaActiveId:
           data.agendaActiveId !== undefined
@@ -649,11 +868,40 @@ export function ViewingChatApp() {
           data.collectionSkippedFields !== undefined
             ? data.collectionSkippedFields
             : active.collectionSkippedFields,
+        collectionFocusFieldIds:
+          data.collectionFocusFieldIds !== undefined
+            ? data.collectionFocusFieldIds
+            : active.collectionFocusFieldIds,
+        pendingConfirm:
+          data.pendingConfirm !== undefined
+            ? data.pendingConfirm
+            : active.pendingConfirm,
+        lastTurnChanges: data.changes ?? [],
+        conversationStatus:
+          data.conversationStatus ?? active.conversationStatus ?? "collecting",
+        turnWarnings: data.turnWarnings ?? [],
       });
       refreshLocal();
       setReplyTo(null);
+
+      if (
+        data.extractionStatus === "extraction_failed" ||
+        data.turnWarnings?.includes("extraction_failed")
+      ) {
+        setTurnError(c.extractionFailed);
+        // Keep lastTurnPayload so retry stays available
+      } else {
+        setLastTurnPayload(null);
+      }
+
+      if (data.conversationStatus === "reviewing") {
+        setSummaryOpen(true);
+      }
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : c.turnFailed);
+      // Optimistic user message already saved — keep it visible
+      const message = error instanceof Error ? error.message : c.turnFailed;
+      setStatus(message);
+      setTurnError(message);
     } finally {
       setBusy(false);
     }
@@ -713,6 +961,7 @@ export function ViewingChatApp() {
           sources: data.sources ?? active.sources,
           pipelineSteps: data.steps ?? active.pipelineSteps,
           stage: "report_ready",
+          conversationStatus: "completed",
         });
         setConflicts(data.conflicts ?? []);
         refreshLocal();
@@ -744,7 +993,10 @@ export function ViewingChatApp() {
         throw new Error(data.error || data.code || c.reportFailed);
       }
       saveLocalMessages(active.id, data.messages, data.report ?? null);
-      patchLocalThread(active.id, { stage: "report_ready" });
+      patchLocalThread(active.id, {
+        stage: "report_ready",
+        conversationStatus: "completed",
+      });
       refreshLocal();
       setStatus("");
     } catch (error) {
@@ -826,10 +1078,25 @@ export function ViewingChatApp() {
         onTogglePinThread={togglePinThread}
       />
 
-      <section className="mx-auto flex min-h-0 min-w-0 max-w-[900px] flex-1 flex-col">
+      <section className="mx-auto flex min-h-0 min-w-0 max-w-[1200px] flex-1 flex-col">
         {active ? (
           <>
-            <header className="flex shrink-0 items-center justify-end gap-2 border-b border-black/8 bg-[#FAF6F1]/95 px-3 py-2.5 pt-[max(0.65rem,env(safe-area-inset-top))] backdrop-blur">
+            <header className="relative z-40 flex shrink-0 items-center justify-end gap-2 border-b border-black/8 bg-[#FAF6F1]/95 px-3 py-2.5 pt-[max(0.65rem,env(safe-area-inset-top))] backdrop-blur">
+              <button
+                type="button"
+                onClick={() => setSummaryOpen((v) => !v)}
+                className={`inline-flex h-8 items-center gap-1 rounded-full px-2.5 text-[12px] font-bold disabled:opacity-40 ${
+                  summaryOpen
+                    ? "bg-black text-white"
+                    : "text-[#4B5563] hover:bg-black/5"
+                }`}
+                aria-label={summaryOpen ? c.summaryClose : c.summaryOpen}
+                title={summaryOpen ? c.summaryClose : c.summaryOpen}
+                aria-pressed={summaryOpen}
+              >
+                <Clipboard className="h-4 w-4" />
+                <span className="hidden sm:inline">{c.summaryOpen}</span>
+              </button>
               <button
                 type="button"
                 disabled={active.messages.length === 0}
@@ -851,13 +1118,25 @@ export function ViewingChatApp() {
               <button
                 type="button"
                 disabled={busy || active.messages.length === 0}
-                onClick={() => void generateReport()}
+                onClick={() => {
+                  if (active.conversationStatus === "reviewing") {
+                    void generateReport();
+                  } else {
+                    enterReviewMode();
+                  }
+                }}
                 className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#2563EB] px-3 py-1.5 text-[12px] font-bold text-white disabled:opacity-40"
               >
                 <Sparkles className="h-3.5 w-3.5" />
-                {busy ? c.generatingReport : c.generateReport}
+                {busy
+                  ? c.generatingReport
+                  : active.conversationStatus === "reviewing"
+                    ? c.reviewConfirm
+                    : c.actionFinish}
               </button>
             </header>
+            <div className="relative flex min-h-0 flex-1">
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
               {conflicts.length > 0 ? (
                 <ConflictingDataAlert
@@ -1057,25 +1336,14 @@ export function ViewingChatApp() {
                 <>
                   <ReportQuickActions
                     disabled={busy || sourceBusy}
-                    items={[
-                      c.quickAskAgent,
-                      c.quickChecklist,
-                      c.quickPhotoCheck,
-                      c.quickNextRoom,
-                      c.agendaSkip,
+                    actions={[
+                      { id: "supplement", label: c.actionSupplement },
+                      { id: "correct", label: c.actionCorrect },
+                      { id: "skip", label: c.actionSkip },
+                      { id: "summarize", label: c.actionSummarize },
+                      { id: "finish", label: c.actionFinish },
                     ]}
-                    onPick={(prompt) => {
-                      if (prompt === c.agendaSkip) {
-                        skipActiveAgendaItem();
-                        return;
-                      }
-                      void submitTurn({
-                        text: prompt,
-                        audio: null,
-                        image: null,
-                        file: null,
-                      });
-                    }}
+                    onAction={handleCollectionAction}
                   />
                   <div className="flex flex-wrap gap-1.5 px-3 pb-2">
                     <button
@@ -1089,12 +1357,29 @@ export function ViewingChatApp() {
                   </div>
                 </>
               )}
+              {composerHint ? (
+                <p className="px-3 pb-1 text-[11px] font-semibold text-[#1D4ED8]">
+                  {composerHint}
+                </p>
+              ) : null}
               <ViewingChatComposer
                 busy={busy || sourceBusy}
+                processing={busy || sourceBusy}
+                processingHint={
+                  busy || sourceBusy
+                    ? status || c.turnProcessing
+                    : null
+                }
+                externalError={turnError}
+                onRetry={
+                  lastTurnPayload
+                    ? () => void submitTurn(lastTurnPayload)
+                    : undefined
+                }
                 replyTo={replyTo}
                 onClearReply={() => setReplyTo(null)}
                 labels={{
-                  placeholder: c.composerPlaceholder,
+                  placeholder: composerHint || c.composerPlaceholder,
                   send: c.send,
                   recording: c.recording,
                   stop: c.stop,
@@ -1102,10 +1387,14 @@ export function ViewingChatApp() {
                   camera: c.attachCamera,
                   uploadImage: c.attachImage,
                   uploadFile: c.attachFile,
+                  uploadVideo: c.attachVideo,
                   empty: c.emptyComposer,
                   micDenied: c.micDenied,
                   replyingTo: c.replyingTo,
                   replyCancel: c.replyCancel,
+                  processing: c.turnProcessing,
+                  uploading: c.uploadProcessing,
+                  retry: c.turnRetry,
                 }}
                 onSubmit={async (payload) => {
                   // A default: all composer input is on-site capture via chat turn.
@@ -1124,6 +1413,228 @@ export function ViewingChatApp() {
                   await submitTurn(payload);
                 }}
               />
+            </div>
+              </div>
+
+              {/* Desktop: right-side summary — chat stays usable */}
+              {summaryOpen ? (
+                <aside className="hidden min-h-0 w-[340px] shrink-0 flex-col border-l border-black/8 bg-white lg:flex">
+                  <div className="flex shrink-0 items-center justify-between border-b border-black/8 px-3 py-2">
+                    <p className="text-[13px] font-bold">
+                      {active.conversationStatus === "reviewing"
+                        ? c.reviewTitle
+                        : c.summaryTitle}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setSummaryOpen(false)}
+                      className="rounded-full p-1.5 text-[#4B5563] hover:bg-black/5"
+                      aria-label={c.summaryClose}
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-hidden">
+                    {active.conversationStatus === "reviewing" ? (
+                      <ReviewCard
+                        record={active.propertyRecord}
+                        skippedFields={
+                          (active.collectionSkippedFields ??
+                            []) as PropertyFieldId[]
+                        }
+                        fieldLabels={c.fieldLabels}
+                        address={active.address}
+                        labels={{
+                          title: c.reviewTitle,
+                          hint: c.reviewHint,
+                          confirm: c.reviewConfirm,
+                          keepCollecting: c.reviewKeepCollecting,
+                          markUnknown: c.reviewMarkUnknown,
+                          saveField: c.reviewConfirm,
+                          valuePlaceholder: c.reviewValuePlaceholder,
+                          share: c.reviewShare,
+                          shared: c.reviewShared,
+                          statusConfirmed: c.statusConfirmed,
+                          statusSubjective: c.statusSubjective,
+                          statusInferred: c.statusInferred,
+                          statusMissing: c.statusMissing,
+                          statusSkipped: c.statusSkipped,
+                          statusConflict: c.statusConflict,
+                        }}
+                        busy={busy}
+                        onConfirm={applyReviewDrafts}
+                        onKeepCollecting={() => {
+                          patchLocalThread(active.id, {
+                            conversationStatus: "collecting",
+                            propertyRecord: active.propertyRecord
+                              ? {
+                                  ...active.propertyRecord,
+                                  mode: "collecting",
+                                }
+                              : active.propertyRecord,
+                          });
+                          refreshLocal();
+                        }}
+                      />
+                    ) : (
+                      <div className="h-full min-h-0 overflow-y-auto overscroll-contain">
+                        <PropertySummaryPanel
+                          record={active.propertyRecord}
+                          skippedFields={
+                            (active.collectionSkippedFields ??
+                              []) as PropertyFieldId[]
+                          }
+                          changes={active.lastTurnChanges ?? []}
+                          fieldLabels={c.fieldLabels}
+                          compact
+                          labels={{
+                            title: c.summaryTitle,
+                            empty: c.summaryEmpty,
+                            changesTitle: c.summaryChangesTitle,
+                            noChanges: c.summaryNoChanges,
+                            statusConfirmed: c.statusConfirmed,
+                            statusSubjective: c.statusSubjective,
+                            statusInferred: c.statusInferred,
+                            statusMissing: c.statusMissing,
+                            statusSkipped: c.statusSkipped,
+                            statusConflict: c.statusConflict,
+                            sectionConfirmed: c.sectionConfirmed,
+                            sectionSubjective: c.sectionSubjective,
+                            sectionInferred: c.sectionInferred,
+                            sectionMissing: c.sectionMissing,
+                            sectionSkipped: c.sectionSkipped,
+                            changeAdded: c.changeAdded,
+                            changeUpdated: c.changeUpdated,
+                            changeCorrected: c.changeCorrected,
+                            changeConflict: c.changeConflict,
+                            changeSkipped: c.changeSkipped,
+                            changeUnknown: c.changeUnknown,
+                            openSummary: c.summaryOpen,
+                            closeSummary: c.summaryClose,
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </aside>
+              ) : null}
+
+              {/* Mobile: slide down from top */}
+              <div
+                className={`absolute inset-x-0 top-0 z-30 flex h-[min(72vh,560px)] flex-col overflow-hidden border-b border-black/8 bg-white shadow-[0_12px_28px_rgba(0,0,0,0.12)] transition-transform duration-300 ease-out lg:hidden ${
+                  summaryOpen
+                    ? "translate-y-0"
+                    : "pointer-events-none -translate-y-[calc(100%+12px)]"
+                }`}
+                aria-hidden={!summaryOpen}
+              >
+                <div className="flex shrink-0 items-center justify-between border-b border-black/8 px-3 py-2">
+                  <p className="text-[13px] font-bold">
+                    {active.conversationStatus === "reviewing"
+                      ? c.reviewTitle
+                      : c.summaryTitle}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setSummaryOpen(false)}
+                    className="rounded-full p-1.5 text-[#4B5563] hover:bg-black/5"
+                    aria-label={c.summaryClose}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="min-h-0 flex-1 overflow-hidden">
+                  {active.conversationStatus === "reviewing" ? (
+                    <ReviewCard
+                      record={active.propertyRecord}
+                      skippedFields={
+                        (active.collectionSkippedFields ??
+                          []) as PropertyFieldId[]
+                      }
+                      fieldLabels={c.fieldLabels}
+                      address={active.address}
+                      labels={{
+                        title: c.reviewTitle,
+                        hint: c.reviewHint,
+                        confirm: c.reviewConfirm,
+                        keepCollecting: c.reviewKeepCollecting,
+                        markUnknown: c.reviewMarkUnknown,
+                        saveField: c.reviewConfirm,
+                        valuePlaceholder: c.reviewValuePlaceholder,
+                        share: c.reviewShare,
+                        shared: c.reviewShared,
+                        statusConfirmed: c.statusConfirmed,
+                        statusSubjective: c.statusSubjective,
+                        statusInferred: c.statusInferred,
+                        statusMissing: c.statusMissing,
+                        statusSkipped: c.statusSkipped,
+                        statusConflict: c.statusConflict,
+                      }}
+                      busy={busy}
+                      onConfirm={applyReviewDrafts}
+                      onKeepCollecting={() => {
+                        patchLocalThread(active.id, {
+                          conversationStatus: "collecting",
+                          propertyRecord: active.propertyRecord
+                            ? {
+                                ...active.propertyRecord,
+                                mode: "collecting",
+                              }
+                            : active.propertyRecord,
+                        });
+                        refreshLocal();
+                      }}
+                    />
+                  ) : (
+                    <div className="h-full min-h-0 overflow-y-auto overscroll-contain">
+                      <PropertySummaryPanel
+                        record={active.propertyRecord}
+                        skippedFields={
+                          (active.collectionSkippedFields ??
+                            []) as PropertyFieldId[]
+                        }
+                        changes={active.lastTurnChanges ?? []}
+                        fieldLabels={c.fieldLabels}
+                        compact
+                        labels={{
+                          title: c.summaryTitle,
+                          empty: c.summaryEmpty,
+                          changesTitle: c.summaryChangesTitle,
+                          noChanges: c.summaryNoChanges,
+                          statusConfirmed: c.statusConfirmed,
+                          statusSubjective: c.statusSubjective,
+                          statusInferred: c.statusInferred,
+                          statusMissing: c.statusMissing,
+                          statusSkipped: c.statusSkipped,
+                          statusConflict: c.statusConflict,
+                          sectionConfirmed: c.sectionConfirmed,
+                          sectionSubjective: c.sectionSubjective,
+                          sectionInferred: c.sectionInferred,
+                          sectionMissing: c.sectionMissing,
+                          sectionSkipped: c.sectionSkipped,
+                          changeAdded: c.changeAdded,
+                          changeUpdated: c.changeUpdated,
+                          changeCorrected: c.changeCorrected,
+                          changeConflict: c.changeConflict,
+                          changeSkipped: c.changeSkipped,
+                          changeUnknown: c.changeUnknown,
+                          openSummary: c.summaryOpen,
+                          closeSummary: c.summaryClose,
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {summaryOpen ? (
+                <button
+                  type="button"
+                  className="absolute inset-0 z-20 bg-black/20 transition-opacity duration-300 lg:hidden"
+                  aria-label={c.summaryClose}
+                  onClick={() => setSummaryOpen(false)}
+                />
+              ) : null}
             </div>
           </>
         ) : (

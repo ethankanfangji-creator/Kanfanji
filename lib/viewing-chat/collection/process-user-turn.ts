@@ -1,13 +1,30 @@
 import OpenAI from "openai";
 import { classifyTurnIntent } from "./classify-turn-intent";
 import { composeAssistantMessage } from "./compose-assistant-message";
+import {
+  isVagueUtterance,
+  pickPendingConfirmFromRecord,
+  resolvePendingConfirm,
+  vagueFocusFact,
+} from "./dialogue-strategy";
 import { extractPropertyFacts } from "./extract-property-facts";
 import { getNextQuestions } from "./get-next-questions";
+import {
+  extractPropertyFactsWithLlm,
+  mergeRuleAndLlmFacts,
+} from "./llm-extract";
+import {
+  VIEWING_RECORDER_POLISH_RULES,
+  VIEWING_RECORDER_SYSTEM_PROMPT,
+} from "./llm-prompt";
+import { parseLlmJson, PolishReplySchema } from "./llm-schemas";
 import { createEmptyPropertyRecord, mergePropertyFacts } from "./merge-property-facts";
 import type {
   ConversationState,
   ConversationStatus,
+  ExtractionStatus,
   FieldEvidence,
+  PendingConfirmState,
   ProcessUserTurnInput,
   ProcessUserTurnResult,
   PropertyRecord,
@@ -45,6 +62,19 @@ function toPropertyRecord(
     skippedFields: [...(base.skippedFields ?? [])],
     captures: [...(base.captures ?? [])],
   };
+}
+
+/** Join text parts without repeating the same utterance (captures echo message.text). */
+function uniqueJoinedText(parts: Array<string | undefined | null>): string {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of parts) {
+    const t = part?.trim();
+    if (!t || seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+  }
+  return out.join("\n").trim();
 }
 
 function normalizeCaptures(
@@ -200,9 +230,14 @@ async function maybePolishReply(input: {
   draft: string;
   userText: string;
   signal?: AbortSignal;
-}): Promise<{ text: string; warning?: string }> {
+}): Promise<{
+  text: string;
+  warning?: string;
+  extractionStatus?: ExtractionStatus;
+  rawAiResponse?: string;
+}> {
   if (!input.apiKey || !input.userText.trim()) {
-    return { text: input.draft };
+    return { text: input.draft, extractionStatus: "ok" };
   }
 
   try {
@@ -216,15 +251,19 @@ async function maybePolishReply(input: {
         messages: [
           {
             role: "system",
-            content:
-              "Polish an on-site viewing assistant reply. Keep the same facts and question list. Never invent prices/area/floor/distance/equipment. Never scold the user for answering out of order. Match the user's language. Return JSON only.",
+            content: `${VIEWING_RECORDER_SYSTEM_PROMPT}
+
+${VIEWING_RECORDER_POLISH_RULES}
+
+本呼叫只潤飾回覆語氣與結構，不可新增、刪改已抽取的事實或追問清單外的題目。回覆 JSON only。`,
           },
           {
             role: "user",
-            content: `User message:
+            content: `使用者訊息：
 ${input.userText}
 
-Draft reply (preserve structure: understand → changes → optional questions → skip hint):
+草稿回覆（請保留結構：先一句確認已理解 → 最多三個可選追問 → 可跳過提示。
+不要再羅列「剛記入／已歸檔」的欄位清單——介面已另外顯示已記下的內容）：
 ${input.draft}
 
 Return JSON: { "assistantMessage": string }`,
@@ -235,31 +274,42 @@ Return JSON: { "assistantMessage": string }`,
     );
 
     const raw = completion.choices[0]?.message?.content?.trim() || "";
-    try {
-      const parsed = JSON.parse(raw) as { assistantMessage?: unknown };
-      const text =
-        typeof parsed.assistantMessage === "string"
-          ? parsed.assistantMessage.trim()
-          : "";
-      if (!text) {
-        return { text: input.draft, warning: "llm_schema_invalid" };
-      }
-      return { text: text.slice(0, 2000) };
-    } catch {
-      return { text: input.draft, warning: "llm_schema_invalid" };
+    const parsed = parseLlmJson(raw, PolishReplySchema);
+    if (!parsed.ok) {
+      // Draft already has rule-based facts — polish miss is soft, not "extraction failed"
+      return {
+        text: input.draft,
+        warning: "polish_failed",
+        extractionStatus: "ok",
+        rawAiResponse: parsed.raw,
+      };
     }
+    return {
+      text: parsed.data.assistantMessage.trim().slice(0, 2000),
+      extractionStatus: "ok",
+      rawAiResponse: parsed.raw,
+    };
   } catch {
-    return { text: input.draft, warning: "llm_failed" };
+    return {
+      text: input.draft,
+      warning: "polish_failed",
+      extractionStatus: "ok",
+    };
   }
 }
 
 /**
  * Canonical conversation orchestrator: every user turn goes through the same pipeline.
  *
- * 1) intent → 2) extract all facts → 3) merge facts/evidence/captures →
- * 4) skippedFields + status → 5) important gaps → 6) natural reply
+ * Engineering invariants:
+ * 1) Extraction / merge / storage run on the server (API), not as sole client truth.
+ * 2) Raw user message / captures are retained before any AI step — model failure must
+ *    never drop user input.
+ * 3) LLM JSON is Zod-validated; parse failure → keep raw, mark extraction_failed,
+ *    do not overwrite prior good field data.
+ * 4) Finish = user chose to stop, not “all fields filled”.
  *
- * On AI / network failure, rule-based extract + merge still run; raw captures are kept.
+ * Pipeline: intent → extract → merge → skippedFields + status → gaps → natural reply
  */
 export async function processUserTurn(
   input: ProcessUserTurnInput,
@@ -276,16 +326,13 @@ export async function processUserTurn(
     message,
   );
 
-  const sourceText = [
+  const sourceText = uniqueJoinedText([
     message.transcript?.trim(),
     message.text?.trim(),
     ...storedCaptures
       .filter((c) => c.kind === "text" || c.kind === "transcript")
       .map((c) => c.text?.trim()),
-  ]
-    .filter(Boolean)
-    .join("\n")
-    .trim();
+  ]);
 
   const hasMedia = storedCaptures.some(
     (c) => c.kind === "photo" || c.kind === "video" || c.kind === "file",
@@ -305,10 +352,29 @@ export async function processUserTurn(
     warnings.push("incomplete_transcript");
   }
 
+  // Classify on the original message + input captures only (storedCaptures
+  // duplicate message.text and would break ^…$ skip patterns like「不知道」).
   const { intent, skippedFieldIds: intentSkips } = classifyTurnIntent({
     message,
-    captures: storedCaptures,
+    captures: input.captures ?? [],
   });
+
+  // Bare "不知道": soft-skip current focus (or the single top gap) so dialogue never stalls
+  const softSkips: PropertyFieldId[] =
+    intent === "skip" && intentSkips.length === 0
+      ? (() => {
+          if (input.conversation.focusFieldIds?.length) {
+            return [...input.conversation.focusFieldIds] as PropertyFieldId[];
+          }
+          const top = getNextQuestions(
+            before,
+            priorEvidence,
+            before.skippedFields,
+            message.locale ?? input.conversation.locale,
+          ).slice(0, 1);
+          return top.map((q) => q.fieldId);
+        })()
+      : [];
 
   // Always append captures first so media is never lost on later failures
   const recordWithCaptures: PropertyRecord = {
@@ -316,25 +382,114 @@ export async function processUserTurn(
     captures: [...before.captures, ...storedCaptures],
   };
 
-  const extracted = extractPropertyFacts({
-    text: message.text,
-    transcript: message.transcript,
+  const focusFieldIds = input.conversation.focusFieldIds ?? [];
+  const priorPending = input.conversation.pendingConfirm ?? null;
+  const priorTurnCount = input.conversation.userTurnCount ?? 0;
+  /** 招4 — this turn's 1-based index after completion */
+  const userTurnCount = priorTurnCount + 1;
+
+  // Use raw composer/transcript only for yes/no/vague (storedCaptures duplicate text)
+  const shortIntentText = [
+    message.transcript?.trim(),
+    message.text?.trim(),
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+
+  // 招1 — Yes/No against pending confirm (before freeform extract)
+  const confirmResolved = resolvePendingConfirm({
+    text: shortIntentText,
+    pending: priorPending,
+    messageId: message.id,
+  });
+
+  // After「不對，…」strip the yes/no prefix so freeform extract maps the rest
+  const freeformText = confirmResolved.clearPending
+    ? confirmResolved.remainder
+    : shortIntentText;
+  const freeformForRules = confirmResolved.clearPending
+    ? confirmResolved.remainder
+    : message.text;
+  const freeformForTranscript = confirmResolved.clearPending
+    ? undefined
+    : message.transcript;
+
+  const ruleExtracted = extractPropertyFacts({
+    text: freeformForRules,
+    transcript: freeformForTranscript,
     messageId: message.id,
     locale: message.locale ?? input.conversation.locale,
+    // While a Yes/No confirm is open, never dump freeform into that focus slot
+    // (e.g.「裝潢狠心ㄟ」must not overwrite pending transit).
+    focusFieldIds:
+      priorPending && !confirmResolved.clearPending
+        ? []
+        : confirmResolved.facts.length && !confirmResolved.remainder
+          ? []
+          : focusFieldIds,
     captures: storedCaptures.map((c) => ({
       kind: c.kind,
       text: c.text,
       messageId: c.messageId,
-      // Only pass analysis when vision completed — avoids fake inferred facts
       analysis: c.pendingVision ? undefined : c.analysis,
       mediaRef: c.mediaRef,
+      visionSlots: c.visionSlots,
     })),
   });
+
+  // 招3 — vague utterance → low confidence + clarify (do not confirmed-fill)
+  const vagueFact = vagueFocusFact({
+    text: freeformText,
+    focusFieldIds,
+    messageId: message.id,
+  });
+  const clarifyFieldIds: PropertyFieldId[] = [];
+  if (vagueFact) {
+    clarifyFieldIds.push(vagueFact.fieldId);
+    warnings.push("vague_utterance");
+  }
+
+  // Implicit (B): optional LLM extract — skip pure yes/no with no remainder
+  const skipLlm =
+    (confirmResolved.facts.length > 0 && !confirmResolved.remainder) ||
+    (isVagueUtterance(freeformText) && freeformText.trim().length < 12);
+  const llmExtract = skipLlm
+    ? { fields: [] as ExtractedPropertyFact[] }
+    : await extractPropertyFactsWithLlm({
+        apiKey: input.apiKey,
+        text: freeformText || sourceText,
+        messageId: message.id,
+        signal: input.signal,
+      });
+  if ("warning" in llmExtract && llmExtract.warning) {
+    warnings.push(llmExtract.warning);
+  }
+
+  let extractedFields = mergeRuleAndLlmFacts(
+    ruleExtracted.fields,
+    llmExtract.fields,
+  );
+  if (confirmResolved.facts.length) {
+    extractedFields = mergeRuleAndLlmFacts(confirmResolved.facts, extractedFields);
+  } else if (vagueFact) {
+    // Prefer vague placeholder over accidental confirmed focus fill
+    extractedFields = mergeRuleAndLlmFacts(
+      [vagueFact],
+      extractedFields.filter((f) => f.fieldId !== vagueFact.fieldId),
+    );
+  }
+
+  const extracted = {
+    ...ruleExtracted,
+    fields: extractedFields,
+  };
 
   const skippedFields = [
     ...new Set([
       ...recordWithCaptures.skippedFields,
       ...intentSkips,
+      ...softSkips,
       ...extracted.skippedFieldIds,
     ]),
   ] as PropertyFieldId[];
@@ -362,23 +517,77 @@ export async function processUserTurn(
     after: updatedRecord,
     extracted: extracted.fields,
     conflicts: merged.conflicts,
-    skippedThisTurn: [...intentSkips, ...extracted.skippedFieldIds],
+    skippedThisTurn: [...intentSkips, ...softSkips, ...extracted.skippedFieldIds],
   });
+
+  const changedFieldIds = changes
+    .filter(
+      (c) =>
+        c.kind === "added" ||
+        c.kind === "updated" ||
+        c.kind === "corrected" ||
+        c.kind === "conflict",
+    )
+    .map((c) => c.fieldId);
+
+  // 招1 — next pending confirm (cleared on yes/no; else pick inferred)
+  let nextPending: PendingConfirmState | null = priorPending;
+  if (confirmResolved.clearPending) {
+    nextPending = null;
+  }
+  if (!nextPending && nextStatus === "collecting") {
+    nextPending = pickPendingConfirmFromRecord(updatedRecord);
+  }
+
+  // User changed topic while a confirm was open — file freeform first, don't
+  // re-trap them in the same Yes/No bubble this turn (pending stays for later).
+  const divertedFromConfirm =
+    Boolean(priorPending) &&
+    !confirmResolved.clearPending &&
+    extracted.fields.some(
+      (f) =>
+        f.fieldId !== priorPending!.fieldId &&
+        f.status !== "unknown" &&
+        f.value != null &&
+        f.value !== "",
+    );
 
   const suggestedQuestions: SuggestedQuestion[] =
     nextStatus === "reviewing" || nextStatus === "completed"
       ? []
-      : getNextQuestions(
-          updatedRecord,
-          merged.evidence,
+      : getNextQuestions({
+          record: updatedRecord,
+          evidence: merged.evidence,
           skippedFields,
-          message.locale ?? input.conversation.locale,
-        ).map((q) => ({
-          fieldId: q.fieldId,
-          question: q.question,
-          priority: q.priority,
-          skippable: true as const,
-        }));
+          locale: message.locale ?? input.conversation.locale,
+          changedFieldIds,
+          userTurnCount,
+          clarifyFieldIds,
+          pendingConfirm: divertedFromConfirm ? null : nextPending,
+        });
+
+  const nextFocusFieldIds = (() => {
+    const top = suggestedQuestions[0];
+    if (!top) return [] as PropertyFieldId[];
+    if (top.fieldIds?.length) return [...top.fieldIds];
+    return [top.fieldId];
+  })();
+
+  // If we emitted a confirm question, keep that as pending for next turn
+  const confirmQ = suggestedQuestions.find((q) => q.kind === "confirm");
+  if (confirmQ?.candidateValue) {
+    nextPending = {
+      fieldId: confirmQ.fieldId,
+      candidateValue: confirmQ.candidateValue,
+      source: nextPending?.source ?? "inferred",
+    };
+  } else if (!confirmQ && !divertedFromConfirm) {
+    // No confirm question in the list — don't force pending unless inferred still open
+    if (!nextPending || isFieldConfirmed(updatedRecord, nextPending.fieldId)) {
+      nextPending = null;
+    }
+  }
+  // divertedFromConfirm: keep nextPending (prior) so we can re-ask later
 
   let assistantMessage = composeAssistantMessage({
     intent,
@@ -393,7 +602,9 @@ export async function processUserTurn(
   const polished = input.polishReply
     ? await input.polishReply(assistantMessage, sourceText).catch(() => ({
         text: assistantMessage,
-        warning: "llm_failed",
+        warning: "polish_failed" as const,
+        extractionStatus: "ok" as ExtractionStatus,
+        rawAiResponse: undefined as string | undefined,
       }))
     : await maybePolishReply({
         apiKey: input.apiKey,
@@ -403,6 +614,13 @@ export async function processUserTurn(
       });
   assistantMessage = polished.text;
   if (polished.warning) warnings.push(polished.warning);
+
+  const extractionStatus: ExtractionStatus =
+    polished.extractionStatus === "extraction_failed" ||
+    polished.warning === "extraction_failed" ||
+    polished.warning === "llm_schema_invalid"
+      ? "extraction_failed"
+      : "ok";
 
   return {
     assistantMessage,
@@ -414,7 +632,27 @@ export async function processUserTurn(
     intent,
     warnings,
     preservedMessageId,
+    extractionStatus,
+    rawAiResponse:
+      ("rawAiResponse" in polished ? polished.rawAiResponse : undefined) ??
+      ("rawAiResponse" in llmExtract ? llmExtract.rawAiResponse : undefined),
+    focusFieldIds: nextFocusFieldIds,
+    pendingConfirm: nextPending,
   };
+}
+
+function isFieldConfirmed(
+  record: PropertyRecord,
+  fieldId: PropertyFieldId,
+): boolean {
+  const f = record.fields[fieldId];
+  return Boolean(
+    f &&
+      (f.status === "confirmed" || f.status === "corrected") &&
+      f.value != null &&
+      f.value !== "" &&
+      (f.confidence ?? 0) > 0.25,
+  );
 }
 
 export function createConversationState(input?: {
@@ -452,5 +690,7 @@ export function createConversationState(input?: {
     address,
     locale: input?.locale,
     focusFieldIds: [],
+    pendingConfirm: null,
+    userTurnCount: 0,
   };
 }

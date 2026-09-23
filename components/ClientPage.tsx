@@ -16,7 +16,6 @@ import {
   X,
 } from "lucide-react";
 import { ClientAuthBar } from "@/components/ClientAuthBar";
-import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { SyncStatusBanner } from "@/components/SyncStatusBanner";
 import { MediaPermissionBanner } from "@/components/media/MediaPermissionBanner";
 import { PermissionPreflight } from "@/components/media/PermissionPreflight";
@@ -4917,7 +4916,6 @@ export function ClientPage() {
           </div>
           <div className="flex flex-col items-start gap-2 sm:items-end sm:mt-1.5">
             <div className="flex flex-wrap items-center gap-2">
-              <LanguageSwitcher />
               <Link
                 href="/viewings"
                 className="min-h-11 px-3 rounded-full bg-white border border-black/10 text-[12px] font-bold text-[#1A1A1A] inline-flex items-center gap-1.5"

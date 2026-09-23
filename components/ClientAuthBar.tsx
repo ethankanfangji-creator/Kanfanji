@@ -9,6 +9,9 @@ import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 import { resetSyncEngineSingleton } from "@/lib/sync";
 import { setPersistenceAccountScope } from "@/lib/idb/draft-store";
 
+/**
+ * Auth actions only — language lives inside the login UI (/login + LoginGateDialog).
+ */
 export function ClientAuthBar() {
   const { messages } = useI18n();
   const router = useRouter();
@@ -19,7 +22,8 @@ export function ClientAuthBar() {
     const supabase = getSupabase();
     if (!supabase) return;
 
-    void supabase.auth.getUser()
+    void supabase.auth
+      .getUser()
       .then(({ data }) => setUser(data.user))
       .catch(() => {
         setPersistenceAccountScope(null);
@@ -40,7 +44,7 @@ export function ClientAuthBar() {
   if (!ready) {
     return (
       <span
-        className="h-11 w-16 rounded-full bg-[#EFEAE4] animate-pulse"
+        className="h-11 w-16 animate-pulse rounded-full bg-[#EFEAE4]"
         role="status"
         aria-label="Loading account"
       />
@@ -49,7 +53,7 @@ export function ClientAuthBar() {
 
   if (!isSupabaseConfigured()) {
     return (
-      <span className="min-h-11 px-3 rounded-full bg-[#FEF2F2] border border-[#FECACA] text-[12px] font-bold text-[#991B1B] inline-flex items-center">
+      <span className="inline-flex min-h-11 items-center rounded-full border border-[#FECACA] bg-[#FEF2F2] px-3 text-[12px] font-bold text-[#991B1B]">
         缺 Supabase env
       </span>
     );
@@ -59,7 +63,7 @@ export function ClientAuthBar() {
     return (
       <Link
         href="/login"
-        className="min-h-11 px-4 rounded-full bg-black text-white text-[12px] font-bold inline-flex items-center"
+        className="inline-flex min-h-11 items-center rounded-full bg-black px-4 text-[12px] font-bold text-white"
       >
         {messages.nav.signIn}
       </Link>
@@ -67,8 +71,10 @@ export function ClientAuthBar() {
   }
 
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-[11px] text-[#6B7280] max-w-[110px] truncate">{user.email}</span>
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="max-w-[110px] truncate text-[11px] text-[#6B7280]">
+        {user.email}
+      </span>
       <button
         type="button"
         onClick={() => {
@@ -79,7 +85,7 @@ export function ClientAuthBar() {
             router.replace("/login");
           });
         }}
-        className="min-h-11 px-3 rounded-full bg-white border border-black/10 text-[12px] font-bold"
+        className="min-h-11 rounded-full border border-black/10 bg-white px-3 text-[12px] font-bold"
       >
         {messages.nav.signOut}
       </button>

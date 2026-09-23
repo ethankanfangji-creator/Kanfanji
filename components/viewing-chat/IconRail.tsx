@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Database,
-  Globe,
   LifeBuoy,
   LogIn,
   LogOut,
@@ -18,11 +17,12 @@ import {
 } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
 import { useI18n } from "@/components/I18nProvider";
-import { LOCALES, LOCALE_LABELS, type Locale } from "@/lib/i18n/config";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 import { resetSyncEngineSingleton } from "@/lib/sync";
 import { setPersistenceAccountScope } from "@/lib/idb/draft-store";
 import type { ViewingChatThread } from "@/lib/viewing-chat/types";
+import { shortenAddressLabel } from "@/lib/shorten-address";
 
 function supportMailto(locale: string, email?: string | null): string {
   const to =
@@ -120,13 +120,11 @@ export function IconRail({
   onDeleteThread: (id: string) => void;
   onTogglePinThread: (id: string) => void;
 }) {
-  const { messages, locale, setLocale } = useI18n();
+  const { messages, locale } = useI18n();
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(() => !isSupabaseConfigured());
-  const [langOpen, setLangOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const langRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
   const expanded = sidebarOpen;
   const recent = threads.slice(0, 20);
@@ -154,7 +152,6 @@ export function IconRail({
   useEffect(() => {
     function onDocClick(event: MouseEvent) {
       const target = event.target as Node;
-      if (langRef.current && !langRef.current.contains(target)) setLangOpen(false);
       if (profileRef.current && !profileRef.current.contains(target)) {
         setProfileOpen(false);
       }
@@ -243,7 +240,11 @@ export function IconRail({
                             aria-hidden
                           />
                         ) : null}
-                        <span className="truncate">{thread.address || "—"}</span>
+                        <span className="truncate" title={thread.address || undefined}>
+                          {thread.address
+                            ? shortenAddressLabel(thread.normalizedAddress || thread.address)
+                            : "—"}
+                        </span>
                       </p>
                       {preview ? (
                         <p className="mt-0.5 truncate text-[11px] text-[#6B7280]">
@@ -305,45 +306,6 @@ export function IconRail({
       <div
         className={`mt-auto flex shrink-0 flex-col gap-1 ${expanded ? "border-t border-black/8 pt-2" : "items-center"}`}
       >
-        <div className="relative w-full" ref={langRef}>
-          <RailButton
-            label={messages.language.label}
-            active={langOpen}
-            expanded={expanded}
-            onClick={() => {
-              setLangOpen((v) => !v);
-              setProfileOpen(false);
-            }}
-          >
-            <Globe className="h-5 w-5" strokeWidth={2} />
-          </RailButton>
-          {langOpen ? (
-            <div
-              className={`absolute z-50 min-w-[128px] rounded-2xl border border-black/10 bg-white p-1.5 shadow-lg ${
-                expanded
-                  ? "bottom-[calc(100%+6px)] left-0 right-0"
-                  : "bottom-0 left-[calc(100%+8px)]"
-              }`}
-            >
-              {LOCALES.map((code) => (
-                <button
-                  key={code}
-                  type="button"
-                  onClick={() => {
-                    setLocale(code as Locale);
-                    setLangOpen(false);
-                  }}
-                  className={`flex w-full items-center rounded-xl px-3 py-2 text-left text-[12px] font-bold ${
-                    locale === code ? "bg-[#EFF6FF] text-[#1D4ED8]" : "hover:bg-[#FAF6F1]"
-                  }`}
-                >
-                  {LOCALE_LABELS[code]}
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </div>
-
         <div className="relative w-full" ref={profileRef}>
           {!ready ? (
             <span
@@ -363,10 +325,7 @@ export function IconRail({
                 label={profileLabel}
                 active={profileOpen}
                 expanded={expanded}
-                onClick={() => {
-                  setProfileOpen((v) => !v);
-                  setLangOpen(false);
-                }}
+                onClick={() => setProfileOpen((v) => !v)}
               >
                 <UserRound className="h-5 w-5" strokeWidth={2} />
               </RailButton>
@@ -383,6 +342,13 @@ export function IconRail({
                       {user.email}
                     </p>
                   ) : null}
+
+                  <div className="px-1 py-1">
+                    <LanguageSwitcher className="w-full" />
+                  </div>
+
+                  <div className="my-1 border-t border-black/8" />
+
                   <a
                     href={supportMailto(locale, user?.email)}
                     onClick={() => setProfileOpen(false)}

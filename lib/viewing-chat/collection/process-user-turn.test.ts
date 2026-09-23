@@ -20,6 +20,7 @@ describe("processUserTurn", () => {
 
     expect(result.intent).toBe("supplement");
     expect(result.conversationStatus).toBe("collecting");
+    expect(result.extractionStatus).toBe("ok");
     expect(result.updatedRecord.fields.price?.value).toBe(12_800_000);
     expect(result.updatedRecord.fields.layout?.value).toMatch(/3房2廳/);
     expect(result.updatedRecord.fields.noise?.rawText).toMatch(/高架|吵/);
@@ -55,7 +56,7 @@ describe("processUserTurn", () => {
     expect(finished.intent).toBe("finish");
     expect(finished.conversationStatus).toBe("reviewing");
     expect(finished.suggestedQuestions).toEqual([]);
-    expect(finished.assistantMessage).toMatch(/整理|報告/);
+    expect(finished.assistantMessage).toMatch(/摘要|整理|報告|留空/);
   });
 
   it("applies corrections and records changes", async () => {
@@ -78,7 +79,7 @@ describe("processUserTurn", () => {
     expect(corrected.intent).toBe("correct");
     expect(corrected.updatedRecord.fields.price?.value).toBe(12_500_000);
     expect(corrected.changes.some((c) => c.kind === "corrected")).toBe(true);
-    expect(corrected.assistantMessage).toMatch(/更正|改/);
+    expect(corrected.assistantMessage).toMatch(/更正|改|為準|1250/);
   });
 
   it("guards empty messages without dropping conversation state", async () => {
@@ -136,11 +137,26 @@ describe("processUserTurn", () => {
       },
     });
 
-    expect(result.warnings).toContain("llm_failed");
+    expect(result.warnings).toContain("polish_failed");
+    expect(result.extractionStatus).toBe("ok");
     expect(result.updatedRecord.fields.price?.value).toBe(9_800_000);
     expect(result.updatedRecord.fields.transit?.rawText).toMatch(/離捷運不遠/);
     expect(result.assistantMessage.length).toBeGreaterThan(0);
     expect(result.preservedMessageId).toBe("net1");
+  });
+
+  it("maps bus-walk minutes to transit not amenities", async () => {
+    const conversation = createConversationState({
+      address: "Saint-Clar",
+    });
+    conversation.focusFieldIds = ["amenities"];
+    const result = await processUserTurn({
+      conversation,
+      message: { id: "bus1", text: "公車站走路五分鐘" },
+    });
+    expect(result.updatedRecord.fields.transit?.value).toMatch(/公車站|五分鐘|走路/);
+    expect(result.updatedRecord.fields.amenities?.value).toBeFalsy();
+    expect(result.changes.some((c) => c.fieldId === "transit")).toBe(true);
   });
 
   it("falls back when LLM returns invalid schema", async () => {
@@ -173,5 +189,23 @@ describe("processUserTurn", () => {
     expect(result.updatedRecord.fields.noise).toBeDefined();
     // understand + changes + optional questions pattern
     expect(result.assistantMessage.split("\n\n").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("keeps rule-based facts when polish schema fails", async () => {
+    const conversation = createConversationState({ address: "台北" });
+    const result = await processUserTurn({
+      conversation,
+      message: { id: "p1", text: "開價 1500 萬" },
+      polishReply: async (draft) => ({
+        text: draft,
+        warning: "extraction_failed",
+        extractionStatus: "extraction_failed",
+        rawAiResponse: '{"bad":true}',
+      }),
+    });
+    expect(result.extractionStatus).toBe("extraction_failed");
+    expect(result.rawAiResponse).toBe('{"bad":true}');
+    expect(result.updatedRecord.fields.price?.value).toBe(15_000_000);
+    expect(result.warnings).toContain("extraction_failed");
   });
 });

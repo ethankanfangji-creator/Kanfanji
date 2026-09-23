@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 import { useState, type FormEvent } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { I18nProvider } from "@/components/I18nProvider";
 import { LoginGateDialog, type LoginGateCopy } from "./LoginGateDialog";
 
 afterEach(cleanup);
@@ -38,20 +39,22 @@ function Harness({
   const [mode, setMode] = useState<"signin" | "signup">("signin");
 
   return (
-    <LoginGateDialog
-      open
-      copy={copy}
-      email={email}
-      password={password}
-      mode={mode}
-      error={error}
-      busy={false}
-      onEmailChange={setEmail}
-      onPasswordChange={setPassword}
-      onModeChange={setMode}
-      onSubmit={onSubmit}
-      onClose={vi.fn()}
-    />
+    <I18nProvider>
+      <LoginGateDialog
+        open
+        copy={copy}
+        email={email}
+        password={password}
+        mode={mode}
+        error={error}
+        busy={false}
+        onEmailChange={setEmail}
+        onPasswordChange={setPassword}
+        onModeChange={setMode}
+        onSubmit={onSubmit}
+        onClose={vi.fn()}
+      />
+    </I18nProvider>
   );
 }
 
@@ -107,23 +110,25 @@ describe("LoginGateDialog focus stability", () => {
       const [error, setError] = useState("");
 
       return (
-        <LoginGateDialog
-          open
-          copy={copy}
-          email={email}
-          password={password}
-          mode={mode}
-          error={error}
-          busy={false}
-          onEmailChange={setEmail}
-          onPasswordChange={setPassword}
-          onModeChange={setMode}
-          onSubmit={(event) => {
-            event.preventDefault();
-            setError("Invalid login");
-          }}
-          onClose={vi.fn()}
-        />
+        <I18nProvider>
+          <LoginGateDialog
+            open
+            copy={copy}
+            email={email}
+            password={password}
+            mode={mode}
+            error={error}
+            busy={false}
+            onEmailChange={setEmail}
+            onPasswordChange={setPassword}
+            onModeChange={setMode}
+            onSubmit={(event) => {
+              event.preventDefault();
+              setError("Invalid login");
+            }}
+            onClose={vi.fn()}
+          />
+        </I18nProvider>
       );
     }
 

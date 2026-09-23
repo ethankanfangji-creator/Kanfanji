@@ -40,6 +40,15 @@ function readAll(): ViewingChatThread[] {
       collectionSkippedFields: Array.isArray(thread.collectionSkippedFields)
         ? thread.collectionSkippedFields
         : [],
+      collectionFocusFieldIds: Array.isArray(thread.collectionFocusFieldIds)
+        ? thread.collectionFocusFieldIds
+        : [],
+      pendingConfirm: thread.pendingConfirm ?? null,
+      lastTurnChanges: Array.isArray(thread.lastTurnChanges)
+        ? thread.lastTurnChanges
+        : [],
+      conversationStatus: thread.conversationStatus ?? "collecting",
+      turnWarnings: Array.isArray(thread.turnWarnings) ? thread.turnWarnings : [],
     }));
   } catch {
     return [];
@@ -102,6 +111,9 @@ export function createLocalThread(
     propertyRecord: null,
     propertyEvidence: [],
     collectionSkippedFields: [],
+    lastTurnChanges: [],
+    conversationStatus: "collecting",
+    turnWarnings: [],
   };
   return upsertLocalThread(thread);
 }

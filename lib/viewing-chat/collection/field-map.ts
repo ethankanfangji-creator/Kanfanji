@@ -14,6 +14,12 @@ const FIELD_TO_AGENDA: Record<string, string> = {
   plumbing: "q_plumbing",
   hvac: "q_hvac",
   parking: "q_storage_parking",
+  transit: "q_transit",
+  amenities: "q_amenities",
+  price: "q_price",
+  area: "q_area",
+  pros: "q_pros",
+  cons: "q_cons",
 };
 
 const AGENDA_TO_FIELD: Record<string, PropertyFieldId> = {
@@ -27,6 +33,12 @@ const AGENDA_TO_FIELD: Record<string, PropertyFieldId> = {
   q_hvac: "hvac",
   q_storage_parking: "parking",
   q_exterior: "amenities",
+  q_amenities: "amenities",
+  q_transit: "transit",
+  q_price: "price",
+  q_area: "area",
+  q_pros: "pros",
+  q_cons: "cons",
   q_ask: "cons",
 };
 

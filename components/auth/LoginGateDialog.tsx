@@ -3,6 +3,7 @@
 import { useRef, useState, type FormEvent, type RefObject } from "react";
 import { Eye, EyeOff, X } from "lucide-react";
 import { Dialog } from "@/components/ui/Dialog";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
 export type LoginGateCopy = {
   title: string;
@@ -33,7 +34,8 @@ function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
 }
 
-function LoginGateFields({
+/** Shared login / signup fields — same UI for gate dialog and /login page. */
+export function LoginAuthFields({
   copy,
   email,
   password,
@@ -41,6 +43,7 @@ function LoginGateFields({
   error,
   busy,
   emailInputRef,
+  showClose,
   onEmailChange,
   onPasswordChange,
   onModeChange,
@@ -53,12 +56,13 @@ function LoginGateFields({
   mode: "signin" | "signup";
   error: string;
   busy: boolean;
-  emailInputRef: RefObject<HTMLInputElement | null>;
+  emailInputRef?: RefObject<HTMLInputElement | null>;
+  showClose?: boolean;
   onEmailChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
   onModeChange: (mode: "signin" | "signup") => void;
   onSubmit: (event: FormEvent) => void;
-  onClose: () => void;
+  onClose?: () => void;
 }) {
   const [showPassword, setShowPassword] = useState(false);
   const [emailTouched, setEmailTouched] = useState(false);
@@ -85,14 +89,20 @@ function LoginGateFields({
 
   return (
     <>
-      <button
-        type="button"
-        aria-label={copy.close}
-        onClick={onClose}
-        className="absolute right-4 top-4 min-w-11 min-h-11 rounded-full bg-[#F5F3F0] flex items-center justify-center"
-      >
-        <X className="w-4 h-4" aria-hidden="true" />
-      </button>
+      {showClose && onClose ? (
+        <button
+          type="button"
+          aria-label={copy.close}
+          onClick={onClose}
+          className="absolute right-4 top-4 flex min-h-11 min-w-11 items-center justify-center rounded-full bg-[#F5F3F0]"
+        >
+          <X className="h-4 w-4" aria-hidden="true" />
+        </button>
+      ) : null}
+
+      <div className={showClose ? "mt-2" : ""}>
+        <LanguageSwitcher />
+      </div>
 
       <form onSubmit={handleSubmit} className="mt-4 space-y-3" noValidate>
         <div className="block text-[12px] font-bold">
@@ -116,7 +126,7 @@ function LoginGateFields({
             aria-describedby={
               showFullEmailError || showLightEmailHint ? "email-hint" : undefined
             }
-            className="mt-1.5 w-full h-12 px-4 rounded-full bg-[#F8F4EF] border border-black/5 text-[16px] outline-none"
+            className="mt-1.5 h-12 w-full rounded-full border border-black/5 bg-[#F8F4EF] px-4 text-[16px] outline-none"
           />
           {showFullEmailError || showLightEmailHint ? (
             <p
@@ -146,7 +156,7 @@ function LoginGateFields({
               onBlur={() => setPasswordTouched(true)}
               aria-invalid={showPasswordError || undefined}
               aria-describedby={showPasswordError ? "password-hint" : undefined}
-              className="w-full h-12 px-4 pr-12 rounded-full bg-[#F8F4EF] border border-black/5 text-[16px] outline-none"
+              className="h-12 w-full rounded-full border border-black/5 bg-[#F8F4EF] px-4 pr-12 text-[16px] outline-none"
             />
             <button
               type="button"
@@ -172,7 +182,7 @@ function LoginGateFields({
         <button
           type="submit"
           disabled={busy}
-          className="w-full h-12 rounded-full bg-black text-white text-[14px] font-bold disabled:opacity-60"
+          className="h-12 w-full rounded-full bg-black text-[14px] font-bold text-white disabled:opacity-60"
         >
           {busy
             ? copy.processing
@@ -183,7 +193,7 @@ function LoginGateFields({
       </form>
 
       {error ? (
-        <p role="alert" className="mt-3 text-[12px] text-[#991B1B] leading-[1.4]">
+        <p role="alert" className="mt-3 text-[12px] leading-[1.4] text-[#991B1B]">
           {error}
         </p>
       ) : null}
@@ -239,7 +249,7 @@ export function LoginGateDialog({
       initialFocusRef={emailInputRef}
     >
       {open ? (
-        <LoginGateFields
+        <LoginAuthFields
           copy={copy}
           email={email}
           password={password}
@@ -247,6 +257,7 @@ export function LoginGateDialog({
           error={error}
           busy={busy}
           emailInputRef={emailInputRef}
+          showClose
           onEmailChange={onEmailChange}
           onPasswordChange={onPasswordChange}
           onModeChange={onModeChange}

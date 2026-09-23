@@ -50,6 +50,13 @@ export type CaptureInput = {
    */
   analysis?: string;
   mediaRef?: string;
+  /** Structured vision slot candidates — always merged as inferred */
+  visionSlots?: Array<{
+    fieldId: string;
+    value: string;
+    confidence?: number;
+    note?: string;
+  }>;
 };
 
 export type ExtractPropertyFactsInput = {
@@ -62,6 +69,8 @@ export type ExtractPropertyFactsInput = {
   /** Extensible multimodal payloads */
   captures?: CaptureInput[];
   locale?: string;
+  /** Explicit (A): soft question focus for short-answer attribution */
+  focusFieldIds?: PropertyFieldId[];
 };
 
 export type ExtractedPropertyFact = {

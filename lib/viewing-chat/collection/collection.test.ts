@@ -199,8 +199,12 @@ describe("getNextQuestions", () => {
     expect(qs.length).toBeGreaterThan(0);
     expect(qs.length).toBeLessThanOrEqual(3);
     expect(qs.every((q) => q.skippable)).toBe(true);
-    // Highest importance among catalog gaps should lead
-    expect(qs[0]?.fieldId).toBe("address");
+    // 招4: early turns prefer condition-band fields (not address/price yet)
+    expect(
+      ["electrical", "water_damage", "amenities", "layout", "floor", "hvac"].includes(
+        qs[0]!.fieldId,
+      ),
+    ).toBe(true);
     expect(qs[1]?.priority).toBeLessThanOrEqual(qs[0]!.priority);
   });
 
@@ -260,6 +264,8 @@ describe("getNextQuestions", () => {
           "light",
           "parking",
           "amenities",
+          "electrical",
+          "year_built",
         ].map((fieldId) => [
           fieldId,
           {

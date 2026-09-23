@@ -14,7 +14,7 @@ afterEach(() => {
 });
 
 describe("LanguageSwitcher", () => {
-  it("keeps the document language in sync", async () => {
+  it("opens a language dialog from the button and syncs document lang", async () => {
     const user = userEvent.setup();
     render(
       <I18nProvider>
@@ -22,7 +22,10 @@ describe("LanguageSwitcher", () => {
       </I18nProvider>,
     );
 
-    await user.selectOptions(screen.getByRole("combobox"), "en");
+    await user.click(screen.getByRole("button", { name: /語言|Language|语言|ภาษา/ }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("option", { name: /English/i }));
     expect(document.documentElement.lang).toBe("en");
   });
 });

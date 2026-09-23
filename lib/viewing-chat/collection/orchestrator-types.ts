@@ -39,6 +39,12 @@ export type StoredCapture = CaptureInput & {
   transcriptIncomplete?: boolean;
 };
 
+export type PendingConfirmState = {
+  fieldId: PropertyFieldId;
+  candidateValue: string;
+  source: "vision" | "intel" | "assistant_guess" | "inferred";
+};
+
 export type ConversationState = {
   status: ConversationStatus;
   record: PropertyRecord;
@@ -47,6 +53,10 @@ export type ConversationState = {
   locale?: string;
   /** Soft focus for skip UX — not the sole source of truth */
   focusFieldIds?: PropertyFieldId[];
+  /** 招1 — candidate awaiting yes/no */
+  pendingConfirm?: PendingConfirmState | null;
+  /** 招4 — completed user turns before this one (0-based count of prior user msgs) */
+  userTurnCount?: number;
 };
 
 export type UserTurnMessage = {
@@ -62,9 +72,15 @@ export type UserTurnMessage = {
 
 export type SuggestedQuestion = {
   fieldId: PropertyFieldId;
+  /** 招2 — multiple fields covered by one composite question */
+  fieldIds?: PropertyFieldId[];
   question: string;
   priority: number;
   skippable: true;
+  /** 招1 confirm / 招3 clarify / 招2 composite / open */
+  kind?: "open" | "confirm" | "clarify" | "composite";
+  /** 招1 — candidate value awaiting yes/no */
+  candidateValue?: string;
 };
 
 export type RecordChange = {
@@ -74,6 +90,9 @@ export type RecordChange = {
   nextValue?: string | number | boolean | null;
   rawText?: string;
 };
+
+/** ok = usable; extraction_failed = Zod/LLM failed — keep prior facts + raw response */
+export type ExtractionStatus = "ok" | "extraction_failed";
 
 export type ProcessUserTurnInput = {
   conversation: ConversationState;
@@ -87,12 +106,18 @@ export type ProcessUserTurnInput = {
   signal?: AbortSignal;
   /**
    * Optional polish override (tests / custom providers).
-   * On failure, return `{ text: draft, warning: "llm_failed" | "llm_schema_invalid" }`.
+   * On failure, return `{ text: draft, warning: "llm_failed" | "extraction_failed", extractionStatus }`.
+   * Never invent facts; caller keeps prior record on schema failure.
    */
   polishReply?: (
     draft: string,
     userText: string,
-  ) => Promise<{ text: string; warning?: string }>;
+  ) => Promise<{
+    text: string;
+    warning?: string;
+    extractionStatus?: ExtractionStatus;
+    rawAiResponse?: string;
+  }>;
 };
 
 export type ProcessUserTurnResult = {
@@ -108,6 +133,13 @@ export type ProcessUserTurnResult = {
   warnings: string[];
   /** Raw user message was retained even if downstream AI failed */
   preservedMessageId: string;
+  extractionStatus: ExtractionStatus;
+  /** Raw model output when schema validation failed (for debug / retry) */
+  rawAiResponse?: string;
+  /** Soft focus for next Explicit (A) short-answer fill */
+  focusFieldIds: PropertyFieldId[];
+  /** 招1 — next Yes/No candidate (or null if cleared) */
+  pendingConfirm: PendingConfirmState | null;
 };
 
 export type FieldSnapshot = PropertyFieldState;

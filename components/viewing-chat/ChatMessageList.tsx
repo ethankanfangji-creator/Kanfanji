@@ -11,6 +11,7 @@ import {
   type ChatReplyRef,
 } from "@/lib/viewing-chat/types";
 import { resolveAgendaId } from "@/lib/viewing-chat/agenda-catalog";
+import { agendaIdToFieldId } from "@/lib/viewing-chat/collection/field-map";
 import { InitialReportCard } from "@/components/viewing-chat/InitialReportCard";
 
 const LONG_PRESS_MS = 480;
@@ -267,37 +268,42 @@ export function ChatMessageList({
                 </p>
               ) : null}
               {message.matched?.length ? (
-                <ul
+                <div
                   className={`space-y-1.5 text-[12px] text-[#374151] ${
                     message.text && looksLikeQuestion(message.text) ? "" : "mt-1.5"
                   }`}
                 >
-                  {message.matched.map((hit) => {
-                    const agendaId = resolveAgendaId(hit.id);
-                    const itemLabel =
-                      c.agendaItems[
-                        agendaId as keyof typeof c.agendaItems
-                      ] ?? agendaId;
-                    return (
-                      <li
-                        key={`${message.id}-${hit.id}`}
-                        className="rounded-xl border border-[#BFDBFE]/80 bg-[#EFF6FF] px-2.5 py-2"
-                      >
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="rounded-full bg-[#2563EB] px-2 py-0.5 text-[10px] font-bold tracking-wide text-white">
-                            {c.matchedLogged}
-                          </span>
-                          <span className="text-[11px] font-semibold text-[#1E40AF]">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-[#1E40AF]">
+                    {c.matchedLogged}
+                  </p>
+                  <ul className="space-y-1.5">
+                    {message.matched.map((hit) => {
+                      const agendaId = resolveAgendaId(hit.id);
+                      const fieldId = agendaIdToFieldId(agendaId);
+                      const itemLabel =
+                        c.agendaItems[
+                          agendaId as keyof typeof c.agendaItems
+                        ] ??
+                        c.fieldLabels?.[
+                          fieldId as keyof typeof c.fieldLabels
+                        ] ??
+                        agendaId;
+                      return (
+                        <li
+                          key={`${message.id}-${hit.id}`}
+                          className="rounded-xl border border-[#BFDBFE]/80 bg-[#EFF6FF] px-2.5 py-2"
+                        >
+                          <p className="text-[11px] font-semibold text-[#1E40AF]">
                             {itemLabel}
-                          </span>
-                        </div>
-                        <p className="mt-1 whitespace-pre-wrap text-[12px] leading-snug text-[#1F2937]">
-                          {hit.answer}
-                        </p>
-                      </li>
-                    );
-                  })}
-                </ul>
+                          </p>
+                          <p className="mt-0.5 whitespace-pre-wrap text-[12px] leading-snug text-[#1F2937]">
+                            {hit.answer}
+                          </p>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
               ) : null}
               {/* Advance turn: show logged facts first, then the next question. */}
               {message.matched?.length &&

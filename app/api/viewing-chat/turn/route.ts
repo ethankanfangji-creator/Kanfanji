@@ -60,6 +60,14 @@ export async function POST(request: Request) {
 
     const hasPhoto = image instanceof File && image.size > 0;
     let photoAnalysis: string | undefined;
+    let visionSlots:
+      | Array<{
+          fieldId: string;
+          value: string;
+          confidence?: number;
+          note?: string;
+        }>
+      | undefined;
     if (hasPhoto && image instanceof File) {
       try {
         const buf = Buffer.from(await image.arrayBuffer());
@@ -88,6 +96,7 @@ export async function POST(request: Request) {
               .filter(Boolean)
               .join("\n")
               .slice(0, 1500);
+            visionSlots = extracted.slots?.length ? extracted.slots : undefined;
           }
         }
       } catch {
@@ -125,6 +134,7 @@ export async function POST(request: Request) {
       transcript,
       hasPhoto,
       photoAnalysis,
+      visionSlots,
       replyTo,
       agendaActiveId:
         typeof form.get("agendaActiveId") === "string"
@@ -187,9 +197,69 @@ export async function POST(request: Request) {
           return [];
         }
       })(),
+      collectionFocusFieldIds: (() => {
+        const raw = form.get("collectionFocusFieldIds");
+        if (typeof raw !== "string" || !raw.trim()) return [];
+        try {
+          const parsed = JSON.parse(raw) as unknown;
+          return Array.isArray(parsed)
+            ? parsed
+                .filter((id): id is string => typeof id === "string")
+                .slice(0, 5) as import("@/lib/viewing-chat/collection/types").PropertyFieldId[]
+            : [];
+        } catch {
+          return [];
+        }
+      })(),
+      pendingConfirm: (() => {
+        const raw = form.get("pendingConfirm");
+        if (typeof raw !== "string" || !raw.trim()) return null;
+        try {
+          const parsed = JSON.parse(raw) as {
+            fieldId?: string;
+            candidateValue?: string;
+            source?: string;
+          };
+          if (
+            parsed &&
+            typeof parsed.fieldId === "string" &&
+            typeof parsed.candidateValue === "string"
+          ) {
+            return {
+              fieldId: parsed.fieldId as import("@/lib/viewing-chat/collection/types").PropertyFieldId,
+              candidateValue: parsed.candidateValue.slice(0, 200),
+              source: (parsed.source as "inferred") || "inferred",
+            };
+          }
+          return null;
+        } catch {
+          return null;
+        }
+      })(),
+      beforeExtraction: async (_userMessage, messagesWithUser) => {
+        // Persist raw user message before AI so model failure cannot erase input
+        if (!viewingId) return;
+        const supabase = await createClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) return;
+        const { error } = await supabase
+          .from("viewings")
+          .update({
+            messages: messagesWithUser,
+            updated_at: new Date().toISOString(),
+            client_updated_at: new Date().toISOString(),
+          })
+          .eq("id", viewingId)
+          .eq("user_id", user.id);
+        if (error) {
+          console.error("viewing_chat_turn_persist_user", error.message);
+        }
+      },
     });
 
-    // Persist for authenticated owners when viewingId is provided.
+    // Persist full turn (user + AI + collection) for authenticated owners
     if (viewingId) {
       const supabase = await createClient();
       const {
@@ -222,6 +292,14 @@ export async function POST(request: Request) {
         propertyRecord: result.propertyRecord,
         propertyEvidence: result.propertyEvidence,
         collectionSkippedFields: result.collectionSkippedFields,
+        changes: result.changes,
+        conversationStatus: result.conversationStatus,
+        turnWarnings: result.turnWarnings,
+        suggestedQuestions: result.suggestedQuestions,
+        extractionStatus: result.extractionStatus,
+        rawAiResponse: result.rawAiResponse,
+        collectionFocusFieldIds: result.collectionFocusFieldIds,
+        pendingConfirm: result.pendingConfirm,
       }),
     );
   } catch (error) {

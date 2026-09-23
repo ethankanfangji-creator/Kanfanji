@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { htmlLang, LOCALES, LOCALE_LABELS, type Locale } from "@/lib/i18n/config";
 import { useI18n } from "@/components/I18nProvider";
 
-export function LanguageSwitcher() {
+export function LanguageSwitcher({ className }: { className?: string }) {
   const { locale, setLocale, messages } = useI18n();
 
   useEffect(() => {
@@ -12,7 +12,14 @@ export function LanguageSwitcher() {
   }, [locale]);
 
   return (
-    <label className="inline-flex items-center gap-1.5 h-8 px-2 rounded-full bg-white border border-black/10">
+    <label
+      className={[
+        "inline-flex items-center gap-1.5 h-8 px-2 rounded-full bg-white border border-black/10",
+        className,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
       <span className="sr-only">{messages.language.label}</span>
       <select
         value={locale}

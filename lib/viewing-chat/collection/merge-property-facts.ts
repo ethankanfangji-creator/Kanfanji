@@ -127,16 +127,16 @@ export function mergePropertyFacts(
   for (const fact of incomingFacts) {
     const prev = fields[fact.fieldId];
 
-    // Unknown / defer markers: set status without inventing a value
+    // Unknown / defer markers: allow clearing value (e.g. Yes/No rejection)
     if (fact.status === "unknown" && (fact.value === null || fact.value === "")) {
       fields[fact.fieldId] = toFieldState(
         {
           ...fact,
-          value: prev?.value ?? null,
+          value: fact.value,
           status: "unknown",
         },
         createdAt,
-        prev?.hasConflict,
+        false,
       );
       newEvidence.push(
         statementEvidence(fact, "unknown", createdAt, {

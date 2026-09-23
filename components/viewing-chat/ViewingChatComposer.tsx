@@ -8,6 +8,7 @@ import {
   Plus,
   Send,
   Square,
+  Video,
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -24,25 +25,34 @@ export type ChatComposerLabels = {
   camera: string;
   uploadImage: string;
   uploadFile: string;
+  uploadVideo?: string;
   empty: string;
   micDenied: string;
   replyCancel?: string;
   replyingTo?: string;
+  processing?: string;
+  uploading?: string;
+  retry?: string;
 };
-
-const TEXTAREA_MAX_PX = 168;
-/** One line of text (15px / leading 22) + vertical padding */
-const SINGLE_LINE_PX = 36;
 
 export function ViewingChatComposer({
   labels,
   busy,
+  processing,
+  processingHint,
+  externalError,
+  onRetry,
   replyTo,
   onClearReply,
   onSubmit,
 }: {
   labels: ChatComposerLabels;
   busy?: boolean;
+  /** True while turn / upload is in flight */
+  processing?: boolean;
+  processingHint?: string | null;
+  externalError?: string | null;
+  onRetry?: () => void;
   replyTo?: ChatReplyRef | null;
   onClearReply?: () => void;
   onSubmit: (payload: {
@@ -54,6 +64,7 @@ export function ViewingChatComposer({
 }) {
   const cameraRef = useRef<HTMLInputElement>(null);
   const imageRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const attachWrapRef = useRef<HTMLDivElement>(null);
@@ -61,6 +72,9 @@ export function ViewingChatComposer({
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+
+  const TEXTAREA_MAX_PX = 168;
+  const SINGLE_LINE_PX = 36;
 
   const [text, setText] = useState("");
   const [recording, setRecording] = useState(false);
@@ -182,6 +196,7 @@ export function ViewingChatComposer({
       setFile(null);
       return;
     }
+    // Video and other docs travel as file attachments
     setFile(picked);
     setImage(null);
   }
@@ -240,6 +255,11 @@ export function ViewingChatComposer({
             label={labels.uploadImage}
             onClick={() => imageRef.current?.click()}
             icon={<ImagePlus className="h-4 w-4" />}
+          />
+          <AttachItem
+            label={labels.uploadVideo || "Video"}
+            onClick={() => videoRef.current?.click()}
+            icon={<Video className="h-4 w-4" />}
           />
           <AttachItem
             label={labels.uploadFile}
@@ -376,9 +396,9 @@ export function ViewingChatComposer({
         }}
       />
       <input
-        ref={fileRef}
+        ref={videoRef}
         type="file"
-        accept="image/*,audio/*,.pdf,.doc,.docx,.txt,.m4a,.mp3,.wav,.webm"
+        accept="video/mp4,video/webm,video/quicktime,video/*"
         className="hidden"
         onChange={(event) => {
           applyPickedFile(event.target.files?.[0]);
@@ -386,6 +406,43 @@ export function ViewingChatComposer({
           setAttachOpen(false);
         }}
       />
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.txt,.m4a,.mp3,.wav,.webm,.mp4,.mov"
+        className="hidden"
+        onChange={(event) => {
+          applyPickedFile(event.target.files?.[0]);
+          event.target.value = "";
+          setAttachOpen(false);
+        }}
+      />
+
+      {processing || processingHint ? (
+        <p
+          className="mb-1.5 px-1 text-[11px] font-semibold text-[#1D4ED8]"
+          role="status"
+        >
+          {processingHint || labels.processing || labels.uploading || "…"}
+        </p>
+      ) : null}
+
+      {error || externalError ? (
+        <div className="mb-1.5 flex items-center gap-2 px-1" role="alert">
+          <p className="min-w-0 flex-1 text-[11px] font-medium text-[#991B1B]">
+            {externalError || error}
+          </p>
+          {onRetry && externalError ? (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="shrink-0 rounded-full bg-[#FEE2E2] px-2.5 py-1 text-[11px] font-bold text-[#991B1B]"
+            >
+              {labels.retry || "Retry"}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       <div
         className={
@@ -427,12 +484,6 @@ export function ViewingChatComposer({
           actionButtons
         )}
       </div>
-
-      {error ? (
-        <p className="mt-1 px-1 text-[11px] font-medium text-[#991B1B]" role="alert">
-          {error}
-        </p>
-      ) : null}
     </div>
   );
 }

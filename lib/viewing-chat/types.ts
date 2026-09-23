@@ -129,6 +129,20 @@ export type ViewingChatThread = {
   propertyEvidence?: PropertyFactEvidence[];
   /** Collection fields deferred by the user */
   collectionSkippedFields?: PropertyFieldId[];
+  /** Explicit (A) soft focus for short-answer attribution */
+  collectionFocusFieldIds?: PropertyFieldId[];
+  /** 招1 — Yes/No candidate awaiting user confirm */
+  pendingConfirm?: {
+    fieldId: PropertyFieldId;
+    candidateValue: string;
+    source: string;
+  } | null;
+  /** Last turn deltas for summary panel */
+  lastTurnChanges?: import("@/lib/viewing-chat/collection").RecordChange[];
+  /** Orchestrator conversation status */
+  conversationStatus?: import("@/lib/viewing-chat/collection").ConversationStatus;
+  /** Soft warnings from last turn (pending vision, incomplete transcript, …) */
+  turnWarnings?: string[];
 };
 
 export const DEFAULT_QUESTION_BANK: Array<Omit<QuestionBankItem, "answer" | "justDiscussed">> = [

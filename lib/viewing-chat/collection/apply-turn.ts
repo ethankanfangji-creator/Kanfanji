@@ -1,9 +1,9 @@
+import { extractPropertyFacts } from "./extract-property-facts";
+import { getNextQuestions } from "./get-next-questions";
 import {
   createEmptyPropertyRecord,
-  extractPropertyFacts,
-  getNextQuestions,
   mergePropertyFacts,
-} from "./index";
+} from "./merge-property-facts";
 import { agendaIdToFieldId, fieldIdToMatchedId } from "./field-map";
 import type {
   ConversationIntent,

@@ -4,6 +4,7 @@ import { Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { ViewingChatThread } from "@/lib/viewing-chat/types";
 import { messageSearchHaystack } from "@/lib/viewing-chat/types";
+import { shortenAddressLabel } from "@/lib/shorten-address";
 
 export function HistorySearchPanel({
   threads,
@@ -93,7 +94,14 @@ export function HistorySearchPanel({
                       active ? "bg-[#EFF6FF]" : "hover:bg-[#FAF6F1]"
                     }`}
                   >
-                    <p className="truncate text-[14px] font-bold">{thread.address || "—"}</p>
+                    <p
+                      className="truncate text-[14px] font-bold"
+                      title={thread.address || undefined}
+                    >
+                      {thread.address
+                        ? shortenAddressLabel(thread.normalizedAddress || thread.address)
+                        : "—"}
+                    </p>
                     {preview ? (
                       <p className="mt-0.5 line-clamp-2 text-[12px] text-[#6B7280]">{preview}</p>
                     ) : null}

@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:install": "playwright install chromium",
-    "test:supabase:smoke": "node scripts/supabase-integration-smoke.mjs"
+    "test:supabase:smoke": "node scripts/supabase-integration-smoke.mjs",
+    "test:node": "node --test lib/billing-status.test.ts lib/supabase-write.test.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

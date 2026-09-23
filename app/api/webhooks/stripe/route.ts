@@ -6,6 +6,7 @@ import {
   type StripeSubscriptionProjection,
 } from "@/lib/billing";
 import { getStripe } from "@/lib/stripe";
+import { throwOnSupabaseError } from "@/lib/supabase-write";
 import { createAdminClient } from "@/utils/supabase/admin";
 
 export const runtime = "nodejs";
@@ -21,7 +22,7 @@ async function resolveUserId(subscription: Stripe.Subscription, customerId?: str
     .select("user_id")
     .eq("stripe_customer_id", customerId)
     .maybeSingle();
-  if (error) throw new Error("BILLING_LOOKUP_FAILED");
+  throwOnSupabaseError(error, "subscriptions lookup");
   return data?.user_id ?? null;
 }
 

@@ -1,5 +1,6 @@
 import Stripe from "stripe";
-import { subscriptionEntitlement } from "@/lib/billing";
+
+export { isActiveSubscriptionStatus } from "@/lib/billing-status";
 
 export function getStripe() {
   const key = process.env.STRIPE_SECRET_KEY;
@@ -10,8 +11,4 @@ export function getStripe() {
     apiVersion: "2025-02-24.acacia",
     typescript: true,
   });
-}
-
-export function isActiveSubscriptionStatus(status?: string | null) {
-  return subscriptionEntitlement(status);
 }

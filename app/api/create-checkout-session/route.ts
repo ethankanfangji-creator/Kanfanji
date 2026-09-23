@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getStripe } from "@/lib/stripe";
+import { throwOnSupabaseError } from "@/lib/supabase-write";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
 
@@ -28,12 +29,12 @@ export async function POST() {
     const stripe = getStripe();
     const admin = createAdminClient();
 
-    const { data: existing, error: subscriptionError } = await admin
+    const { data: existing, error: existingError } = await admin
       .from("subscriptions")
       .select("stripe_customer_id, status, plan")
       .eq("user_id", user.id)
       .maybeSingle();
-    if (subscriptionError) throw new Error("SUBSCRIPTION_LOOKUP_FAILED");
+    throwOnSupabaseError(existingError, "subscriptions lookup");
 
     let customerId = existing?.stripe_customer_id ?? null;
     if (!customerId) {
@@ -42,7 +43,7 @@ export async function POST() {
         metadata: { supabase_user_id: user.id },
       });
       customerId = customer.id;
-      const { error: customerPersistError } = await admin.from("subscriptions").upsert(
+      const { error: upsertError } = await admin.from("subscriptions").upsert(
         {
           user_id: user.id,
           stripe_customer_id: customerId,
@@ -52,7 +53,7 @@ export async function POST() {
         },
         { onConflict: "user_id" },
       );
-      if (customerPersistError) throw new Error("CUSTOMER_PERSIST_FAILED");
+      throwOnSupabaseError(upsertError, "subscriptions upsert");
     }
 
     const session = await stripe.checkout.sessions.create({

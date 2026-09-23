@@ -33,6 +33,13 @@ function readAll(): ViewingChatThread[] {
         ? thread.agendaSkippedIds
         : [],
       agendaMarket: thread.agendaMarket ?? undefined,
+      propertyRecord: thread.propertyRecord ?? null,
+      propertyEvidence: Array.isArray(thread.propertyEvidence)
+        ? thread.propertyEvidence
+        : [],
+      collectionSkippedFields: Array.isArray(thread.collectionSkippedFields)
+        ? thread.collectionSkippedFields
+        : [],
     }));
   } catch {
     return [];
@@ -92,6 +99,9 @@ export function createLocalThread(
     agendaActiveId: null,
     agendaSkippedIds: [],
     agendaMarket: undefined,
+    propertyRecord: null,
+    propertyEvidence: [],
+    collectionSkippedFields: [],
   };
   return upsertLocalThread(thread);
 }

@@ -11,6 +11,7 @@ import { MediaLibraryPanel } from "@/components/viewing-chat/MediaLibraryPanel";
 import { ViewingChatComposer } from "@/components/viewing-chat/ViewingChatComposer";
 import { AI_CONSENT_VERSION } from "@/lib/ai-boundary/client";
 import type { AddressSuggestion } from "@/lib/address-suggest";
+import { shortenAddressLabel } from "@/lib/shorten-address";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 import {
   createLocalThread,
@@ -52,10 +53,16 @@ import {
   getActiveAgendaItem,
   inferAgendaMarket,
   openingAgendaActiveId,
-  pickNextAgendaId,
   projectAgenda,
 } from "@/lib/viewing-chat/agenda";
 import { createAgendaLabelResolver } from "@/lib/viewing-chat/agenda-labels";
+import { applyCollectionSkip } from "@/lib/viewing-chat/collection";
+import type {
+  PropertyCollectionRecord,
+  PropertyFactEvidence,
+  PropertyFieldId,
+} from "@/lib/viewing-chat/collection/types";
+import { createEmptyPropertyRecord } from "@/lib/viewing-chat/collection";
 
 function consentSessionId(): string {
   if (typeof window === "undefined") return "ssr";
@@ -261,6 +268,23 @@ export function ViewingChatApp() {
       agendaActiveId: firstId,
       agendaSkippedIds: [],
       agendaMarket: market,
+      propertyRecord: createEmptyPropertyRecord({
+        address: trimmed,
+        mode: "collecting",
+        fields: {
+          address: {
+            fieldId: "address",
+            value: trimmed,
+            status: "confirmed",
+            confidence: 0.95,
+            sourceMessageId: null,
+            rawText: trimmed,
+            updatedAt: new Date().toISOString(),
+          },
+        },
+      }),
+      propertyEvidence: [],
+      collectionSkippedFields: [],
     });
     refreshLocal();
     setActiveId(thread.id);
@@ -274,36 +298,32 @@ export function ViewingChatApp() {
   function skipActiveAgendaItem() {
     if (!active) return;
     const current = getActiveAgendaItem(agenda);
-    if (!current) return;
-    const skipped = [...new Set([...(active.agendaSkippedIds ?? []), current.id])];
-    const nextId = pickNextAgendaId(
-      projectAgenda({
-        messages: active.messages,
-        activeId: current.id,
-        skippedIds: skipped,
-        market: active.agendaMarket ?? inferAgendaMarket(active.address),
-        resolveLabels: createAgendaLabelResolver(c),
-      }),
-    );
-    const nextItem = nextId
-      ? agenda.find((item) => item.id === nextId) ||
-        projectAgenda({
-          messages: active.messages,
-          activeId: nextId,
-          skippedIds: skipped,
-          market: active.agendaMarket ?? inferAgendaMarket(active.address),
-          resolveLabels: createAgendaLabelResolver(c),
-        }).find((item) => item.id === nextId)
-      : null;
+    const skipId =
+      current?.id ||
+      active.agendaActiveId ||
+      active.collectionSkippedFields?.[0] ||
+      "area";
+    const skipped = applyCollectionSkip({
+      record:
+        active.propertyRecord ??
+        createEmptyPropertyRecord({ address: active.address }),
+      evidence: active.propertyEvidence ?? [],
+      skippedFields: (active.collectionSkippedFields ?? []) as PropertyFieldId[],
+      skipId,
+      locale,
+    });
     const msg = createAiMessage({
       type: "follow_up",
-      text: nextItem
-        ? c.agendaSkippedNext.replace("{question}", nextItem.question)
-        : c.agendaAllDone,
+      text: skipped.replyText,
     });
     patchLocalThread(active.id, {
-      agendaActiveId: nextId,
-      agendaSkippedIds: skipped,
+      agendaActiveId: skipped.focusMatchedId,
+      agendaSkippedIds: [
+        ...new Set([...(active.agendaSkippedIds ?? []), skipId]),
+      ],
+      collectionSkippedFields: skipped.skippedFields,
+      propertyRecord: skipped.record,
+      propertyEvidence: skipped.evidence,
       messages: [...active.messages, msg],
     });
     refreshLocal();
@@ -511,6 +531,18 @@ export function ViewingChatApp() {
         "agendaMarket",
         active.agendaMarket ?? inferAgendaMarket(active.address),
       );
+      form.append(
+        "propertyRecord",
+        JSON.stringify(active.propertyRecord ?? null),
+      );
+      form.append(
+        "propertyEvidence",
+        JSON.stringify(active.propertyEvidence ?? []),
+      );
+      form.append(
+        "collectionSkippedFields",
+        JSON.stringify(active.collectionSkippedFields ?? []),
+      );
       if (replyTo) {
         form.append("replyTo", JSON.stringify(replyTo));
       }
@@ -531,6 +563,9 @@ export function ViewingChatApp() {
         messages?: ChatMessage[];
         agendaActiveId?: string | null;
         agendaSkippedIds?: string[];
+        propertyRecord?: PropertyCollectionRecord | null;
+        propertyEvidence?: PropertyFactEvidence[];
+        collectionSkippedFields?: PropertyFieldId[];
         error?: string;
         code?: string;
       };
@@ -602,6 +637,18 @@ export function ViewingChatApp() {
           data.agendaSkippedIds !== undefined
             ? data.agendaSkippedIds
             : active.agendaSkippedIds,
+        propertyRecord:
+          data.propertyRecord !== undefined
+            ? data.propertyRecord
+            : active.propertyRecord,
+        propertyEvidence:
+          data.propertyEvidence !== undefined
+            ? data.propertyEvidence
+            : active.propertyEvidence,
+        collectionSkippedFields:
+          data.collectionSkippedFields !== undefined
+            ? data.collectionSkippedFields
+            : active.collectionSkippedFields,
       });
       refreshLocal();
       setReplyTo(null);
@@ -827,7 +874,12 @@ export function ViewingChatApp() {
                 />
               ) : null}
               <div className="sticky top-0 z-10 border-b border-black/8 bg-[#FAF6F1]/95 px-4 py-2.5 backdrop-blur">
-                <p className="truncate text-center text-[14px] font-bold">{active.address}</p>
+                <p
+                  className="truncate text-center text-[14px] font-bold"
+                  title={active.address}
+                >
+                  {shortenAddressLabel(active.normalizedAddress || active.address)}
+                </p>
                 {status ? (
                   <p
                     className="mt-1 text-center text-[12px] font-semibold text-[#92400E]"

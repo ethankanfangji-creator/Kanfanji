@@ -149,6 +149,44 @@ export async function POST(request: Request) {
         }
         return null;
       })(),
+      propertyRecord: (() => {
+        const raw = form.get("propertyRecord");
+        if (typeof raw !== "string" || !raw.trim()) return null;
+        try {
+          return JSON.parse(raw) as import("@/lib/viewing-chat/collection/types").PropertyCollectionRecord;
+        } catch {
+          return null;
+        }
+      })(),
+      propertyEvidence: (() => {
+        const raw = form.get("propertyEvidence");
+        if (typeof raw !== "string" || !raw.trim()) return [];
+        try {
+          const parsed = JSON.parse(raw) as unknown;
+          return Array.isArray(parsed)
+            ? (parsed as import("@/lib/viewing-chat/collection/types").PropertyFactEvidence[]).slice(
+                0,
+                200,
+              )
+            : [];
+        } catch {
+          return [];
+        }
+      })(),
+      collectionSkippedFields: (() => {
+        const raw = form.get("collectionSkippedFields");
+        if (typeof raw !== "string" || !raw.trim()) return [];
+        try {
+          const parsed = JSON.parse(raw) as unknown;
+          return Array.isArray(parsed)
+            ? parsed
+                .filter((id): id is string => typeof id === "string")
+                .slice(0, 40) as import("@/lib/viewing-chat/collection/types").PropertyFieldId[]
+            : [];
+        } catch {
+          return [];
+        }
+      })(),
     });
 
     // Persist for authenticated owners when viewingId is provided.
@@ -181,6 +219,9 @@ export async function POST(request: Request) {
         messages: result.messages,
         agendaActiveId: result.agendaActiveId,
         agendaSkippedIds: result.agendaSkippedIds,
+        propertyRecord: result.propertyRecord,
+        propertyEvidence: result.propertyEvidence,
+        collectionSkippedFields: result.collectionSkippedFields,
       }),
     );
   } catch (error) {

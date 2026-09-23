@@ -13,6 +13,11 @@ import type {
   PropertySource,
 } from "@/lib/property-source/types";
 import type { PropertyChatStage } from "@/lib/viewing-chat/stage";
+import type {
+  PropertyCollectionRecord,
+  PropertyFactEvidence,
+  PropertyFieldId,
+} from "@/lib/viewing-chat/collection/types";
 
 export type ChatMessageRole = "user" | "ai";
 
@@ -118,6 +123,12 @@ export type ViewingChatThread = {
   agendaSkippedIds?: string[];
   /** Market pack for agenda (inferred from address; US/CA/TW/OTHER) */
   agendaMarket?: "US" | "CA" | "TW" | "OTHER";
+  /** Progressive collection: structured field state (source of truth for facts) */
+  propertyRecord?: PropertyCollectionRecord | null;
+  /** Append-only evidence / correction / conflict log */
+  propertyEvidence?: PropertyFactEvidence[];
+  /** Collection fields deferred by the user */
+  collectionSkippedFields?: PropertyFieldId[];
 };
 
 export const DEFAULT_QUESTION_BANK: Array<Omit<QuestionBankItem, "answer" | "justDiscussed">> = [

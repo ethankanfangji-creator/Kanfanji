@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { assertContentLength } from "@/lib/ai-boundary/server-entry";
 import { AiInputError } from "@/lib/ai-boundary/validation";
-import { erasePropertyData } from "@/lib/property-domain/erasure";
+import {
+  erasePropertyData,
+  requireAuthenticatedEraseUser,
+} from "@/lib/property-domain/erasure";
 import {
   authorizePropertyApi,
   propertyApiErrorSync,
@@ -14,6 +17,7 @@ export const runtime = "nodejs";
 /**
  * POST /api/property-report/erase
  * Body: { reportId? | address? | cacheKey?, ...consent }
+ * Authenticated users only; deletes only snapshots they created.
  */
 export async function POST(request: Request) {
   const requestId = requestIdFrom(request);
@@ -21,6 +25,7 @@ export async function POST(request: Request) {
     assertContentLength(request);
     const body = (await request.json()) as Record<string, unknown>;
     const boundary = await authorizePropertyApi(request, body, { consumeQuota: true });
+    const actorUserId = requireAuthenticatedEraseUser(boundary.userId);
 
     const reportId =
       typeof body.reportId === "string" && body.reportId.trim()
@@ -45,7 +50,8 @@ export async function POST(request: Request) {
       reportId,
       address,
       cacheKey,
-      actor: boundary.identityKind === "user" ? "user" : "guest",
+      actor: "user",
+      actorUserId,
     });
 
     return boundary.applyCookie(

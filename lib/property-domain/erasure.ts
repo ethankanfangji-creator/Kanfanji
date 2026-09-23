@@ -1,9 +1,14 @@
 /**
  * Erase property report snapshots + evidence + intel cache by reportId or address.
+ *
+ * HTTP callers must pass `actorUserId` (authenticated user). That scopes deletes
+ * to snapshots that user created and never wipes the shared intel cache.
+ * Omitting `actorUserId` is for tests / internal jobs and keeps global behavior.
  */
 
 import { createHash } from "node:crypto";
 import { createAdminClient } from "@/utils/supabase/admin";
+import { AiInputError } from "@/lib/ai-boundary/validation";
 import { propertyIntelCacheKey } from "@/lib/property-intel/cache-key";
 import { addressCacheMaterial } from "@/lib/property-intel/normalize-query";
 import { recordPropertyAudit, type PropertyAuditActor } from "./audit";
@@ -14,6 +19,8 @@ export type ErasePropertyDataInput = {
   address?: string;
   cacheKey?: string;
   actor?: PropertyAuditActor;
+  /** Authenticated user id. When set, only that user's snapshots are deleted. */
+  actorUserId?: string;
 };
 
 export type ErasePropertyDataResult = {
@@ -23,6 +30,13 @@ export type ErasePropertyDataResult = {
   deletedEvidence: number;
   deletedIntelCache: number;
 };
+
+export function requireAuthenticatedEraseUser(userId: string | null | undefined): string {
+  if (typeof userId !== "string" || !userId.trim()) {
+    throw new AiInputError("ai_auth_required", 401);
+  }
+  return userId.trim();
+}
 
 function tryAdmin() {
   if (process.env.VITEST || process.env.PROPERTY_REPORT_MEMORY_STORE === "1") {
@@ -48,6 +62,11 @@ export async function erasePropertyData(
     };
   }
 
+  const actorUserId =
+    typeof input.actorUserId === "string" && input.actorUserId.trim()
+      ? input.actorUserId.trim()
+      : undefined;
+
   const admin = tryAdmin();
   if (!admin) {
     const erased = eraseMemoryReport({
@@ -55,7 +74,11 @@ export async function erasePropertyData(
       cacheKey:
         input.cacheKey ||
         (input.address ? reportCacheKeyForAddress(input.address) : undefined),
+      createdBy: actorUserId,
     });
+    if (actorUserId && input.reportId && erased.deletedReports === 0) {
+      throw new AiInputError("report_not_found", 404);
+    }
     await recordPropertyAudit({
       actor: input.actor ?? "system",
       action: "erase",
@@ -63,7 +86,7 @@ export async function erasePropertyData(
       cacheKeyHash: input.cacheKey
         ? createHash("sha256").update(input.cacheKey).digest("hex").slice(0, 16)
         : null,
-      meta: { mode: "memory", ...erased },
+      meta: { mode: "memory", actorUserId: actorUserId ?? null, ...erased },
     });
     return {
       ok: true,
@@ -87,22 +110,28 @@ export async function erasePropertyData(
     const { data } = await admin
       .schema("private")
       .from("property_domain_reports")
-      .select("id, cache_key")
+      .select("id, cache_key, created_by")
       .eq("id", input.reportId)
       .maybeSingle();
+    if (actorUserId && (!data || String(data.created_by ?? "") !== actorUserId)) {
+      throw new AiInputError("report_not_found", 404);
+    }
     if (data) {
       reportIds.push(String(data.id));
-      if (data.cache_key) cacheKeys.add(String(data.cache_key));
     }
   }
 
   for (const key of cacheKeys) {
     if (key.startsWith("report:")) {
-      const { data } = await admin
+      let query = admin
         .schema("private")
         .from("property_domain_reports")
         .select("id")
         .eq("cache_key", key);
+      if (actorUserId) {
+        query = query.eq("created_by", actorUserId);
+      }
+      const { data } = await query;
       for (const row of data ?? []) reportIds.push(String(row.id));
     }
   }
@@ -127,14 +156,17 @@ export async function erasePropertyData(
     deletedReports = rp ?? 0;
   }
 
-  for (const key of cacheKeys) {
-    if (key.startsWith("facts:")) {
-      const { count } = await admin
-        .schema("private")
-        .from("property_intel_cache")
-        .delete({ count: "exact" })
-        .eq("cache_key", key);
-      deletedIntelCache += count ?? 0;
+  // Shared intel cache is not per-user; only unscoped (system) erase may drop it.
+  if (!actorUserId) {
+    for (const key of cacheKeys) {
+      if (key.startsWith("facts:")) {
+        const { count } = await admin
+          .schema("private")
+          .from("property_intel_cache")
+          .delete({ count: "exact" })
+          .eq("cache_key", key);
+        deletedIntelCache += count ?? 0;
+      }
     }
   }
 
@@ -146,7 +178,13 @@ export async function erasePropertyData(
     cacheKeyHash: firstKey
       ? createHash("sha256").update(firstKey).digest("hex").slice(0, 16)
       : null,
-    meta: { deletedReports, deletedEvidence, deletedIntelCache, reportIds: uniqueIds },
+    meta: {
+      deletedReports,
+      deletedEvidence,
+      deletedIntelCache,
+      reportIds: uniqueIds,
+      actorUserId: actorUserId ?? null,
+    },
   });
 
   return {

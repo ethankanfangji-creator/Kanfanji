@@ -291,21 +291,32 @@ export async function persistPropertyReport(input: {
   }
 
   try {
-    const { data, error } = await admin
+    const baseRow = {
+      cache_key: cacheKey,
+      normalized_address: envelope.normalizedAddress.slice(0, 500),
+      country_code: envelope.country,
+      schema_version: PROPERTY_REPORT_API_SCHEMA,
+      report: envelope,
+      expires_at: expiresAt,
+      updated_at: now,
+    };
+    let inserted = await admin
       .schema("private")
       .from("property_domain_reports")
-      .insert({
-        cache_key: cacheKey,
-        normalized_address: envelope.normalizedAddress.slice(0, 500),
-        country_code: envelope.country,
-        schema_version: PROPERTY_REPORT_API_SCHEMA,
-        report: envelope,
-        created_by: createdBy,
-        expires_at: expiresAt,
-        updated_at: now,
-      })
+      .insert({ ...baseRow, created_by: createdBy })
       .select("id, expires_at")
       .single();
+    // Databases that have not applied migrate-property-report-created-by.sql
+    // reject created_by. Retry without it so the snapshot still lands in Postgres.
+    if (inserted.error || !inserted.data) {
+      inserted = await admin
+        .schema("private")
+        .from("property_domain_reports")
+        .insert(baseRow)
+        .select("id, expires_at")
+        .single();
+    }
+    const { data, error } = inserted;
 
     if (error || !data) throw error ?? new Error("persist failed");
 

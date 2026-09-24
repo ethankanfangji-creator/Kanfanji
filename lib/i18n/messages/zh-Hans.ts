@@ -545,7 +545,7 @@ const zhHans: Messages = {
     declined: "已保存在本机，没有发送 AI 请求。",
     queued: "AI 分析已在此设备排队",
     processing: "AI 分析中…",
-    quota: "已达到 AI 使用上限，请稍后再试。",
+    quota: "已达今日 AI 使用上限。请稍后再试，或升级 Pro 取得更高额度。媒体与笔记仍保存在本机。",
     unavailable: "AI 当前安全停用，媒体仍保存在本机。",
     failed: "AI 分析失败，媒体仍已保存。",
   },

@@ -33,6 +33,17 @@ describe("AI inbound validation", () => {
     );
   });
 
+  it("rejects oversized audio before provider access", () => {
+    const form = validRecordingForm();
+    const oversized = new File([new Uint8Array(AI_LIMITS.audioBytes + 1)], "big.webm", {
+      type: "audio/webm",
+    });
+    form.set("audio", oversized);
+    expect(() => validateRecordingForm(form)).toThrowError(
+      expect.objectContaining({ code: "audio_too_large", status: 413 }),
+    );
+  });
+
   it("rejects malformed MIME, question, marker and context values", () => {
     const mime = validRecordingForm();
     mime.set("audio", new File(["x"], "x.exe", { type: "application/octet-stream" }));

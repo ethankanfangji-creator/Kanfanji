@@ -35,7 +35,8 @@ Last updated: 2026-09-19. Living inventory for agents and humans.
 - `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID`, `STRIPE_WEBHOOK_SECRET`
 - `AI_GUEST_COOKIE_SECRET`, `AI_QUOTA_HASH_SECRET`
 - `SHARE_COOKIE_SECRET`
-- Optional quotas/timeouts: `AI_UPSTREAM_TIMEOUT_MS`, `AI_*_DAILY_LIMIT`, `AI_QUOTA_WINDOW_SECONDS`
+- Optional quotas/timeouts: `AI_UPSTREAM_TIMEOUT_MS`, `AI_GUEST_DAILY_LIMIT`, `AI_FREE_DAILY_LIMIT`, `AI_PRO_DAILY_LIMIT`, `AI_DEVICE_DAILY_LIMIT`, `AI_IP_DAILY_LIMIT`, `AI_QUOTA_WINDOW_SECONDS`
+  - Subject tiers (`lib/ai-quota.ts`): guest 5 / free 20 / pro 200 per rolling 24h window, from DB `subscriptions.status` (`active|trialing` → pro). Never trust client `isPro`.
 - Optional property intel: `GOOGLE_MAPS_API_KEY`, `BING_SEARCH_API_KEY`, `ATTOM_API_KEY`, `PROPERTY_INTEL_CACHE_TTL_HOURS`
 
 If a dedicated AI/share cookie secret is unset, code may fall back to `SUPABASE_SERVICE_ROLE_KEY` — configure dedicated secrets in production.

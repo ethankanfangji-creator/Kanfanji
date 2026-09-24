@@ -3,9 +3,12 @@ import { AiInputError } from "./validation";
 import { aiErrorResponse } from "./server";
 
 describe("AI public errors", () => {
-  it("returns Retry-After for quota errors", async () => {
+  it("returns Retry-After and tier metadata for quota errors", async () => {
     const error = Object.assign(new AiInputError("ai_quota_exceeded", 429), {
       retryAfter: 37,
+      tier: "free",
+      limit: 20,
+      resetAt: "2026-09-24T00:00:00.000Z",
     });
     const response = aiErrorResponse(error);
     expect(response.status).toBe(429);
@@ -13,6 +16,9 @@ describe("AI public errors", () => {
     expect(await response.json()).toEqual({
       error: "AI request could not be completed.",
       code: "ai_quota_exceeded",
+      tier: "free",
+      limit: 20,
+      resetAt: "2026-09-24T00:00:00.000Z",
     });
   });
 

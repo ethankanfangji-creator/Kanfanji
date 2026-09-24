@@ -545,7 +545,7 @@ const zhHant: Messages = {
     declined: "已保存在本機，沒有送出 AI 請求。",
     queued: "AI 分析已在此裝置排隊",
     processing: "AI 分析中…",
-    quota: "已達 AI 使用上限，請稍後再試。",
+    quota: "已達今日 AI 使用上限。請稍後再試，或升級 Pro 取得更高額度。媒體與筆記仍保存在本機。",
     unavailable: "AI 目前安全停用，媒體仍保存在本機。",
     failed: "AI 分析失敗，媒體仍已保存。",
   },

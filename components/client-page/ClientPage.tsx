@@ -3902,7 +3902,7 @@ export function ClientPage() {
             category: "onsite_confirm" as const,
             priority: "high" as const,
             hint: `${input.address} · AI`,
-            description: "Address-specific follow-up suggested by AI — verify on site.",
+            description: messages.wizard.aiHighlightDescription,
           }));
         if (additions.length === 0) return current;
         const merged = [...current, ...additions];

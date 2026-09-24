@@ -3,14 +3,18 @@ import type { Messages } from "../types";
 const zhHant: Messages = {
   brand: {
     name: "看房記 KanFangJi",
-    subtitle: "OPEN HOUSE RECORDER",
-    cardEyebrow: "KANFANGJI · OPEN HOUSE RECORDER",
+    subtitle: "開放看房記錄",
+    cardEyebrow: "看房記 · 開放看房記錄",
   },
   nav: {
     records: "看房紀錄",
     signIn: "登入",
     signOut: "登出",
     contactSupport: "聯絡支援",
+    loadingAccount: "載入帳號中",
+    supportAccountGuest: "帳號：訪客",
+    supportAccountUser: "帳號：{email}",
+    supportDescribeIssue: "請描述問題：",
   },
   status: {
     loggedIn: "已登入 · 生成卡片時上傳",
@@ -59,6 +63,7 @@ const zhHant: Messages = {
     needFieldContent: "請先加入至少一個回答、筆記或媒體再產生報告",
     highlightsLoading: "正在依地址準備看房重點…",
     highlightsReady: "看房重點已就緒 — 請在現場作答",
+    aiHighlightDescription: "依地址建議的 AI 現場追問 — 請到現場核對。",
     propertyDetailsTitle: "房屋基本資料（選填）",
     propertyDetailsHint: "可稍後再填，或由查址／AI 協助 — 不影響進入下一步",
     finishViewing: "完成看房／生成 Report",
@@ -731,6 +736,7 @@ const zhHant: Messages = {
     addressPlaceholder: "輸入看房地址…",
     confirmAddress: "確認並開始",
     generateReport: "完成看房／生成報告",
+    generateReportFromSources: "請依已蒐集的房源資料產生初步報告。",
     generatingReport: "報告生成中…",
     shareReport: "分享連結",
     openBank: "問題清單",

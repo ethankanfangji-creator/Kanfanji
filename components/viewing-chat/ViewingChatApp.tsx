@@ -1082,7 +1082,7 @@ export function ViewingChatApp() {
       if ((active.sources?.length ?? 0) > 0) {
         const form = new FormData();
         form.append("sourceType", "chat_message");
-        form.append("text", "Generate initial report from collected sources.");
+        form.append("text", c.generateReportFromSources);
         form.append("address", active.address);
         form.append("locale", locale);
         form.append("consentVersion", AI_CONSENT_VERSION);

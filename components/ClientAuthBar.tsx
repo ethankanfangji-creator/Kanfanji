@@ -46,7 +46,7 @@ export function ClientAuthBar() {
       <span
         className="h-11 w-16 animate-pulse rounded-full bg-[#EFEAE4]"
         role="status"
-        aria-label="Loading account"
+        aria-label={messages.nav.loadingAccount}
       />
     );
   }

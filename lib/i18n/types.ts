@@ -9,6 +9,10 @@ export type Messages = {
     signIn: string;
     signOut: string;
     contactSupport: string;
+    loadingAccount: string;
+    supportAccountGuest: string;
+    supportAccountUser: string;
+    supportDescribeIssue: string;
   };
   status: {
     loggedIn: string;
@@ -56,6 +60,8 @@ export type Messages = {
     needFieldContent: string;
     highlightsLoading: string;
     highlightsReady: string;
+    /** Description for AI-enriched on-site highlight tickets. */
+    aiHighlightDescription: string;
     propertyDetailsTitle: string;
     propertyDetailsHint: string;
     finishViewing: string;
@@ -692,6 +698,8 @@ export type Messages = {
     addressPlaceholder: string;
     confirmAddress: string;
     generateReport: string;
+    /** User-visible + AI-facing prompt when generating a report from listing sources. */
+    generateReportFromSources: string;
     generatingReport: string;
     shareReport: string;
     openBank: string;

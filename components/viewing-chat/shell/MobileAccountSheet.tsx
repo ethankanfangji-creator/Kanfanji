@@ -10,22 +10,7 @@ import { useI18n } from "@/components/I18nProvider";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 import { resetSyncEngineSingleton } from "@/lib/sync";
 import { setPersistenceAccountScope } from "@/lib/idb/draft-store";
-
-function supportMailto(locale: string, email?: string | null): string {
-  const to =
-    process.env.NEXT_PUBLIC_SUPPORT_EMAIL?.trim() || "support@kanfangji.app";
-  const subject = encodeURIComponent(`[Kanfangji] Support (${locale})`);
-  const body = encodeURIComponent(
-    [
-      email ? `Account: ${email}` : "Account: guest",
-      `Locale: ${locale}`,
-      "",
-      "Please describe the issue:",
-      "",
-    ].join("\n"),
-  );
-  return `mailto:${to}?subject=${subject}&body=${body}`;
-}
+import { buildSupportMailto } from "@/lib/i18n/support-mailto";
 
 /** Mobile account sheet opened from the bottom tab. */
 export function MobileAccountSheet({
@@ -95,12 +80,20 @@ export function MobileAccountSheet({
         </div>
 
         {!ready ? (
-          <div className="h-11 animate-pulse rounded-2xl bg-[#EFEAE4]" />
+          <div
+            className="h-11 animate-pulse rounded-2xl bg-[#EFEAE4]"
+            aria-label={messages.nav.loadingAccount}
+            role="status"
+          />
         ) : (
           <div className="space-y-2">
             <LanguageSwitcher className="w-full" />
             <a
-              href={supportMailto(locale, user?.email)}
+              href={buildSupportMailto({
+                locale,
+                email: user?.email,
+                copy: messages.nav,
+              })}
               onClick={onClose}
               className="flex min-h-[var(--touch-target)] w-full items-center gap-2 rounded-2xl px-3 text-left text-[13px] font-bold hover:bg-[#FAF6F1]"
             >

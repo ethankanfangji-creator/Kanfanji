@@ -5625,6 +5625,7 @@ export function ClientPage() {
         {draftReady && wizardStep === 2 ? (
           <ChatComposer
             messages={messages.composer}
+            permissionCopy={messages.permissions}
             suggestions={questions
               .filter(
                 (q) =>

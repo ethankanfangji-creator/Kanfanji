@@ -264,3 +264,119 @@ describe("TW suggest ranking with mocked upstream", () => {
     expect(results[0]?.label).not.toContain("公園");
   });
 });
+
+describe("US/OTHER suggest ranking with mocked upstream", () => {
+  beforeEach(() => {
+    process.env.GOOGLE_MAPS_API_KEY = "test-google-key";
+  });
+
+  function jsonResponse(body: unknown, ok = true) {
+    return Promise.resolve({
+      ok,
+      json: async () => body,
+    } as Response);
+  }
+
+  it("US: prefers Geocode over park Nominatim when Autocomplete is empty", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("place/autocomplete")) {
+        return jsonResponse({ status: "ZERO_RESULTS", predictions: [] });
+      }
+      if (url.includes("/geocode/")) {
+        return jsonResponse({
+          status: "OK",
+          results: [
+            {
+              place_id: "us-house",
+              formatted_address: "1600 Amphitheatre Parkway, Mountain View, CA 94043, USA",
+              geometry: { location: { lat: 37.42, lng: -122.08 } },
+              address_components: [
+                { long_name: "1600", types: ["street_number"] },
+                { long_name: "Amphitheatre Parkway", types: ["route"] },
+                { long_name: "Mountain View", types: ["locality"] },
+                {
+                  long_name: "California",
+                  short_name: "CA",
+                  types: ["administrative_area_level_1"],
+                },
+                { long_name: "United States", types: ["country"] },
+              ],
+            },
+          ],
+        });
+      }
+      if (url.includes("nominatim.openstreetmap.org")) {
+        return jsonResponse([
+          {
+            place_id: 77,
+            class: "leisure",
+            type: "park",
+            display_name: "Amphitheatre Park, Somewhere, USA",
+            lat: "37.4",
+            lon: "-122.0",
+          },
+        ]);
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const results = await suggestAddresses("1600 Amphitheatre Parkway, Mountain View, CA 94043");
+    expect(results[0]?.source).toBe("google");
+    expect(results[0]?.label).toMatch(/Amphitheatre Parkway/i);
+    expect(results[0]?.label).not.toMatch(/Amphitheatre Park,/);
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    const autoIdx = urls.findIndex((u) => u.includes("place/autocomplete"));
+    const geoIdx = urls.findIndex((u) => u.includes("/geocode/"));
+    expect(geoIdx).toBeGreaterThan(autoIdx);
+    expect(urls.some((u) => u.includes("nominatim"))).toBe(false);
+  });
+
+  it("OTHER: same Geocode-before-Nominatim order when key is set", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("place/autocomplete")) {
+        return jsonResponse({ status: "ZERO_RESULTS", predictions: [] });
+      }
+      if (url.includes("/geocode/")) {
+        return jsonResponse({
+          status: "OK",
+          results: [
+            {
+              place_id: "th-addr",
+              formatted_address: "1 Siam Square, Pathum Wan, Bangkok, Thailand",
+              geometry: { location: { lat: 13.74, lng: 100.53 } },
+              address_components: [
+                { long_name: "1", types: ["street_number"] },
+                { long_name: "Siam Square", types: ["route"] },
+                { long_name: "Bangkok", types: ["locality"] },
+                { long_name: "Thailand", types: ["country"] },
+              ],
+            },
+          ],
+        });
+      }
+      if (url.includes("nominatim.openstreetmap.org")) {
+        return jsonResponse([
+          {
+            place_id: 55,
+            class: "leisure",
+            type: "park",
+            display_name: "Siam Park, Bangkok, Thailand",
+            lat: "13.7",
+            lon: "100.5",
+          },
+        ]);
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    // No TW/US/CA cues → OTHER
+    const results = await suggestAddresses("1 Siam Square Pathum Wan Bangkok");
+    expect(detectSuggestRegion("1 Siam Square Pathum Wan Bangkok")).toBe("OTHER");
+    expect(results[0]?.label).toMatch(/Siam Square/i);
+    expect(results[0]?.label).not.toMatch(/Siam Park/);
+  });
+});

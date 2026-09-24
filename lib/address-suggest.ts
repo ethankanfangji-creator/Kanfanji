@@ -247,9 +247,9 @@ export function isReasonableGoogleAutocomplete(
 
 /**
  * Autocomplete suggestions for address entry.
- * CA/BC → BC Geocoder first.
- * TW + Google key → Autocomplete (if reasonable) → Geocode → filtered Nominatim.
- * US/OTHER → Google Autocomplete → Nominatim → Geocode fallback.
+ * CA/BC → BC Geocoder first when it hits.
+ * With `GOOGLE_MAPS_API_KEY`: Autocomplete (if reasonable) → Geocode → filtered Nominatim.
+ * Without key: filtered Nominatim only.
  * Never invent addresses — empty list if all upstreams miss.
  */
 export async function suggestAddresses(
@@ -267,7 +267,7 @@ export async function suggestAddresses(
     if (bc.length > 0) return bc;
   }
 
-  if (region === "TW" && googleKey()) {
+  if (googleKey()) {
     const google = await suggestViaGoogleAutocomplete(trimmed, limit, region);
     if (isReasonableGoogleAutocomplete(trimmed, google, region)) return google;
 
@@ -277,14 +277,7 @@ export async function suggestAddresses(
     return suggestViaNominatim(trimmed, limit, region);
   }
 
-  const google = await suggestViaGoogleAutocomplete(trimmed, limit, region);
-  if (google.length > 0) return google;
-
-  const osm = await suggestViaNominatim(trimmed, limit, region);
-  if (osm.length > 0) return osm;
-
-  // Full-string geocode as last resort (helps complete US street+ZIP queries)
-  return suggestViaGoogleGeocode(trimmed, limit, region);
+  return suggestViaNominatim(trimmed, limit, region);
 }
 
 async function suggestViaBc(query: string, limit: number): Promise<AddressSuggestion[]> {

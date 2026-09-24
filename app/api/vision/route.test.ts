@@ -92,6 +92,21 @@ describe("POST /api/vision AI boundary", () => {
     expect(await response.json()).toMatchObject({ jobId: "media-1" });
   });
 
+  it("embeds English output-language lock in the vision prompt", async () => {
+    await POST(request(body({ locale: "en" })));
+    expect(completion).toHaveBeenCalled();
+    const messages = completion.mock.calls[0]?.[0]?.messages as Array<{
+      role: string;
+      content: Array<{ type: string; text?: string }> | string;
+    }>;
+    const user = messages?.find((m) => m.role === "user");
+    const textPart = Array.isArray(user?.content)
+      ? user.content.find((p) => p.type === "text")?.text ?? ""
+      : String(user?.content ?? "");
+    expect(textPart).toMatch(/Output language \(mandatory\)/);
+    expect(textPart).toMatch(/English/);
+  });
+
   it("redacts upstream timeout details", async () => {
     completion.mockRejectedValue(
       new DOMException("provider secret request-id=abc", "TimeoutError"),

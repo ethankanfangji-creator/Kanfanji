@@ -30,6 +30,7 @@ export type ShareAccessPanelLabels = {
   confirmRevoke: string;
   busy: string;
   errorGeneric: string;
+  needSync: string;
   historyTitle: string;
   historyEmpty: string;
   historyRevokedAt: string;
@@ -102,7 +103,7 @@ export function ShareAccessPanel({
 
   async function run(action: () => Promise<void>) {
     if (!viewingId) {
-      setError("請先同步雲端案件");
+      setError(labels.needSync);
       return;
     }
     setBusy(true);

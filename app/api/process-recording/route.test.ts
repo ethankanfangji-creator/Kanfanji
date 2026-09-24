@@ -96,4 +96,43 @@ describe("POST /api/process-recording validation", () => {
     expect(response.status).toBe(413);
     expect(transcription).not.toHaveBeenCalled();
   });
+
+  it("embeds English output-language lock in the chat prompt", async () => {
+    transcription.mockResolvedValue({ text: "any leaks near the window" });
+    completion.mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              answers: [],
+              facts: [],
+              pros: [],
+              risks: [],
+              followUps: ["Ask about window seals"],
+              actionItems: [],
+            }),
+          },
+        },
+      ],
+    });
+    await POST(
+      new Request("https://example.test/api/process-recording", {
+        method: "POST",
+        body: form(),
+      }),
+    );
+    expect(transcription).toHaveBeenCalledWith(
+      expect.objectContaining({ language: "en" }),
+      expect.anything(),
+    );
+    expect(completion).toHaveBeenCalled();
+    const messages = completion.mock.calls[0]?.[0]?.messages as Array<{
+      role: string;
+      content: string;
+    }>;
+    const system = messages?.find((m) => m.role === "system")?.content ?? "";
+    expect(system).toMatch(/Output language \(mandatory\)/);
+    expect(system).toMatch(/English/);
+    expect(system).not.toMatch(/繁體中文/);
+  });
 });

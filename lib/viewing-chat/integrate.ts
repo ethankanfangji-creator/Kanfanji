@@ -11,7 +11,7 @@ import {
   createConversationState,
   fieldIdToMatchedId,
   processUserTurn,
-  VIEWING_RECORDER_REPORT_RULES,
+  viewingRecorderReportRules,
 } from "@/lib/viewing-chat/collection";
 import {
   ChatReportLlmSchema,
@@ -392,17 +392,15 @@ export async function buildChatReport(input: {
       messages: [
         {
           role: "system",
-          content: `${VIEWING_RECORDER_REPORT_RULES}
+          content: `${viewingRecorderReportRules(input.locale)}
 
 Create a concise open-house report from chat + PROPERTY_EVIDENCE only.
 - ${llmPropertySystemRules()}
 - Any numeric or listing fact in the summary/pros/risks MUST cite an evidence id from PROPERTY_EVIDENCE (e.g. [ev_3_year_built]).
 - If a field is in data_gaps or needs_human, say it is unconfirmed — never invent.
 - Do not invent flood/earthquake/tax/HOA/price when evidence is missing.
-- Prefer aligning with narrative_summary_zh when present; keep original EN/FR snippets untranslated when quoting fenced sources.
-- Write visible report text in 繁體中文 unless the chat majority is another language.`,
-        },
-        {
+- Prefer aligning with narrative_summary_zh when present; keep original EN/FR snippets untranslated when quoting fenced sources.`,
+        },        {
           role: "user",
           content: `Address: ${input.address}
 PROPERTY_EVIDENCE:

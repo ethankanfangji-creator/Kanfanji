@@ -3,6 +3,8 @@ import {
   VIEWING_RECORDER_POLISH_RULES,
   VIEWING_RECORDER_REPORT_RULES,
   VIEWING_RECORDER_SYSTEM_PROMPT,
+  viewingRecorderReportRules,
+  viewingRecorderSystemPrompt,
 } from "./llm-prompt";
 
 describe("VIEWING_RECORDER_SYSTEM_PROMPT", () => {
@@ -21,13 +23,22 @@ describe("VIEWING_RECORDER_SYSTEM_PROMPT", () => {
     expect(p).toMatch(/correction evidence|更正/);
     expect(p).toMatch(/最多三個/);
     expect(p).toMatch(/固定順序/);
-    expect(p).toMatch(/繁體中文/);
+    expect(p).toMatch(/Output language \(mandatory\)/);
+    expect(p).toMatch(/Traditional Chinese|繁體中文/);
     expect(p).toMatch(/review|完成/);
     expect(p).not.toMatch(/房仲推薦/);
+  });
+
+  it("locks English when locale is en", () => {
+    const p = viewingRecorderSystemPrompt("en");
+    expect(p).toMatch(/Output language \(mandatory\)/);
+    expect(p).toMatch(/English/);
+    expect(p).not.toMatch(/繁體中文/);
   });
 
   it("exports polish and report variants with grounding rules", () => {
     expect(VIEWING_RECORDER_POLISH_RULES).toMatch(/不可新增事實/);
     expect(VIEWING_RECORDER_REPORT_RULES).toMatch(/不要聲稱所有資料完整/);
+    expect(viewingRecorderReportRules("en")).toMatch(/English/);
   });
 });

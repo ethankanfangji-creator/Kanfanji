@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import {
   AiInputError,
   aiErrorResponse,
+  aiOutputLanguageInstruction,
   aiTimeoutMs,
   assertContentLength,
   authorizeAiRequest,
@@ -21,14 +22,7 @@ export async function POST(request: Request) {
     if (!apiKey) throw new AiInputError("ai_unavailable", 503);
 
     const { address, locale, market, openData, propertyContext } = input;
-    const languageHint =
-      locale.startsWith("th")
-        ? "ภาษาไทย only, sharp open-house questions"
-        : locale.startsWith("en")
-          ? "English only, sharp open-house questions"
-          : locale.includes("Hans") || locale.toLowerCase().includes("cn")
-            ? "简体中文，尖锐看房必问"
-            : "繁體中文，尖銳看房必問";
+    const languageLock = aiOutputLanguageInstruction(locale);
 
     const od = openData ?? {};
     const openDataContext = [
@@ -64,7 +58,7 @@ export async function POST(request: Request) {
         messages: [
           {
             role: "system",
-            content: `You are an open-house viewing coach. Given an address and optional municipal Open Data, propose 4-6 must-ask on-site questions. Do not invent listing facts (price, beds, year built). Prefer risks, verification, and negotiation leverage. Reply with one question per line, no numbering. ${languageHint}.`,
+            content: `You are an open-house viewing coach. Given an address and optional municipal Open Data, propose 4-6 must-ask on-site questions. Do not invent listing facts (price, beds, year built). Prefer risks, verification, and negotiation leverage. Reply with one question per line, no numbering. Keep questions sharp. ${languageLock}`,
           },
           {
             role: "user",

@@ -5,7 +5,7 @@
 
 import OpenAI from "openai";
 import { z } from "zod";
-import { VIEWING_RECORDER_SYSTEM_PROMPT } from "./llm-prompt";
+import { viewingRecorderSystemPrompt } from "./llm-prompt";
 import { parseLlmJson } from "./llm-schemas";
 import type { ExtractedPropertyFact, PropertyFieldId } from "./types";
 
@@ -52,6 +52,7 @@ export async function extractPropertyFactsWithLlm(input: {
   apiKey?: string;
   text: string;
   messageId: string | null;
+  locale?: string;
   signal?: AbortSignal;
 }): Promise<LlmExtractResult> {
   if (!input.apiKey || !input.text.trim() || input.text.trim().length < 4) {
@@ -69,7 +70,7 @@ export async function extractPropertyFactsWithLlm(input: {
         messages: [
           {
             role: "system",
-            content: `${VIEWING_RECORDER_SYSTEM_PROMPT}
+            content: `${viewingRecorderSystemPrompt(input.locale)}
 
 本呼叫只做欄位抽取。回覆 JSON：
 { "fields": [{ "fieldId", "value", "status", "confidence", "rawText" }] }

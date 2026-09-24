@@ -3964,18 +3964,20 @@ export function ClientPage() {
         error?: string;
       };
       if (!response.ok) {
-        throw new Error(payload.error || "同步失敗");
+        throw new Error(payload.error || messages.paywall.syncFailed);
       }
       const nextPro = Boolean(payload.isPro);
       setIsPro(nextPro);
       setHasStripeCustomer(true);
       setCheckoutTimedOut(false);
       setSyncMessage(
-        nextPro ? messages.paywall.syncSuccess : `訂閱狀態：${payload.status ?? "inactive"}`,
+        nextPro
+          ? messages.paywall.syncSuccess
+          : t(messages.paywall.statusLine, { status: payload.status ?? "inactive" }),
       );
       if (nextPro) setShowPaywall(false);
     } catch (error) {
-      setSyncMessage(error instanceof Error ? error.message : "同步失敗");
+      setSyncMessage(error instanceof Error ? error.message : messages.paywall.syncFailed);
     } finally {
       setBillingSyncLoading(false);
     }

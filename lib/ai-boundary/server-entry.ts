@@ -10,3 +10,11 @@ export {
   validateViewingHighlightsBody,
   validateVisionBody,
 } from "./validation";
+export {
+  DEFAULT_AI_LOCALE,
+  aiOutputLanguageInstruction,
+  aiOutputLanguageName,
+  aiWhisperLanguage,
+  resolveAiLocale,
+} from "./locale";
+export type { AiLocale } from "./config";

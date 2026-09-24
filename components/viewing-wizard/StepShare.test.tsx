@@ -71,6 +71,7 @@ const baseProps = {
     confirmRevoke: "Confirm",
     busy: "Busy",
     errorGeneric: "Error",
+    needSync: "Sync first",
     historyTitle: "History",
     historyEmpty: "Empty",
     historyRevokedAt: "Revoked at",

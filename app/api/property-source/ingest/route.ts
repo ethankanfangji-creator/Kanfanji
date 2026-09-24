@@ -4,9 +4,11 @@ import {
   aiErrorResponse,
   assertContentLength,
   authorizeAiRequest,
+  resolveAiLocale,
   validateConsent,
 } from "@/lib/ai-boundary/server-entry";
 import { AI_LIMITS } from "@/lib/ai-boundary/config";
+import { DEFAULT_AI_LOCALE } from "@/lib/ai-boundary/locale";
 import { runPropertySourcePipeline } from "@/lib/property-source/pipeline";
 import { extractPropertyFromImage } from "@/lib/property-source/extract-vision";
 import { enrichPropertyDataFromFactCard } from "@/lib/property-source/enrich-from-facts";
@@ -39,7 +41,7 @@ export async function POST(request: Request) {
     let sourceType: PropertySourceType = "user_text";
     let sourceRole: PropertySourceRole | null = null;
     let address = "";
-    let locale = "zh-Hant";
+    let locale = DEFAULT_AI_LOCALE;
     let text: string | undefined;
     let url: string | undefined;
     let fileBase64: string | undefined;
@@ -62,7 +64,7 @@ export async function POST(request: Request) {
         sourceRole = roleRaw as PropertySourceRole;
       }
       address = String(form.get("address") || "").trim();
-      locale = String(form.get("locale") || "zh-Hant");
+      locale = resolveAiLocale(form.get("locale"));
       text = form.get("text") ? String(form.get("text")) : undefined;
       url = form.get("url") ? String(form.get("url")) : undefined;
       fileName = form.get("fileName") ? String(form.get("fileName")) : undefined;
@@ -95,7 +97,7 @@ export async function POST(request: Request) {
         sourceRole = body.sourceRole as PropertySourceRole;
       }
       address = typeof body.address === "string" ? body.address.trim() : "";
-      locale = typeof body.locale === "string" ? body.locale : "zh-Hant";
+      locale = resolveAiLocale(body.locale);
       text = typeof body.text === "string" ? body.text : undefined;
       url = typeof body.url === "string" ? body.url : undefined;
       fileBase64 = typeof body.fileBase64 === "string" ? body.fileBase64 : undefined;

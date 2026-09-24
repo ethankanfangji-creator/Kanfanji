@@ -9,7 +9,9 @@ import {
 import {
   AiInputError,
   aiErrorResponse,
+  aiOutputLanguageInstruction,
   aiTimeoutMs,
+  aiWhisperLanguage,
   assertContentLength,
   authorizeAiRequest,
   validateRecordingForm,
@@ -74,18 +76,8 @@ export async function POST(request: Request) {
 
     const openai = new OpenAI({ apiKey });
 
-    const whisperLang = locale.startsWith("th")
-      ? "th"
-      : locale.startsWith("en")
-        ? "en"
-        : "zh";
-    const replyLanguage = locale.startsWith("th")
-      ? "Thai (ภาษาไทย)"
-      : locale.startsWith("en")
-        ? "English"
-        : locale.includes("Hans") || locale.toLowerCase().includes("cn")
-          ? "Simplified Chinese (简体中文)"
-          : "Traditional Chinese (繁體中文)";
+    const whisperLang = aiWhisperLanguage(locale);
+    const languageLock = aiOutputLanguageInstruction(locale);
 
     const transcription = await openai.audio.transcriptions.create(
       {
@@ -114,7 +106,8 @@ export async function POST(request: Request) {
           content: `You are a Metro Vancouver open-house note structurer.
 Never invent facts. Guesses must use confidence "needs_verification", never as facts.
 Municipal Open Data is background only — do not inject zoning/PID questions without dialogue triggers.
-Reply JSON string values in ${replyLanguage}.`,
+${languageLock}
+Reply JSON string values in the locked output language only.`,
         },
         {
           role: "user",

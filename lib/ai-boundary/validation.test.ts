@@ -25,6 +25,22 @@ function validRecordingForm() {
 }
 
 describe("AI inbound validation", () => {
+  it("defaults missing locale to zh-Hant without bypassing consent", () => {
+    const form = validRecordingForm();
+    form.delete("locale");
+    const parsed = validateRecordingForm(form);
+    expect(parsed.locale).toBe("zh-Hant");
+    expect(parsed.consentVersion).toBe(AI_CONSENT_VERSION);
+  });
+
+  it("rejects invalid locale values", () => {
+    const form = validRecordingForm();
+    form.set("locale", "fr-FR");
+    expect(() => validateRecordingForm(form)).toThrowError(
+      expect.objectContaining({ code: "locale_invalid" }),
+    );
+  });
+
   it("requires current, per-session consent", () => {
     const form = validRecordingForm();
     form.delete("consentVersion");

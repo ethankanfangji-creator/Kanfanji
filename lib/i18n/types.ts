@@ -539,8 +539,16 @@ export type Messages = {
     queued: string;
     processing: string;
     quota: string;
+    quotaGuest: string;
+    quotaUser: string;
+    authRequired: string;
+    consentRequired: string;
     unavailable: string;
     failed: string;
+    timeout: string;
+    validation: string;
+    ctaUpgrade: string;
+    ctaRetry: string;
   };
   loginPage: {
     signInTitle: string;

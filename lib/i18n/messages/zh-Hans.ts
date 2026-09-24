@@ -558,8 +558,18 @@ const zhHans: Messages = {
     queued: "AI 分析已在此设备排队",
     processing: "AI 分析中…",
     quota: "已达到 AI 使用上限，请稍后再试。",
+    quotaGuest:
+      "今日访客 AI 额度已用完。登录可提高免费额度，或升级 Pro。",
+    quotaUser:
+      "今日免费 AI 额度已用完。可升级 Pro 继续使用，或稍后再试。",
+    authRequired: "请先登录后再继续此 AI 请求。",
+    consentRequired: "请先允许本看房使用 AI，再重试。",
     unavailable: "AI 当前安全停用，媒体仍保存在本机。",
-    failed: "AI 分析失败，媒体仍已保存。",
+    failed: "AI 分析失败，媒体仍已保存，可再试一次。",
+    timeout: "AI 服务超时。媒体仍已保存 — 请点重试。",
+    validation: "此 AI 请求无法接受，请检查内容后重试。",
+    ctaUpgrade: "升级 Pro",
+    ctaRetry: "重试",
   },
   loginPage: {
     signInTitle: "登录",

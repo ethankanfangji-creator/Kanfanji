@@ -8,6 +8,8 @@ import {
   createBrowserMediaPermissionAdapter,
   type MediaPermissionAdapter,
 } from "@/lib/media-permissions";
+import type { AiUiAction } from "@/lib/ai-boundary/map-ai-error-ui";
+import { AiErrorActionBar } from "@/components/ai/AiErrorActionBar";
 
 export type ComposerSuggestionTicket = {
   id: number;
@@ -66,6 +68,9 @@ export function ChatComposer({
   busy = false,
   progressLabel = null,
   error = null,
+  errorActions,
+  errorActionLabels,
+  onErrorAction,
   mediaAdapter,
   onBindQuestion,
   onClearBound,
@@ -79,6 +84,9 @@ export function ChatComposer({
   busy?: boolean;
   progressLabel?: string | null;
   error?: string | null;
+  errorActions?: AiUiAction[];
+  errorActionLabels?: { retry: string; signIn: string; upgrade: string };
+  onErrorAction?: (action: AiUiAction) => void;
   /** Injectable for tests; defaults to browser MediaPermissionAdapter. */
   mediaAdapter?: MediaPermissionAdapter;
   onBindQuestion: (id: number) => void;
@@ -474,9 +482,20 @@ export function ChatComposer({
           </div>
 
           {displayError ? (
-            <p className="border-t border-[#FECACA] bg-[#FEF2F2] px-3 py-2 text-[11px] font-semibold text-[#991B1B]">
-              {displayError}
-            </p>
+            <div
+              className="flex flex-col gap-1.5 border-t border-[#FECACA] bg-[#FEF2F2] px-3 py-2"
+              role="alert"
+            >
+              <p className="text-[11px] font-semibold text-[#991B1B]">{displayError}</p>
+              {error && errorActions && errorActions.length > 0 && errorActionLabels && onErrorAction ? (
+                <AiErrorActionBar
+                  actions={errorActions}
+                  labels={errorActionLabels}
+                  disabled={busy}
+                  onAction={onErrorAction}
+                />
+              ) : null}
+            </div>
           ) : null}
         </div>
       </div>

@@ -32,6 +32,8 @@ import {
   type MediaPermissionAdapter,
   type MediaPermissionStatus,
 } from "@/lib/media-permissions";
+import type { AiUiAction } from "@/lib/ai-boundary/map-ai-error-ui";
+import { AiErrorActionBar } from "@/components/ai/AiErrorActionBar";
 import type { ChatReplyRef } from "@/lib/viewing-chat/types";
 
 export type ChatComposerLabels = {
@@ -73,6 +75,9 @@ export function ViewingChatComposer({
   processing,
   processingHint,
   externalError,
+  errorActions,
+  errorActionLabels,
+  onErrorAction,
   onRetry,
   replyTo,
   onClearReply,
@@ -86,6 +91,9 @@ export function ViewingChatComposer({
   processing?: boolean;
   processingHint?: string | null;
   externalError?: string | null;
+  errorActions?: AiUiAction[];
+  errorActionLabels?: { retry: string; signIn: string; upgrade: string };
+  onErrorAction?: (action: AiUiAction) => void;
   onRetry?: () => void;
   replyTo?: ChatReplyRef | null;
   onClearReply?: () => void;
@@ -706,18 +714,34 @@ export function ViewingChatComposer({
       ) : null}
 
       {error || externalError ? (
-        <div className="mb-1.5 flex items-center gap-2 px-1" role="alert">
-          <p className="min-w-0 flex-1 text-[11px] font-medium text-[#991B1B]">
-            {externalError || error}
-          </p>
-          {onRetry && externalError ? (
-            <button
-              type="button"
-              onClick={onRetry}
-              className="shrink-0 rounded-full bg-[#FEE2E2] px-2.5 py-1 text-[11px] font-bold text-[#991B1B]"
-            >
-              {labels.retry || "Retry"}
-            </button>
+        <div className="mb-1.5 flex flex-col gap-1.5 px-1" role="alert">
+          <div className="flex items-center gap-2">
+            <p className="min-w-0 flex-1 text-[11px] font-medium text-[#991B1B]">
+              {externalError || error}
+            </p>
+            {onRetry && externalError && !(errorActions && errorActions.length > 0) ? (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="shrink-0 rounded-full bg-[#FEE2E2] px-2.5 py-1 text-[11px] font-bold text-[#991B1B]"
+              >
+                {labels.retry || "Retry"}
+              </button>
+            ) : null}
+          </div>
+          {errorActions && errorActions.length > 0 && errorActionLabels && onErrorAction ? (
+            <AiErrorActionBar
+              actions={errorActions}
+              labels={errorActionLabels}
+              disabled={busy || processing}
+              onAction={(action) => {
+                if (action === "retry" && onRetry) {
+                  onRetry();
+                  return;
+                }
+                onErrorAction(action);
+              }}
+            />
           ) : null}
         </div>
       ) : null}

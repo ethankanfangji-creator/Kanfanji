@@ -558,8 +558,18 @@ const zhHant: Messages = {
     queued: "AI 分析已在此裝置排隊",
     processing: "AI 分析中…",
     quota: "已達 AI 使用上限，請稍後再試。",
+    quotaGuest:
+      "今日訪客 AI 額度已用完。登入可提高免費額度，或升級 Pro。",
+    quotaUser:
+      "今日免費 AI 額度已用完。可升級 Pro 繼續使用，或稍後再試。",
+    authRequired: "請先登入後再繼續此 AI 請求。",
+    consentRequired: "請先允許本看房使用 AI，再重試。",
     unavailable: "AI 目前安全停用，媒體仍保存在本機。",
-    failed: "AI 分析失敗，媒體仍已保存。",
+    failed: "AI 分析失敗，媒體仍已保存，可再試一次。",
+    timeout: "AI 服務逾時。媒體仍已保存 — 請點重試。",
+    validation: "此 AI 請求無法接受，請檢查內容後重試。",
+    ctaUpgrade: "升級 Pro",
+    ctaRetry: "重試",
   },
   loginPage: {
     signInTitle: "登入",

@@ -84,6 +84,11 @@ import {
   completeAiJobIfLeaseHeld,
   failAiJobIfLeaseHeld,
 } from "@/lib/ai-boundary/job-commit";
+import {
+  aiErrorUiCopyFromBoundary,
+  mapAiErrorToUi,
+  type AiUiAction,
+} from "@/lib/ai-boundary/map-ai-error-ui";
 import { AiSummaryPanel } from "@/components/media/AiSummaryPanel";
 import {
   createImageThumbnail,
@@ -320,6 +325,7 @@ export function ClientPage() {
   const [composerBusy, setComposerBusy] = useState(false);
   const [composerProgress, setComposerProgress] = useState<string | null>(null);
   const [composerError, setComposerError] = useState<string | null>(null);
+  const [composerErrorActions, setComposerErrorActions] = useState<AiUiAction[]>([]);
   const [showBackToAddressConfirm, setShowBackToAddressConfirm] = useState(false);
   const [showHighPriorityConfirm, setShowHighPriorityConfirm] = useState(false);
   const aiConsentResolverRef = useRef<((accepted: boolean) => void) | null>(null);
@@ -972,8 +978,15 @@ export function ClientPage() {
           identityKind: user ? "user" : "guest",
         }),
       });
-      const payload = (await response.json()) as { question?: string; code?: string };
-      if (!response.ok || !payload.question) throw new Error(payload.code || "ai_failed");
+      const payload = (await response.json()) as { question?: string; code?: string; error?: string };
+      if (!response.ok || !payload.question) {
+        const ui = mapAiErrorToUi(
+          { code: payload.code, status: response.status, error: payload.error },
+          aiErrorUiCopyFromBoundary(messages.aiBoundary),
+          { isAuthenticated: Boolean(user) },
+        );
+        throw Object.assign(new Error(ui.message), { aiUi: ui });
+      }
       const complete = await DraftDb.open({ accountScope: scope });
       try {
         const completed = await completeAiJobIfLeaseHeld(complete.aiJobs, job, {
@@ -1922,11 +1935,12 @@ export function ClientPage() {
       error?: string;
     };
     if (!response.ok || !payload.transcript?.trim()) {
-      if (payload.code === "ai_quota_exceeded") throw new Error(messages.aiBoundary.quota);
-      if (payload.code === "ai_quota_unavailable" || payload.code === "ai_unavailable") {
-        throw new Error(messages.aiBoundary.unavailable);
-      }
-      throw new Error(messages.aiBoundary.failed);
+      const ui = mapAiErrorToUi(
+        { code: payload.code, status: response.status, error: payload.error },
+        aiErrorUiCopyFromBoundary(messages.aiBoundary),
+        { isAuthenticated: Boolean(user) },
+      );
+      throw Object.assign(new Error(ui.message), { aiUi: ui });
     }
     return payload.transcript.trim();
   }
@@ -1952,6 +1966,7 @@ export function ClientPage() {
 
     setComposerBusy(true);
     setComposerError(null);
+    setComposerErrorActions([]);
     const entryId = createInputEntryId();
     let transcript = payload.transcript.trim();
     let imageBase64: string | null = null;
@@ -2022,11 +2037,12 @@ export function ClientPage() {
       };
 
       if (!response.ok || !body.integration) {
-        if (body.code === "ai_quota_exceeded") throw new Error(messages.aiBoundary.quota);
-        if (body.code === "ai_quota_unavailable" || body.code === "ai_unavailable") {
-          throw new Error(messages.aiBoundary.unavailable);
-        }
-        throw new Error(messages.aiBoundary.failed);
+        const ui = mapAiErrorToUi(
+          { code: body.code, status: response.status, error: body.error },
+          aiErrorUiCopyFromBoundary(messages.aiBoundary),
+          { isAuthenticated: Boolean(user) },
+        );
+        throw Object.assign(new Error(ui.message), { aiUi: ui });
       }
 
       const integration = body.integration;
@@ -2129,8 +2145,14 @@ export function ClientPage() {
       }
       setBoundComposerQuestionId(null);
     } catch (error) {
-      const message = error instanceof Error ? error.message : messages.aiBoundary.failed;
+      const aiUi =
+        error && typeof error === "object" && "aiUi" in error
+          ? (error as { aiUi: { message: string; actions: AiUiAction[] } }).aiUi
+          : null;
+      const message =
+        aiUi?.message ?? (error instanceof Error ? error.message : messages.aiBoundary.failed);
       setComposerError(message);
+      setComposerErrorActions(aiUi?.actions ?? ["retry"]);
       const failedEntry: ViewingInputEntry = {
         id: entryId,
         viewingSessionId,
@@ -2309,13 +2331,12 @@ export function ClientPage() {
       };
 
       if (!response.ok) {
-        const detail =
-          payload.code === "ai_quota_exceeded"
-            ? messages.aiBoundary.quota
-            : payload.code === "ai_quota_unavailable" || payload.code === "ai_unavailable"
-              ? messages.aiBoundary.unavailable
-              : messages.aiBoundary.failed;
-        throw new Error(detail);
+        const ui = mapAiErrorToUi(
+          { code: payload.code, status: response.status, error: payload.error },
+          aiErrorUiCopyFromBoundary(messages.aiBoundary),
+          { isAuthenticated: Boolean(user) },
+        );
+        throw Object.assign(new Error(ui.message), { aiUi: ui });
       }
 
       const noteId = Date.now();
@@ -4250,13 +4271,12 @@ export function ClientPage() {
             code?: string;
           };
           if (!response.ok || !payload.question) {
-            throw new Error(
-              payload.code === "ai_quota_exceeded"
-                ? messages.aiBoundary.quota
-                : payload.code === "ai_quota_unavailable" || payload.code === "ai_unavailable"
-                  ? messages.aiBoundary.unavailable
-                  : messages.aiBoundary.failed,
+            const ui = mapAiErrorToUi(
+              { code: payload.code, status: response.status, error: payload.error },
+              aiErrorUiCopyFromBoundary(messages.aiBoundary),
+              { isAuthenticated: Boolean(user) },
             );
+            throw Object.assign(new Error(ui.message), { aiUi: ui });
           }
           const result = {
             text: payload.question.trim(),
@@ -5629,11 +5649,34 @@ export function ClientPage() {
             busy={composerBusy}
             progressLabel={composerProgress}
             error={composerError}
+            errorActions={composerErrorActions}
+            errorActionLabels={{
+              retry: messages.aiBoundary.ctaRetry,
+              signIn: messages.nav.signIn,
+              upgrade: messages.aiBoundary.ctaUpgrade,
+            }}
+            onErrorAction={(action) => {
+              if (action === "sign_in") {
+                router.push("/login");
+                return;
+              }
+              if (action === "upgrade") {
+                if (!user) {
+                  router.push("/login");
+                  return;
+                }
+                void startCheckout();
+                return;
+              }
+              setComposerError(null);
+              setComposerErrorActions([]);
+            }}
             onBindQuestion={bindComposerToQuestion}
             onClearBound={() => setBoundComposerQuestionId(null)}
             onSubmit={(payload) => void submitComposerInput(payload)}
             onCancel={() => {
               setComposerError(null);
+              setComposerErrorActions([]);
               setComposerProgress(null);
             }}
           />

@@ -25,3 +25,14 @@ export type {
   RecordingInput,
   VisionInput,
 } from "./validation";
+export {
+  aiErrorUiCopyFromBoundary,
+  mapAiErrorToUi,
+} from "./map-ai-error-ui";
+export type {
+  AiErrorResponseLike,
+  AiErrorUiCopy,
+  AiErrorUiKind,
+  AiErrorUiModel,
+  AiUiAction,
+} from "./map-ai-error-ui";

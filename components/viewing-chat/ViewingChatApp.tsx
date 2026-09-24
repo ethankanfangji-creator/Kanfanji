@@ -21,6 +21,11 @@ import { PropertySummaryPanel } from "@/components/viewing-chat/PropertySummaryP
 import { ReviewCard, type ReviewFieldDraft } from "@/components/viewing-chat/ReviewCard";
 import { ViewingChatComposer } from "@/components/viewing-chat/ViewingChatComposer";
 import { AI_CONSENT_VERSION } from "@/lib/ai-boundary/client";
+import {
+  aiErrorUiCopyFromBoundary,
+  mapAiErrorToUi,
+  type AiUiAction,
+} from "@/lib/ai-boundary/map-ai-error-ui";
 import type { AddressSuggestion } from "@/lib/address-suggest";
 import {
   buildAddressConfirmationCandidate,
@@ -144,6 +149,7 @@ export function ViewingChatApp() {
   const [userId, setUserId] = useState<string | null>(null);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [turnError, setTurnError] = useState<string | null>(null);
+  const [turnErrorActions, setTurnErrorActions] = useState<AiUiAction[]>([]);
   const [lastTurnPayload, setLastTurnPayload] = useState<{
     text: string;
     audio: Blob | null;
@@ -384,6 +390,7 @@ export function ViewingChatApp() {
     setPendingAddressConfirm(null);
     setStatus("");
     setTurnError(null);
+    setTurnErrorActions([]);
     setConflicts([]);
     setListingIntakeOpen(false);
     setSoftFailCtas(false);
@@ -718,10 +725,12 @@ export function ViewingChatApp() {
         code?: string;
       };
       if (!response.ok) {
-        if (data.code === "ai_quota_exceeded" || response.status === 429) {
-          throw new Error(t.aiBoundary.quota);
-        }
-        throw new Error(data.error || data.code || c.sourceIngestFailed);
+        const ui = mapAiErrorToUi(
+          { code: data.code, status: response.status, error: data.error },
+          aiErrorUiCopyFromBoundary(t.aiBoundary),
+          { isAuthenticated: Boolean(userId) },
+        );
+        throw Object.assign(new Error(ui.message), { aiUi: ui });
       }
 
       const errors = data.source?.extractionErrors ?? [];
@@ -764,7 +773,15 @@ export function ViewingChatApp() {
         void addMediaFile(opts.file, active.id, active.address).catch(() => {});
       }
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : c.sourceIngestFailed);
+      const aiUi =
+        error && typeof error === "object" && "aiUi" in error
+          ? (error as { aiUi: { message: string; actions: AiUiAction[] } }).aiUi
+          : null;
+      const message =
+        aiUi?.message ?? (error instanceof Error ? error.message : c.sourceIngestFailed);
+      setStatus(message);
+      setTurnError(message);
+      setTurnErrorActions(aiUi?.actions ?? ["retry"]);
     } finally {
       setSourceBusy(false);
     }
@@ -819,6 +836,7 @@ export function ViewingChatApp() {
         : c.turnProcessing,
     );
     setTurnError(null);
+    setTurnErrorActions([]);
     setLastTurnPayload(payload);
     setComposerHint(null);
 
@@ -921,10 +939,12 @@ export function ViewingChatApp() {
         code?: string;
       };
       if (!response.ok || !data.messages) {
-        if (data.code === "ai_quota_exceeded" || response.status === 429) {
-          throw new Error(t.aiBoundary.quota);
-        }
-        throw new Error(data.error || data.code || c.turnFailed);
+        const ui = mapAiErrorToUi(
+          { code: data.code, status: response.status, error: data.error },
+          aiErrorUiCopyFromBoundary(t.aiBoundary),
+          { isAuthenticated: Boolean(userId) },
+        );
+        throw Object.assign(new Error(ui.message), { aiUi: ui });
       }
       let nextMessages = data.messages;
 
@@ -1022,6 +1042,7 @@ export function ViewingChatApp() {
         data.turnWarnings?.includes("extraction_failed")
       ) {
         setTurnError(c.extractionFailed);
+        setTurnErrorActions(["retry"]);
         // Keep lastTurnPayload so retry stays available
       } else {
         setLastTurnPayload(null);
@@ -1032,9 +1053,14 @@ export function ViewingChatApp() {
       }
     } catch (error) {
       // Optimistic user message already saved — keep it visible
-      const message = error instanceof Error ? error.message : c.turnFailed;
+      const aiUi =
+        error && typeof error === "object" && "aiUi" in error
+          ? (error as { aiUi: { message: string; actions: AiUiAction[] } }).aiUi
+          : null;
+      const message = aiUi?.message ?? (error instanceof Error ? error.message : c.turnFailed);
       setStatus(message);
       setTurnError(message);
+      setTurnErrorActions(aiUi?.actions ?? ["retry"]);
     } finally {
       setBusy(false);
     }
@@ -1080,7 +1106,12 @@ export function ViewingChatApp() {
           code?: string;
         };
         if (!response.ok) {
-          throw new Error(data.error || data.code || c.reportFailed);
+          const ui = mapAiErrorToUi(
+            { code: data.code, status: response.status, error: data.error },
+            aiErrorUiCopyFromBoundary(t.aiBoundary),
+            { isAuthenticated: Boolean(userId) },
+          );
+          throw Object.assign(new Error(ui.message), { aiUi: ui });
         }
         const reportMsg = createAiMessage({
           type: "initial_report",
@@ -1123,7 +1154,12 @@ export function ViewingChatApp() {
         code?: string;
       };
       if (!response.ok || !data.messages) {
-        throw new Error(data.error || data.code || c.reportFailed);
+        const ui = mapAiErrorToUi(
+          { code: data.code, status: response.status, error: data.error },
+          aiErrorUiCopyFromBoundary(t.aiBoundary),
+          { isAuthenticated: Boolean(userId) },
+        );
+        throw Object.assign(new Error(ui.message), { aiUi: ui });
       }
       saveLocalMessages(active.id, data.messages, data.report ?? null);
       patchLocalThread(active.id, {
@@ -1133,9 +1169,45 @@ export function ViewingChatApp() {
       refreshLocal();
       setStatus("");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : c.reportFailed);
+      const aiUi =
+        error && typeof error === "object" && "aiUi" in error
+          ? (error as { aiUi: { message: string; actions: AiUiAction[] } }).aiUi
+          : null;
+      const message =
+        aiUi?.message ?? (error instanceof Error ? error.message : c.reportFailed);
+      setStatus(message);
+      setTurnError(message);
+      setTurnErrorActions(aiUi?.actions ?? ["retry"]);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleAiErrorAction(action: AiUiAction) {
+    if (action === "retry") {
+      if (lastTurnPayload) void submitTurn(lastTurnPayload);
+      return;
+    }
+    if (action === "sign_in") {
+      window.location.href = "/login";
+      return;
+    }
+    if (action === "upgrade") {
+      if (!userId) {
+        window.location.href = "/login";
+        return;
+      }
+      try {
+        const response = await fetch("/api/create-checkout-session", { method: "POST" });
+        const payload = (await response.json()) as { url?: string; error?: string };
+        if (payload.url) {
+          window.location.href = payload.url;
+          return;
+        }
+        setStatus(payload.error || t.paywall.syncFailed);
+      } catch {
+        setStatus(t.paywall.syncFailed);
+      }
     }
   }
 
@@ -1506,6 +1578,13 @@ export function ViewingChatApp() {
                     : null
                 }
                 externalError={turnError}
+                errorActions={turnErrorActions}
+                errorActionLabels={{
+                  retry: c.turnRetry,
+                  signIn: t.nav.signIn,
+                  upgrade: t.aiBoundary.ctaUpgrade,
+                }}
+                onErrorAction={(action) => void handleAiErrorAction(action)}
                 onRetry={
                   lastTurnPayload
                     ? () => void submitTurn(lastTurnPayload)

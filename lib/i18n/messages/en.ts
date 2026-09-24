@@ -562,8 +562,18 @@ const en: Messages = {
     queued: "AI analysis queued on this device",
     processing: "AI analysis in progress…",
     quota: "AI limit reached. Try again later.",
+    quotaGuest:
+      "You've used today's guest AI allowance. Sign in for a higher free limit, or upgrade to Pro.",
+    quotaUser:
+      "You've reached today's free AI allowance. Upgrade to Pro for more, or try again later.",
+    authRequired: "Sign in to continue this AI request.",
+    consentRequired: "Allow AI for this viewing first, then try again.",
     unavailable: "AI is unavailable safely; your media remains local.",
-    failed: "AI analysis failed; your media remains saved.",
+    failed: "AI analysis failed; your media remains saved. You can retry.",
+    timeout: "The AI provider timed out. Your media remains saved — tap retry.",
+    validation: "That AI request could not be accepted. Check the input and retry.",
+    ctaUpgrade: "Upgrade Pro",
+    ctaRetry: "Retry",
   },
   loginPage: {
     signInTitle: "Sign in",

@@ -11,6 +11,8 @@ import { AiInputError, type AiConsentAssertion } from "./validation";
 
 export type AiBoundaryContext = {
   identityKind: "guest" | "user";
+  /** Signed-in user id, or null for a guest cookie. */
+  userId: string | null;
   applyCookie<T>(response: NextResponse<T>): NextResponse<T>;
 };
 
@@ -68,6 +70,7 @@ export async function authorizeAiRequest(
 
   return {
     identityKind: actualKind,
+    userId,
     applyCookie(response) {
       if (issued) {
         response.cookies.set(AI_GUEST_COOKIE, issued.value, guestCookieOptions(issued.maxAge));

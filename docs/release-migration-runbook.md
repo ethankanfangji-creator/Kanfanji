@@ -85,6 +85,7 @@ of the following in order:
 12. `migrate-stripe-ordering-forward-fix.sql`
 13. `migrate-viewing-update-grants-forward-fix.sql`
 14. `migrate-properties-multicountry.sql` (country_code / admin1 / city / postal_code on properties)
+15. `migrate-property-domain.sql` then `migrate-property-report-created-by.sql` (report snapshots + `created_by` owner scope)
 
 The base schema already incorporates the older auth, property, subscription,
 and initial share-link migrations. `schema.sql` alone intentionally does not

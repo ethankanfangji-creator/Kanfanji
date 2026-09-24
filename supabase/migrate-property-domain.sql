@@ -15,6 +15,7 @@ create table if not exists private.property_domain_reports (
   country_code text not null default 'OTHER',
   schema_version text not null default 'property-report-api/v1',
   report jsonb not null,
+  created_by uuid references auth.users (id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   expires_at timestamptz not null,
@@ -64,6 +65,13 @@ create index if not exists property_domain_reports_normalized_address_idx
 
 create index if not exists property_domain_reports_country_code_idx
   on private.property_domain_reports (country_code);
+
+alter table private.property_domain_reports
+  add column if not exists created_by uuid references auth.users (id) on delete set null;
+
+create index if not exists property_domain_reports_created_by_idx
+  on private.property_domain_reports (created_by)
+  where created_by is not null;
 
 create unique index if not exists property_evidence_report_evidence_id_uidx
   on private.property_evidence (report_id, evidence_id)

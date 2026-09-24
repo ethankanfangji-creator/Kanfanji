@@ -24,3 +24,20 @@ export function validateImportedMedia(file: File, kind: ImportedMediaKind): stri
   if (file.size > limit) return kind === "photo" ? "photo-too-large" : "video-too-large";
   return null;
 }
+
+export type MediaImportErrorCopy = {
+  invalidPhoto: string;
+  invalidVideo: string;
+  emptyFile: string;
+  photoTooLarge: string;
+  videoTooLarge: string;
+};
+
+/** Map validateImportedMedia codes to localized copy. */
+export function mapMediaImportErrorCode(code: string, copy: MediaImportErrorCopy): string {
+  if (code === "invalid-photo-type") return copy.invalidPhoto;
+  if (code === "invalid-video-type") return copy.invalidVideo;
+  if (code === "empty-file") return copy.emptyFile;
+  if (code === "photo-too-large") return copy.photoTooLarge;
+  return copy.videoTooLarge;
+}

@@ -15,7 +15,7 @@
  * `isActiveSubscriptionStatus`. Never trust client `isPro`.
  */
 
-import { isActiveSubscriptionStatus } from "@/lib/billing-status";
+import { isActiveSubscriptionStatus } from "./billing-status";
 
 export const AI_TIERS = ["guest", "free", "pro"] as const;
 export type AiTier = (typeof AI_TIERS)[number];

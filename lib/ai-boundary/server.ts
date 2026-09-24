@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { limitFor, resolveAiTier, type AiTier } from "@/lib/ai-quota";
-import { createAdminClient } from "@/utils/supabase/admin";
-import { createClient } from "@/utils/supabase/server";
+import { limitFor, resolveAiTier, type AiTier } from "../ai-quota";
+import { createAdminClient } from "../../utils/supabase/admin";
+import { createClient } from "../../utils/supabase/server";
 import {
   AI_GUEST_COOKIE,
   createGuestIdentityCookie,

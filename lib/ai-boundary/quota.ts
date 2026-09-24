@@ -5,8 +5,8 @@ import {
   limitFor,
   resetAtFromRetryAfter,
   type AiTier,
-} from "@/lib/ai-quota";
-import { createAdminClient } from "@/utils/supabase/admin";
+} from "../ai-quota";
+import { createAdminClient } from "../../utils/supabase/admin";
 import type { GuestIdentity } from "./guest-identity";
 
 type QuotaIdentity =

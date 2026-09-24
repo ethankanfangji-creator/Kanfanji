@@ -693,6 +693,10 @@ export type Messages = {
     mediaLibraryUpload: string;
     mediaLibraryDelete: string;
     mediaLibraryFailed: string;
+    /** Short label for the mobile bottom tab (account). */
+    tabAccount: string;
+    /** Accessible name for the mobile bottom tab bar. */
+    mobileNavLabel: string;
     composerPlaceholder: string;
     send: string;
     recording: string;

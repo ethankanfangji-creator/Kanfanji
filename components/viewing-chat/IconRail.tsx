@@ -166,7 +166,7 @@ export function IconRail({
 
   return (
     <nav
-      className={`flex h-full shrink-0 flex-col border-r border-black/8 bg-white py-3 transition-[width] duration-200 ease-out ${
+      className={`hidden h-full shrink-0 flex-col border-r border-black/8 bg-white py-3 transition-[width] duration-200 ease-out md:flex ${
         expanded ? "w-[240px] px-2.5" : "w-14 items-center"
       }`}
       aria-label="App controls"

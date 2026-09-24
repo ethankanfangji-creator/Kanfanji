@@ -746,6 +746,8 @@ const th: Messages = {
     mediaLibraryUpload: "อัปโหลดไฟล์",
     mediaLibraryDelete: "ลบ",
     mediaLibraryFailed: "จัดการคลังสื่อไม่สำเร็จ",
+    tabAccount: "บัญชี",
+    mobileNavLabel: "เมนูหลัก",
     composerPlaceholder: "บันทึกสังเกตหน้างานหรือสรุปบทสนทนา…",
     send: "ส่ง",
     recording: "กำลังอัด",

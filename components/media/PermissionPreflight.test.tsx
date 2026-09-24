@@ -41,8 +41,25 @@ describe("PermissionPreflight", () => {
     );
 
     expect(screen.getByRole("dialog", { name: "Camera access" })).toBeTruthy();
+    expect(screen.getByText(copy.bodyCamera)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Import instead" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Not now" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+  });
+
+  it("shows why-permission body before the browser prompt", () => {
+    render(
+      <PermissionPreflight
+        kind="audio"
+        copy={copy}
+        status="prompt"
+        onContinue={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("dialog", { name: "Microphone access" })).toBeTruthy();
+    expect(screen.getByText(copy.bodyMic)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeTruthy();
   });
 });

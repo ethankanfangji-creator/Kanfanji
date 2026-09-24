@@ -5,8 +5,16 @@ import { useEffect, useId, useRef, useState } from "react";
 import { AI_LIMITS, IMAGE_MIME_TYPES } from "@/lib/ai-boundary/config";
 import { selectSupportedAudioMimeType } from "@/components/media/useMediaCapture";
 import {
+  PermissionPreflight,
+  type PermissionCopy,
+} from "@/components/media/PermissionPreflight";
+import {
   createBrowserMediaPermissionAdapter,
+  decideCaptureStart,
+  hasCaptureExplained,
+  markCaptureExplained,
   type MediaPermissionAdapter,
+  type MediaPermissionStatus,
 } from "@/lib/media-permissions";
 import type { AiUiAction } from "@/lib/ai-boundary/map-ai-error-ui";
 import { AiErrorActionBar } from "@/components/ai/AiErrorActionBar";
@@ -72,6 +80,7 @@ export function ChatComposer({
   errorActionLabels,
   onErrorAction,
   mediaAdapter,
+  permissionCopy,
   onBindQuestion,
   onClearBound,
   onSubmit,
@@ -89,6 +98,8 @@ export function ChatComposer({
   onErrorAction?: (action: AiUiAction) => void;
   /** Injectable for tests; defaults to browser MediaPermissionAdapter. */
   mediaAdapter?: MediaPermissionAdapter;
+  /** When set, first mic tap shows why-permission copy before getUserMedia. */
+  permissionCopy?: PermissionCopy;
   onBindQuestion: (id: number) => void;
   onClearBound: () => void;
   onSubmit: (payload: ChatComposerSubmitPayload) => void | Promise<void>;
@@ -113,6 +124,10 @@ export function ChatComposer({
   const [recordSeconds, setRecordSeconds] = useState(0);
   const [localError, setLocalError] = useState<string | null>(null);
   const [lastSentText, setLastSentText] = useState<string | null>(null);
+  const [preflightOpen, setPreflightOpen] = useState(false);
+  const [preflightStatus, setPreflightStatus] = useState<MediaPermissionStatus | null>(null);
+  const [preflightBusy, setPreflightBusy] = useState(false);
+  const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     return () => {
@@ -145,7 +160,9 @@ export function ChatComposer({
     }
   }
 
-  async function startRecording() {
+  async function beginRecording() {
+    setPreflightOpen(false);
+    setPreflightStatus(null);
     setLocalError(null);
     if (recording || busy) return;
     const media = mediaRef.current;
@@ -210,6 +227,54 @@ export function ChatComposer({
       setLocalError(messages.micDenied);
       stopRecorderInternal(true);
     }
+  }
+
+  async function startRecording() {
+    setLocalError(null);
+    if (recording || busy) return;
+    const media = mediaRef.current;
+    if (!media.isMediaDevicesSupported() || !media.isMediaRecorderSupported()) {
+      setLocalError(messages.micUnsupported);
+      return;
+    }
+
+    if (!permissionCopy) {
+      await beginRecording();
+      return;
+    }
+
+    setPreflightBusy(true);
+    const status = await media.query("microphone");
+    setPreflightBusy(false);
+
+    const decision = decideCaptureStart({
+      kind: "audio",
+      status,
+      explained: hasCaptureExplained("audio"),
+    });
+
+    if (decision.action === "show-reauth" || decision.action === "show-preflight") {
+      setPreflightStatus(decision.status);
+      setPreflightOpen(true);
+      return;
+    }
+
+    await beginRecording();
+  }
+
+  async function onPreflightContinue() {
+    markCaptureExplained("audio");
+    await beginRecording();
+  }
+
+  function onPreflightCancel() {
+    setPreflightOpen(false);
+    setPreflightStatus(null);
+  }
+
+  function onPreflightTextNote() {
+    onPreflightCancel();
+    textAreaRef.current?.focus();
   }
 
   function stopRecording() {
@@ -285,6 +350,7 @@ export function ChatComposer({
   const canSend = !busy && !recording && Boolean(text.trim() || imageFile || audioBlob);
 
   return (
+    <>
     <div className="fixed bottom-[calc(56px+env(safe-area-inset-bottom))] inset-x-0 z-40 flex justify-center pointer-events-none">
       <div className="pointer-events-auto box-border w-full max-w-[min(420px,100%)] px-3 pb-1">
         <div className="rounded-[22px] border border-black/10 bg-white/95 shadow-[0_-8px_28px_rgba(0,0,0,0.08)] backdrop-blur-md">
@@ -417,7 +483,7 @@ export function ChatComposer({
             ) : (
               <button
                 type="button"
-                disabled={busy}
+                disabled={busy || preflightBusy}
                 onClick={() => void startRecording()}
                 aria-label={messages.recording}
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#2563EB] active:bg-[#EFF6FF] disabled:opacity-40"
@@ -429,6 +495,7 @@ export function ChatComposer({
               {messages.placeholder}
             </label>
             <textarea
+              ref={textAreaRef}
               id={inputId}
               value={text}
               disabled={busy}
@@ -500,5 +567,17 @@ export function ChatComposer({
         </div>
       </div>
     </div>
+    {permissionCopy && preflightOpen ? (
+      <PermissionPreflight
+        kind="audio"
+        copy={permissionCopy}
+        status={preflightStatus}
+        busy={preflightBusy}
+        onContinue={() => void onPreflightContinue()}
+        onCancel={onPreflightCancel}
+        onTextNote={onPreflightTextNote}
+      />
+    ) : null}
+    </>
   );
 }

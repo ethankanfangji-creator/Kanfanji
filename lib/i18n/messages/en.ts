@@ -317,9 +317,12 @@ const en: Messages = {
     titleMic: "Microphone access needed",
     titleCamera: "Camera access needed (video)",
     titlePhoto: "Camera / photos access needed",
-    bodyMic: "Used for on-site voice notes: transcript, checklist answers, and follow-ups.",
-    bodyCamera: "Used for short clips of key issues (ceiling, cracks, panel, etc.).",
-    bodyPhoto: "Used to take or pick photos; AI adds risk questions from each shot.",
+    bodyMic:
+      "We need the mic so on-site voice notes can become transcripts, checklist answers, and follow-ups. Tap Continue, then allow when the browser asks.",
+    bodyCamera:
+      "We need the camera for short clips of key issues (ceiling, cracks, electrical panel). Tap Continue, then allow when asked — or import a clip instead.",
+    bodyPhoto:
+      "We need camera or photo access so you can document the unit; AI adds risk questions from each shot. Tap Continue to allow, or pick from your album.",
     localNote:
       "Files stay on this device (IndexedDB) first. Nothing uploads until you sign in and sync.",
     continue: "Continue & allow",

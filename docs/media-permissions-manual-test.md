@@ -5,7 +5,8 @@ Cross-browser checks for mic / camera / photo / video. Prefer real devices for i
 ## Shared rules (all browsers)
 
 - [ ] Cold start the app — **no** mic/camera prompt appears until a capture control is tapped.
-- [ ] **Audio / video:** first tap in a session may show a short explain sheet; Continue hands off to the **native** OS/browser permission prompt (or opens the video file picker).
+- [ ] **Audio / video:** first tap in a session may show a short explain sheet (1–2 sentences why the permission is needed); Continue hands off to the **native** OS/browser permission prompt (or opens the video file picker).
+- [ ] **Wizard chat Mic:** first tap shows the same why-permission sheet before `getUserMedia`; Deny keeps text-note (and Cancel) — no live mic required.
 - [ ] **After mic is granted** (or the explain was already shown), later Record taps **start recording directly** — no custom permission dialog every time.
 - [ ] **Photos (wizard Add):** use the native file picker (`accept="image/*" capture="environment"`) with **no** in-app permission dialog.
 - [ ] **Viewing chat Camera:** first tap may show a short camera explain sheet; Continue opens capture input; Deny / Block shows settings guidance **and** gallery (`image/*`) import; typed composer notes stay intact.

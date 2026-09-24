@@ -4,7 +4,10 @@
  */
 
 import OpenAI from "openai";
-import { aiTimeoutMs } from "@/lib/ai-boundary/server-entry";
+import {
+  aiOutputLanguageInstruction,
+  aiTimeoutMs,
+} from "@/lib/ai-boundary/server-entry";
 import { fenceUntrusted } from "@/lib/security/untrusted-content";
 import {
   parseVisionExtractRaw,
@@ -43,13 +46,7 @@ export async function extractPropertyFromImage(args: {
     return null;
   }
 
-  const languageHint = args.locale.startsWith("th")
-    ? "Thai"
-    : args.locale.startsWith("en")
-      ? "English"
-      : args.locale.includes("Hans")
-        ? "Simplified Chinese"
-        : "Traditional Chinese";
+  const languageLock = aiOutputLanguageInstruction(args.locale);
 
   try {
     const openai = new OpenAI({ apiKey });
@@ -72,7 +69,7 @@ Return JSON only:
   "slots": [{ "fieldId": string, "value": string, "confidence": number, "note": string }]
 }
 Rules:
-- Language: ${languageHint}
+- ${languageLock}
 - Prefer copying visible listing text into extractedText when this is a screenshot
 - Do NOT invent listing facts not visible in the image
 - slots.fieldId limited to: electrical, plumbing, hvac, water_damage, odor, light, amenities, layout, noise, parking, floor

@@ -4,6 +4,7 @@ import {
   aiErrorResponse,
   assertContentLength,
   authorizeAiRequest,
+  resolveAiLocale,
   validateConsent,
 } from "@/lib/ai-boundary/server-entry";
 import { assemblePropertyFacts } from "@/lib/property-facts/orchestrator";
@@ -23,7 +24,7 @@ export async function POST(request: Request) {
 
     const address = typeof body.address === "string" ? body.address.trim() : "";
     if (!address) throw new AiInputError("address_invalid");
-    const locale = typeof body.locale === "string" ? body.locale : "zh-Hant";
+    const locale = resolveAiLocale(body.locale);
     const viewingId = typeof body.viewingId === "string" ? body.viewingId.trim() : "";
     const messages = Array.isArray(body.messages) ? (body.messages as ChatMessage[]) : [];
 

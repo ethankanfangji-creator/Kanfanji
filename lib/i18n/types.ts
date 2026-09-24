@@ -396,6 +396,7 @@ export type Messages = {
     confirmRevoke: string;
     busy: string;
     errorGeneric: string;
+    needSync: string;
     historyTitle: string;
     historyEmpty: string;
     historyRevokedAt: string;
@@ -434,6 +435,8 @@ export type Messages = {
     sync: string;
     syncLoading: string;
     syncSuccess: string;
+    syncFailed: string;
+    statusLine: string;
     processing: string;
     processingTimeout: string;
   };

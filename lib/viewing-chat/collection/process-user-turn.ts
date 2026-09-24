@@ -14,8 +14,8 @@ import {
   mergeRuleAndLlmFacts,
 } from "./llm-extract";
 import {
-  VIEWING_RECORDER_POLISH_RULES,
-  VIEWING_RECORDER_SYSTEM_PROMPT,
+  viewingRecorderPolishRules,
+  viewingRecorderSystemPrompt,
 } from "./llm-prompt";
 import { parseLlmJson, PolishReplySchema } from "./llm-schemas";
 import { createEmptyPropertyRecord, mergePropertyFacts } from "./merge-property-facts";
@@ -229,6 +229,7 @@ async function maybePolishReply(input: {
   apiKey?: string;
   draft: string;
   userText: string;
+  locale?: string;
   signal?: AbortSignal;
 }): Promise<{
   text: string;
@@ -251,9 +252,9 @@ async function maybePolishReply(input: {
         messages: [
           {
             role: "system",
-            content: `${VIEWING_RECORDER_SYSTEM_PROMPT}
+            content: `${viewingRecorderSystemPrompt(input.locale)}
 
-${VIEWING_RECORDER_POLISH_RULES}
+${viewingRecorderPolishRules(input.locale)}
 
 本呼叫只潤飾回覆語氣與結構，不可新增、刪改已抽取的事實或追問清單外的題目。回覆 JSON only。`,
           },
@@ -460,6 +461,7 @@ export async function processUserTurn(
         apiKey: input.apiKey,
         text: freeformText || sourceText,
         messageId: message.id,
+        locale: message.locale ?? input.conversation.locale,
         signal: input.signal,
       });
   if ("warning" in llmExtract && llmExtract.warning) {
@@ -610,6 +612,7 @@ export async function processUserTurn(
         apiKey: input.apiKey,
         draft: assistantMessage,
         userText: sourceText,
+        locale: message.locale ?? input.conversation.locale,
         signal: input.signal,
       });
   assistantMessage = polished.text;

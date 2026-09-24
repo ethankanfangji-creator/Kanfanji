@@ -4,6 +4,9 @@
 
 import OpenAI from "openai";
 import { aiTimeoutMs } from "@/lib/ai-boundary/config";
+import {
+  aiOutputLanguageInstruction,
+} from "@/lib/ai-boundary/locale";
 import { AiInputError } from "@/lib/ai-boundary/validation";
 import { normalizeIntegrationPayload } from "@/lib/viewing-wizard/input-integration";
 import {
@@ -14,11 +17,8 @@ import {
   type AiService,
 } from "./types";
 
-function languageHint(locale: string): string {
-  if (locale.startsWith("th")) return "Thai";
-  if (locale.startsWith("en")) return "English";
-  if (locale.includes("Hans")) return "Simplified Chinese";
-  return "Traditional Chinese";
+function languageLock(locale: string): string {
+  return aiOutputLanguageInstruction(locale);
 }
 
 export function createOpenAiService(apiKey = process.env.OPENAI_API_KEY): AiService {
@@ -67,7 +67,8 @@ Rules:
 - Discover at most 5 new tickets if truly warranted; mark them as AI discoveries.
 - If an image is provided but content is unclear, set imageUncertain=true and do not speculate on condition.
 - Source labels: user_input vs ai_inferred.
-- Reply JSON in ${languageHint(input.locale)}:
+- ${languageLock(input.locale)}
+- Reply JSON string values in the locked output language:
 {
   "imageUncertain": boolean,
   "message": string,

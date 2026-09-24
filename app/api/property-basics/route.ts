@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import {
   AiInputError,
   aiErrorResponse,
+  aiOutputLanguageInstruction,
   aiTimeoutMs,
   assertContentLength,
   authorizeAiRequest,
@@ -61,14 +62,7 @@ export async function POST(request: Request) {
 
     const apiKey = process.env.OPENAI_API_KEY;
     if (apiKey) {
-      const languageHint =
-        locale.startsWith("th")
-          ? "ภาษาไทย"
-          : locale.startsWith("en")
-            ? "English"
-            : locale.includes("Hans") || locale.toLowerCase().includes("cn")
-              ? "简体中文"
-              : "繁體中文";
+      const languageLock = aiOutputLanguageInstruction(locale);
 
       const payload = factCardPromptPayload(card);
       try {
@@ -85,7 +79,8 @@ export async function POST(request: Request) {
                 content: `You write a brief property viewing summary from structured facts only.
 Never invent price, area, beds, baths, fees, year, zoning, or tax.
 If a field has status not_found or needs_human, say it is unknown.
-Reply in ${languageHint}. JSON: {"summary": string|null}`,
+${languageLock}
+JSON: {"summary": string|null}`,
               },
               {
                 role: "user",

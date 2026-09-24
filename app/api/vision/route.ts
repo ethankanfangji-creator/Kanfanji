@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import {
   AiInputError,
   aiErrorResponse,
+  aiOutputLanguageInstruction,
   aiTimeoutMs,
   assertContentLength,
   authorizeAiRequest,
@@ -43,14 +44,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const languageHint =
-      locale.startsWith("th")
-        ? "ภาษาไทย only, sharp"
-        : locale.startsWith("en")
-          ? "English only, sharp"
-          : locale.includes("Hans") || locale.toLowerCase().includes("cn")
-            ? "简体中文，尖锐"
-            : "繁體中文，尖銳";
+    const languageLock = aiOutputLanguageInstruction(locale);
 
     const openai = new OpenAI({ apiKey });
     const completion = await openai.chat.completions.create(
@@ -64,7 +58,7 @@ export async function POST(request: Request) {
             content: [
               {
                 type: "text",
-                text: `You are a home inspector for US/CA/TW markets. Looking at this "${tag}" photo, what risk do you see? Reply with ONLY one must-ask open-house question. ${languageHint}. Do not invent facts; phrase as a check question.`,
+                text: `You are a home inspector for US/CA/TW markets. Looking at this "${tag}" photo, what risk do you see? Reply with ONLY one must-ask open-house question. ${languageLock} Keep the question sharp and concise. Do not invent facts; phrase as a check question.`,
               },
               {
                 type: "image_url",

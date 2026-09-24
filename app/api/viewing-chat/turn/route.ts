@@ -4,8 +4,10 @@ import {
   AiInputError,
   aiErrorResponse,
   aiTimeoutMs,
+  aiWhisperLanguage,
   assertContentLength,
   authorizeAiRequest,
+  resolveAiLocale,
   validateConsent,
 } from "@/lib/ai-boundary/server-entry";
 import { AI_LIMITS } from "@/lib/ai-boundary/config";
@@ -34,7 +36,7 @@ export async function POST(request: Request) {
 
     const address = String(form.get("address") ?? "").trim();
     if (!address || address.length > 500) throw new AiInputError("address_invalid");
-    const locale = String(form.get("locale") ?? "zh-Hant");
+    const locale = resolveAiLocale(form.get("locale"));
     const viewingId = String(form.get("viewingId") ?? "").trim() || null;
     const text = String(form.get("text") ?? "").trim().slice(0, AI_LIMITS.genericString);
     const messages = parseMessages(form.get("messages")).slice(-80);
@@ -52,6 +54,7 @@ export async function POST(request: Request) {
         {
           file: audio,
           model: "whisper-1",
+          language: aiWhisperLanguage(locale),
         },
         { signal: AbortSignal.timeout(aiTimeoutMs()) },
       );

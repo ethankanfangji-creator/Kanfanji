@@ -6,6 +6,13 @@ export {
   aiTimeoutMs,
 } from "./config";
 export {
+  DEFAULT_AI_LOCALE,
+  aiOutputLanguageInstruction,
+  aiOutputLanguageName,
+  aiWhisperLanguage,
+  resolveAiLocale,
+} from "./locale";
+export {
   AiInputError,
   assertContentLength,
   validateIntegrateInputBody,

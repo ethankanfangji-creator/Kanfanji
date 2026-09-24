@@ -8,6 +8,7 @@ import {
   type AiLocale,
   type AiMarket,
 } from "./config";
+import { DEFAULT_AI_LOCALE } from "./locale";
 
 export class AiInputError extends Error {
   constructor(
@@ -31,6 +32,12 @@ function enumValue<T extends string>(
 ): T {
   if (typeof value !== "string" || !allowed.includes(value as T)) throw new AiInputError(code);
   return value as T;
+}
+
+/** Locale: missing/empty → DEFAULT_AI_LOCALE; invalid non-empty → locale_invalid. */
+function localeValue(value: unknown): AiLocale {
+  if (value == null || value === "") return DEFAULT_AI_LOCALE;
+  return enumValue(value, AI_LOCALES, "locale_invalid");
 }
 
 function parseJson(value: FormDataEntryValue | null, max: number, code: string): unknown {
@@ -225,7 +232,7 @@ export function validateRecordingForm(form: FormData): RecordingInput {
     questions,
     address: optionalString(form.get("address"), AI_LIMITS.genericString, "address_invalid"),
     market: enumValue(form.get("market"), AI_MARKETS, "market_invalid"),
-    locale: enumValue(form.get("locale"), AI_LOCALES, "locale_invalid"),
+    locale: localeValue(form.get("locale")),
     openData: openData as Record<string, unknown> | null,
     propertyContext: propertyContext as RecordingInput["propertyContext"],
     markers: markers as MarkerInput[],
@@ -273,7 +280,7 @@ export function validateVisionBody(body: unknown): VisionInput {
     base64,
     mime: match[1] as VisionInput["mime"],
     tag,
-    locale: enumValue(input.locale, AI_LOCALES, "locale_invalid"),
+    locale: localeValue(input.locale),
     market: enumValue(input.market, AI_MARKETS, "market_invalid"),
     mediaId:
       typeof input.mediaId === "string" &&
@@ -399,7 +406,7 @@ export function validateViewingHighlightsBody(body: unknown): ViewingHighlightsI
   return {
     ...consent,
     address: input.address.trim(),
-    locale: enumValue(input.locale, AI_LOCALES, "locale_invalid"),
+    locale: localeValue(input.locale),
     market: enumValue(input.market, AI_MARKETS, "market_invalid"),
     openData: validateOpenDataObject(input.openData),
     propertyContext: validatePropertyContextObject(input.propertyContext),
@@ -486,7 +493,7 @@ export function validatePropertyBasicsBody(body: unknown): PropertyBasicsInput {
   return {
     ...consent,
     address: input.address.trim(),
-    locale: enumValue(input.locale, AI_LOCALES, "locale_invalid"),
+    locale: localeValue(input.locale),
     market: enumValue(input.market, AI_MARKETS, "market_invalid"),
     openData: validateOpenDataObject(input.openData),
     propertyContext: validatePropertyBasicsContext(input.propertyContext),
@@ -589,7 +596,7 @@ export function validateIntegrateInputBody(body: unknown): IntegrateInputBody {
     ...consent,
     viewingSessionId: input.viewingSessionId.trim(),
     address: input.address.trim(),
-    locale: enumValue(input.locale, AI_LOCALES, "locale_invalid"),
+    locale: localeValue(input.locale),
     market: enumValue(input.market, AI_MARKETS, "market_invalid"),
     boundQuestionId,
     boundQuestionText,

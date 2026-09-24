@@ -756,6 +756,8 @@ const zhHant: Messages = {
     mediaLibraryFailed: "媒體庫操作失敗",
     tabAccount: "帳號",
     mobileNavLabel: "主要導覽",
+    newThreadAlreadyActive: "已在新看房",
+    startNewViewing: "開始新看房",
     composerPlaceholder: "記錄現場觀察、對話摘要…",
     send: "送出",
     recording: "錄音中",

@@ -16,6 +16,7 @@ export function MobileHistoryDrawer({
   onSelectThread,
   onDeleteThread,
   onTogglePinThread,
+  onStartNew,
   labels,
 }: {
   open: boolean;
@@ -25,6 +26,8 @@ export function MobileHistoryDrawer({
   onSelectThread: (id: string) => void;
   onDeleteThread: (id: string) => void;
   onTogglePinThread: (id: string) => void;
+  /** Empty-state CTA — leave history and open address setup. */
+  onStartNew?: () => void;
   labels: {
     title: string;
     empty: string;
@@ -32,6 +35,7 @@ export function MobileHistoryDrawer({
     pin: string;
     unpin: string;
     delete: string;
+    startNew?: string;
   };
 }) {
   if (!open) return null;
@@ -63,8 +67,17 @@ export function MobileHistoryDrawer({
         </div>
         <ul className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[max(1rem,env(safe-area-inset-bottom,0px))]">
           {recent.length === 0 ? (
-            <li className="px-4 py-10 text-center text-[13px] text-[#6B7280]">
-              {labels.empty}
+            <li className="px-4 py-10 text-center">
+              <p className="text-[13px] text-[#6B7280]">{labels.empty}</p>
+              {onStartNew && labels.startNew ? (
+                <button
+                  type="button"
+                  onClick={onStartNew}
+                  className="mt-4 inline-flex min-h-[var(--touch-target)] items-center justify-center rounded-full bg-black px-5 text-[13px] font-bold text-white active:scale-[0.98]"
+                >
+                  {labels.startNew}
+                </button>
+              ) : null}
             </li>
           ) : (
             recent.map((thread) => {

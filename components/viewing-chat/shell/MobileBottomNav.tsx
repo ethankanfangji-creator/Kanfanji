@@ -35,12 +35,15 @@ export function MobileBottomNav({
   activeTab,
   onSelect,
   hidden,
+  /** Tabs that stay visible but do not fire onSelect (aria explains why). */
+  disabledTabs,
 }: {
   labels: MobileNavLabels;
   activeTab: MobileNavTabId | null;
   onSelect: (tab: MobileNavTabId) => void;
   /** Hide while the soft keyboard is open so it cannot cover the composer. */
   hidden?: boolean;
+  disabledTabs?: Partial<Record<MobileNavTabId, string>>;
 }) {
   if (hidden) return null;
 
@@ -81,16 +84,24 @@ export function MobileBottomNav({
       <ul className="flex w-full items-stretch justify-between px-1 pt-1">
         {tabs.map((tab) => {
           const active = activeTab === tab.id;
+          const disabledHint = disabledTabs?.[tab.id];
+          const disabled = Boolean(disabledHint);
           return (
             <li key={tab.id} className="min-w-0 flex-1">
               <button
                 type="button"
-                onClick={() => onSelect(tab.id)}
-                aria-label={tab.label}
+                disabled={disabled}
+                onClick={() => {
+                  if (disabled) return;
+                  onSelect(tab.id);
+                }}
+                aria-label={disabledHint ?? tab.label}
                 aria-current={active ? "page" : undefined}
-                className={`flex min-h-[var(--touch-target)] w-full flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-1 touch-manipulation ${
+                aria-disabled={disabled || undefined}
+                title={disabledHint ?? tab.label}
+                className={`flex min-h-[var(--touch-target)] w-full flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-1 touch-manipulation disabled:cursor-default ${
                   active ? "text-[#111]" : "text-[#6B7280]"
-                }`}
+                } ${disabled && !active ? "opacity-50" : ""}`}
               >
                 <span
                   className={`flex h-8 w-8 items-center justify-center rounded-xl ${

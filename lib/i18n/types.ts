@@ -716,6 +716,10 @@ export type Messages = {
     tabAccount: string;
     /** Accessible name for the mobile bottom tab bar. */
     mobileNavLabel: string;
+    /** Aria when New tab is already the address-setup screen. */
+    newThreadAlreadyActive: string;
+    /** History empty-state CTA to open address setup. */
+    startNewViewing: string;
     composerPlaceholder: string;
     send: string;
     recording: string;

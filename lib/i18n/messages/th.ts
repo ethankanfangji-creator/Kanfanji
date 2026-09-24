@@ -773,6 +773,8 @@ const th: Messages = {
     mediaLibraryFailed: "จัดการคลังสื่อไม่สำเร็จ",
     tabAccount: "บัญชี",
     mobileNavLabel: "เมนูหลัก",
+    newThreadAlreadyActive: "กำลังเปิดชมบ้านใหม่แล้ว",
+    startNewViewing: "เริ่มชมบ้านใหม่",
     composerPlaceholder: "บันทึกสังเกตหน้างานหรือสรุปบทสนทนา…",
     send: "ส่ง",
     recording: "กำลังอัด",

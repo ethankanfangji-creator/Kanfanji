@@ -56,4 +56,35 @@ describe("MobileBottomNav", () => {
     );
     expect(container).toBeEmptyDOMElement();
   });
+
+  it("keeps New selected but inert on address setup with an aria reason", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    render(
+      <MobileBottomNav
+        activeTab="new"
+        onSelect={onSelect}
+        disabledTabs={{ new: "Already starting a new viewing" }}
+        labels={{
+          nav: "Primary navigation",
+          new: "New property",
+          history: "Viewing history",
+          search: "Search records",
+          media: "Media library",
+          account: "Account",
+        }}
+      />,
+    );
+
+    const newTab = screen.getByRole("button", {
+      name: "Already starting a new viewing",
+    });
+    expect(newTab).toBeDisabled();
+    expect(newTab).toHaveAttribute("aria-current", "page");
+    await user.click(newTab);
+    expect(onSelect).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Viewing history" }));
+    expect(onSelect).toHaveBeenCalledWith("history");
+  });
 });

@@ -774,6 +774,8 @@ const en: Messages = {
     mediaLibraryFailed: "Media library action failed",
     tabAccount: "Account",
     mobileNavLabel: "Primary navigation",
+    newThreadAlreadyActive: "Already starting a new viewing",
+    startNewViewing: "Start a new viewing",
     composerPlaceholder: "On-site notes or dialogue summary…",
     send: "Send",
     recording: "Recording",

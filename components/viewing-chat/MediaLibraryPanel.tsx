@@ -1,6 +1,6 @@
 "use client";
 
-import { Database, FileIcon, ImageIcon, Music, Trash2, Video, X } from "lucide-react";
+import { Database, FileIcon, ImageIcon, Music, Trash2, Video } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   formatBytes,
@@ -8,6 +8,7 @@ import {
   removeMediaFile,
   type MediaLibraryItem,
 } from "@/lib/viewing-chat/media-library";
+import { SheetCloseButton } from "@/components/viewing-chat/shell/SheetCloseButton";
 
 export function MediaLibraryPanel({
   onClose,
@@ -92,14 +93,7 @@ export function MediaLibraryPanel({
             <h2 className="text-[15px] font-bold">{labels.title}</h2>
             <p className="text-[11px] text-[#6B7280]">{labels.hint}</p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex h-9 w-9 items-center justify-center rounded-full hover:bg-black/5"
-            aria-label={labels.close}
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <SheetCloseButton label={labels.close} onClick={onClose} />
         </div>
 
         {error ? (

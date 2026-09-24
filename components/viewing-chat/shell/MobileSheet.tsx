@@ -1,6 +1,5 @@
 "use client";
 
-import { X } from "lucide-react";
 import {
   useCallback,
   useRef,
@@ -8,6 +7,7 @@ import {
   type ReactNode,
   type TouchEvent,
 } from "react";
+import { SheetCloseButton } from "@/components/viewing-chat/shell/SheetCloseButton";
 
 const DISMISS_PX = 72;
 
@@ -108,14 +108,7 @@ export function MobileSheet({
             <div className="min-w-0 flex-1 text-[15px] font-bold text-[#1A1A1A]">
               {title}
             </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] shrink-0 items-center justify-center rounded-full text-[#4B5563] hover:bg-black/5"
-              aria-label={closeLabel}
-            >
-              <X className="h-5 w-5" />
-            </button>
+            <SheetCloseButton label={closeLabel} onClick={onClose} />
           </div>
           {headerExtra ? (
             <div className="border-b border-black/8 px-3 pb-3">{headerExtra}</div>

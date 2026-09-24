@@ -4,7 +4,6 @@ import type { ReactNode } from "react";
 import {
   Database,
   History,
-  Plus,
   Search,
   UserRound,
 } from "lucide-react";
@@ -13,7 +12,6 @@ export type MobileNavTabId = "new" | "history" | "search" | "media" | "account";
 
 export type MobileNavLabels = {
   nav: string;
-  new: string;
   history: string;
   search: string;
   media: string;
@@ -21,15 +19,15 @@ export type MobileNavLabels = {
 };
 
 type TabDef = {
-  id: MobileNavTabId;
+  id: Exclude<MobileNavTabId, "new">;
   label: string;
   icon: ReactNode;
 };
 
 /**
  * Mobile primary navigation. Hidden from md and up (desktop uses IconRail).
+ * Four tabs only — “new viewing” lives on the address empty state / ⋯ menu.
  * Icon + short label; selected state uses a filled icon chip + underline.
- * Touch targets are at least 44px; bottom padding respects the home indicator.
  */
 export function MobileBottomNav({
   labels,
@@ -49,11 +47,6 @@ export function MobileBottomNav({
   if (hidden) return null;
 
   const tabs: TabDef[] = [
-    {
-      id: "new",
-      label: labels.new,
-      icon: <Plus className="h-[1.15rem] w-[1.15rem]" strokeWidth={2.25} aria-hidden />,
-    },
     {
       id: "history",
       label: labels.history,

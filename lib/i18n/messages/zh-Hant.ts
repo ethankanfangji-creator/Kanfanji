@@ -729,6 +729,8 @@ const zhHant: Messages = {
     mediaLibraryUpload: "上傳檔案",
     mediaLibraryDelete: "刪除",
     mediaLibraryFailed: "媒體庫操作失敗",
+    tabAccount: "帳號",
+    mobileNavLabel: "主要導覽",
     composerPlaceholder: "記錄現場觀察、對話摘要…",
     send: "送出",
     recording: "錄音中",

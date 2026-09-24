@@ -68,8 +68,8 @@ export function MediaLibraryPanel({
     <div className="fixed inset-0 z-50 flex bg-black/40">
       <button type="button" className="absolute inset-0" aria-label={labels.close} onClick={onClose} />
       <div
-        className={`relative flex h-full w-full max-w-lg flex-col bg-white shadow-2xl ${
-          railExpanded ? "ml-[240px]" : "ml-14"
+        className={`relative flex h-full w-full max-w-lg flex-col bg-white shadow-2xl md:ml-14 ${
+          railExpanded ? "md:ml-[240px]" : ""
         }`}
       >
         <div className="flex items-center gap-2 border-b border-black/8 px-4 py-3">

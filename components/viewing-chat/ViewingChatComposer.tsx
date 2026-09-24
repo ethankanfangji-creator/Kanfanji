@@ -233,7 +233,7 @@ export function ViewingChatComposer({
         aria-label={labels.attach}
         aria-expanded={attachOpen}
         onClick={() => setAttachOpen((open) => !open)}
-        className={`flex h-9 w-9 items-center justify-center rounded-full text-[#6B7280] transition active:bg-black/5 disabled:opacity-40 ${
+        className={`flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center rounded-full text-[#6B7280] transition active:bg-black/5 disabled:opacity-40 ${
           attachOpen ? "bg-black/8 text-[#111]" : ""
         }`}
       >
@@ -278,7 +278,7 @@ export function ViewingChatComposer({
           type="button"
           aria-label={labels.stop}
           onClick={stopRecording}
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-[#EF4444] text-white"
+          className="flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center rounded-full bg-[#EF4444] text-white"
         >
           <Square className="h-3.5 w-3.5 fill-current" />
         </button>
@@ -288,7 +288,7 @@ export function ViewingChatComposer({
           disabled={busy}
           aria-label={labels.recording}
           onClick={() => void startRecording()}
-          className="flex h-9 w-9 items-center justify-center rounded-full text-[#4B5563] active:bg-black/5 disabled:opacity-40"
+          className="flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center rounded-full text-[#4B5563] active:bg-black/5 disabled:opacity-40"
         >
           <Mic className="h-5 w-5" />
         </button>
@@ -298,7 +298,7 @@ export function ViewingChatComposer({
         disabled={busy || recording || !canSend}
         aria-label={labels.send}
         onClick={() => void handleSend()}
-        className="flex h-9 w-9 items-center justify-center rounded-full bg-[#111] text-white disabled:bg-transparent disabled:text-[#D1D5DB]"
+        className="flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center rounded-full bg-[#111] text-white disabled:bg-transparent disabled:text-[#D1D5DB]"
       >
         <Send className="h-4 w-4" />
       </button>
@@ -306,7 +306,7 @@ export function ViewingChatComposer({
   );
 
   return (
-    <div className="bg-transparent px-2.5 pb-[max(0.65rem,env(safe-area-inset-bottom))] pt-1.5">
+    <div className="bg-transparent px-2.5 pb-1.5 pt-1.5 md:pb-[max(0.65rem,env(safe-area-inset-bottom))]">
       {replyTo ? (
         <div className="mb-1.5 flex items-start gap-2 rounded-2xl bg-[#EFF6FF] px-3 py-2">
           <div className="min-w-0 flex-1">

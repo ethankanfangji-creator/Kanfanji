@@ -7,6 +7,14 @@ import { useI18n } from "@/components/I18nProvider";
 import { ChatMessageList } from "@/components/viewing-chat/ChatMessageList";
 import { HistorySearchPanel } from "@/components/viewing-chat/HistorySearchPanel";
 import { IconRail } from "@/components/viewing-chat/IconRail";
+import {
+  MobileAccountSheet,
+} from "@/components/viewing-chat/shell/MobileAccountSheet";
+import {
+  MobileBottomNav,
+  type MobileNavTabId,
+} from "@/components/viewing-chat/shell/MobileBottomNav";
+import { MobileHistoryDrawer } from "@/components/viewing-chat/shell/MobileHistoryDrawer";
 import { MediaLibraryPanel } from "@/components/viewing-chat/MediaLibraryPanel";
 import { PropertySummaryPanel } from "@/components/viewing-chat/PropertySummaryPanel";
 import { ReviewCard, type ReviewFieldDraft } from "@/components/viewing-chat/ReviewCard";
@@ -110,9 +118,13 @@ export function ViewingChatApp() {
   const screenshotInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const hoaDocInputRef = useRef<HTMLInputElement>(null);
-  const [historyOpen, setHistoryOpen] = useState(true);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [mediaOpen, setMediaOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const [mobileNavTab, setMobileNavTab] = useState<MobileNavTabId | null>(null);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [replyTo, setReplyTo] = useState<ChatReplyRef | null>(null);
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState("");
@@ -188,12 +200,19 @@ export function ViewingChatApp() {
 
   useEffect(() => {
     setThreads(listLocalThreads());
-    // Desktop: history open by default; mobile starts closed.
-    if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
-      setHistoryOpen(false);
-    }
+    const mq = window.matchMedia("(max-width: 767px)");
+    const syncViewport = () => {
+      const mobile = mq.matches;
+      setIsMobileViewport(mobile);
+      // Desktop keeps the history rail expanded; mobile keeps the drawer closed.
+      setHistoryOpen(!mobile);
+    };
+    syncViewport();
+    mq.addEventListener("change", syncViewport);
     const supabase = getSupabase();
-    if (!supabase) return;
+    if (!supabase) {
+      return () => mq.removeEventListener("change", syncViewport);
+    }
     void supabase.auth.getUser().then(({ data }) => {
       setUserId(data.user?.id ?? null);
     });
@@ -202,7 +221,10 @@ export function ViewingChatApp() {
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setUserId(session?.user?.id ?? null);
     });
-    return () => subscription.unsubscribe();
+    return () => {
+      mq.removeEventListener("change", syncViewport);
+      subscription.unsubscribe();
+    };
   }, []);
 
   // Lock shell to svh so Safari chrome show/hide does not reflow the page.
@@ -215,6 +237,7 @@ export function ViewingChatApp() {
     const clearShellOffset = () => {
       shell.style.height = "";
       shell.style.transform = "";
+      setKeyboardOpen(false);
     };
 
     const syncShellToKeyboard = () => {
@@ -224,6 +247,7 @@ export function ViewingChatApp() {
       }
       shell.style.height = `${Math.round(vv.height)}px`;
       shell.style.transform = vv.offsetTop ? `translateY(${Math.round(vv.offsetTop)}px)` : "";
+      setKeyboardOpen(true);
     };
 
     const onFocusIn = (event: FocusEvent) => {
@@ -245,6 +269,47 @@ export function ViewingChatApp() {
       clearShellOffset();
     };
   }, []);
+
+  function closeMobileOverlays() {
+    setHistoryOpen(false);
+    setSearchOpen(false);
+    setMediaOpen(false);
+    setAccountOpen(false);
+  }
+
+  function handleMobileNav(tab: MobileNavTabId) {
+    setMobileNavTab(tab);
+    if (tab === "new") {
+      closeMobileOverlays();
+      startNewProperty();
+      return;
+    }
+    if (tab === "history") {
+      setSearchOpen(false);
+      setMediaOpen(false);
+      setAccountOpen(false);
+      setHistoryOpen(true);
+      return;
+    }
+    if (tab === "search") {
+      setHistoryOpen(false);
+      setMediaOpen(false);
+      setAccountOpen(false);
+      setSearchOpen(true);
+      return;
+    }
+    if (tab === "media") {
+      setHistoryOpen(false);
+      setSearchOpen(false);
+      setAccountOpen(false);
+      setMediaOpen(true);
+      return;
+    }
+    setHistoryOpen(false);
+    setSearchOpen(false);
+    setMediaOpen(false);
+    setAccountOpen(true);
+  }
 
   function refreshLocal() {
     setThreads(listLocalThreads());
@@ -1023,6 +1088,7 @@ export function ViewingChatApp() {
     setSearchOpen(false);
     if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
       setHistoryOpen(false);
+      setMobileNavTab(null);
     }
   }
 
@@ -1047,8 +1113,9 @@ export function ViewingChatApp() {
   return (
     <div
       ref={shellRef}
-      className="fixed inset-0 flex h-[100svh] max-h-[100svh] w-full overflow-hidden bg-[#FAF6F1] text-[#1A1A1A]"
+      className="fixed inset-0 flex h-[100svh] max-h-[100svh] w-full flex-col overflow-hidden bg-[#FAF6F1] text-[#1A1A1A]"
     >
+      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
       <IconRail
         sidebarOpen={historyOpen}
         onToggleSidebar={() => {
@@ -1676,13 +1743,70 @@ export function ViewingChatApp() {
           </div>
         )}
       </section>
+      </div>
+
+      <MobileBottomNav
+        hidden={keyboardOpen}
+        activeTab={
+          accountOpen
+            ? "account"
+            : mediaOpen
+              ? "media"
+              : searchOpen
+                ? "search"
+                : historyOpen && isMobileViewport
+                  ? "history"
+                  : mobileNavTab
+        }
+        labels={{
+          nav: c.mobileNavLabel,
+          new: c.newThread,
+          history: c.openHistory,
+          search: c.searchRecords,
+          media: c.mediaLibrary,
+          account: c.tabAccount,
+        }}
+        onSelect={handleMobileNav}
+      />
+
+      <MobileHistoryDrawer
+        open={historyOpen && isMobileViewport}
+        threads={threads}
+        activeId={activeId}
+        onClose={() => {
+          setHistoryOpen(false);
+          setMobileNavTab(null);
+        }}
+        onSelectThread={selectThread}
+        onDeleteThread={deleteThread}
+        onTogglePinThread={togglePinThread}
+        labels={{
+          title: c.historyTitle,
+          empty: c.emptyHistory,
+          close: c.searchClose,
+          pin: c.pinHistory,
+          unpin: c.unpinHistory,
+          delete: c.deleteHistory,
+        }}
+      />
+
+      <MobileAccountSheet
+        open={accountOpen}
+        onClose={() => {
+          setAccountOpen(false);
+          setMobileNavTab(null);
+        }}
+      />
 
       {searchOpen ? (
         <HistorySearchPanel
           threads={threads}
           activeId={activeId}
           onSelect={selectThread}
-          onClose={() => setSearchOpen(false)}
+          onClose={() => {
+            setSearchOpen(false);
+            setMobileNavTab(null);
+          }}
           railExpanded={historyOpen}
           labels={{
             title: c.searchRecords,
@@ -1696,7 +1820,10 @@ export function ViewingChatApp() {
 
       {mediaOpen ? (
         <MediaLibraryPanel
-          onClose={() => setMediaOpen(false)}
+          onClose={() => {
+            setMediaOpen(false);
+            setMobileNavTab(null);
+          }}
           railExpanded={historyOpen}
           labels={{
             title: c.mediaLibrary,

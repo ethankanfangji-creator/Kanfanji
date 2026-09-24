@@ -1445,6 +1445,7 @@ export function ViewingChatApp() {
                 }
                 replyTo={replyTo}
                 onClearReply={() => setReplyTo(null)}
+                permissionCopy={t.permissions}
                 labels={{
                   placeholder: composerHint || c.composerPlaceholder,
                   send: c.send,
@@ -1457,6 +1458,12 @@ export function ViewingChatApp() {
                   uploadVideo: c.attachVideo,
                   empty: c.emptyComposer,
                   micDenied: c.micDenied,
+                  importAudio: c.importAudio,
+                  audioTooLarge: t.composer.audioTooLarge,
+                  imageTooLarge: t.composer.imageTooLarge,
+                  imageBadType: t.composer.imageBadType,
+                  emptyFile: t.mediaImport.emptyFile,
+                  videoTooLarge: t.mediaImport.videoTooLarge,
                   replyingTo: c.replyingTo,
                   replyCancel: c.replyCancel,
                   processing: c.turnProcessing,

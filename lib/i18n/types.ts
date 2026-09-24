@@ -712,6 +712,14 @@ export type Messages = {
     mediaLibraryUpload: string;
     mediaLibraryDelete: string;
     mediaLibraryFailed: string;
+    /** Short label for the mobile bottom tab (new). */
+    tabNew: string;
+    /** Short label for the mobile bottom tab (history). */
+    tabHistory: string;
+    /** Short label for the mobile bottom tab (search). */
+    tabSearch: string;
+    /** Short label for the mobile bottom tab (media). */
+    tabMedia: string;
     /** Short label for the mobile bottom tab (account). */
     tabAccount: string;
     /** Accessible name for the mobile bottom tab bar. */

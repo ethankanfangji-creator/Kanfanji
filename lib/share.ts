@@ -3,6 +3,10 @@ import { createAdminClient } from "@/utils/supabase/admin";
 import { MEDIA_BUCKET } from "@/lib/supabase";
 import { toStoragePath } from "@/lib/media-paths";
 import {
+  assertSharePhotoPath,
+  SHARE_MEDIA_SIGNED_TTL_SECONDS,
+} from "@/lib/media-sign";
+import {
   mapStatusToFailure,
   toPublicSharePayload,
   type PublicShareResult,
@@ -29,15 +33,15 @@ async function signPublishedPaths(
   pathsOrUrls: string[],
   ownerId: string,
   viewingId: string,
-  expiresIn = 3600,
+  expiresIn = SHARE_MEDIA_SIGNED_TTL_SECONDS,
 ): Promise<string[]> {
   if (pathsOrUrls.length === 0) return [];
 
   const supabase = createAdminClient();
-  const expectedPrefix = `${ownerId}/${viewingId}/photos/`;
   const paths = pathsOrUrls.map((item) => toStoragePath(item));
-  if (paths.some((path) => !path || !path.startsWith(expectedPrefix))) {
-    throw new Error("SHARE_MEDIA_FORBIDDEN");
+  for (const path of paths) {
+    if (!path) throw new Error("SHARE_MEDIA_FORBIDDEN");
+    assertSharePhotoPath(path, ownerId, viewingId);
   }
 
   const { data, error } = await supabase.storage
@@ -198,6 +202,45 @@ export async function resolvePublicShare(
   } catch {
     return mapStatusToFailure("error");
   }
+}
+
+/**
+ * Re-sign published share photos after TTL expiry (same unlock gate as resolvePublicShare).
+ * Returns paths → signedUrl list; callers replace expired URLs in the UI.
+ */
+export async function refreshShareMediaUrls(
+  token: string,
+  pathsOrUrls: string[],
+): Promise<
+  | { ok: true; urls: string[]; expiresIn: number }
+  | { ok: false; result: PublicShareResult }
+> {
+  const resolved = await resolvePublicShare(token);
+  if (resolved.status !== "active") return { ok: false, result: resolved };
+
+  const admin = createAdminClient();
+  const row = await fetchViewingByShareTokenAdmin(admin, token);
+  if (!row) return { ok: false, result: mapStatusToFailure("missing") };
+
+  const allowed = new Set(
+    row.mediaManifest
+      .map((item) => toStoragePath(item.path))
+      .filter((path): path is string => typeof path === "string" && path.length > 0),
+  );
+  const requested = pathsOrUrls
+    .map((item) => toStoragePath(item))
+    .filter((path): path is string => typeof path === "string" && allowed.has(path));
+
+  if (requested.length === 0) {
+    return { ok: true, urls: [], expiresIn: SHARE_MEDIA_SIGNED_TTL_SECONDS };
+  }
+
+  const urls = await signPublishedPaths(
+    requested,
+    row.ownerId,
+    row.shareLink.viewing_id,
+  );
+  return { ok: true, urls, expiresIn: SHARE_MEDIA_SIGNED_TTL_SECONDS };
 }
 
 /** @deprecated Prefer resolvePublicShare */

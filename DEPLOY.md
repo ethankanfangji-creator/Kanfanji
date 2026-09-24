@@ -1,6 +1,7 @@
 # Dual environment (prod + dev)
 
 Stack inventory, service interfaces, and env var roles: see [`docs/STACK.md`](./docs/STACK.md).
+Schema / CLI migrations: see [`supabase/README.md`](./supabase/README.md).
 
 ## Branches
 - `main` → Production (kanfangji-prod)
@@ -8,7 +9,14 @@ Stack inventory, service interfaces, and env var roles: see [`docs/STACK.md`](./
 
 ## Local
 1. Fill `.env.local` with **kanfangji-dev** Supabase keys
-2. `npm run dev`
+2. Optional DB: `npx supabase start` then `npx supabase db reset` (applies `supabase/migrations/`)
+3. `npm run dev`
+
+### Schema changes (local → remote)
+1. `npx supabase migration new <name>` — edit the new SQL under `supabase/migrations/`
+2. Apply locally with `npx supabase db reset` (or `db push` to a linked remote)
+3. Open PR; after merge, push to **dev** then **prod** (`supabase db push` or Dashboard / MCP). Do not put secrets in SQL.
+4. Private media: confirm `viewing-media` stays `public=false` (migration `ensure_private_viewing_media`).
 
 ## Deploy flow
 ```bash
@@ -33,7 +41,7 @@ git push origin main
 | SUPABASE_SERVICE_ROLE_KEY | prod | dev |
 | OPENAI_API_KEY | (shared or separate) | (shared or separate) |
 | STRIPE_* | live | test |
-| NEXT_PUBLIC_SITE_URL | https://kanfangji.vercel.app | Preview URL / custom domain |
+| NEXT_PUBLIC_SITE_URL | https://kanfanji.vercel.app | Preview URL / custom domain |
 
 ## Stripe Billing Portal
 1. In Stripe Dashboard → **Settings → Billing → Customer portal**: turn the portal on (test and live separately).
@@ -41,7 +49,12 @@ git push origin main
 3. App routes:
    - `POST /api/create-portal-session` — opens portal for the logged-in user's `subscriptions.stripe_customer_id`
    - `POST /api/billing/sync` — pulls Stripe subscription → upserts DB + `viewings.is_pro` (rate-limited)
-4. After deploy, run SQL `supabase/migrate-viewings-insert-gate.sql` so authenticated clients can no longer INSERT viewings (create goes through `POST /api/viewings`).
+4. After deploy, ensure insert gate is applied (`viewings` INSERT is service-role / `POST /api/viewings` only) — see `supabase/migrations/` and the release runbook.
+
+## Media (private bucket)
+- Bucket `viewing-media` is private; clients must not rely on `/object/public/...`.
+- Playback uses signed URLs (`lib/media.ts`, `POST /api/media/sign`).
+- Share cards use short TTL signed URLs; refresh with `POST /api/share/public/[token]/media`.
 
 ## Manual acceptance
 - Portal: Pro / prior-checkout user →「管理訂閱」→ return to site.
@@ -49,4 +62,4 @@ git push origin main
 - Gate: logged-in non-Pro with ≥3 viewings → `POST /api/viewings` returns 402 `FREE_LIMIT_REACHED` even if UI is bypassed.
 - Two users: user A cannot sync user B's customer (API only reads A’s row by `auth.uid()`).
 - `#2` invariant: `/?checkout=success` alone never grants Pro.
-
+- Media: unauthenticated public object URL fails; signed URL from an authorized session plays.

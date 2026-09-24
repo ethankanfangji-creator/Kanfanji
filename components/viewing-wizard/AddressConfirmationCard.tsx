@@ -11,6 +11,7 @@ export type AddressConfirmationCopy = {
   coordinatesLabel: string;
   openMap: string;
   noCoordinates: string;
+  adminMismatchWarning: string;
 };
 
 export function AddressConfirmationCard({
@@ -41,6 +42,15 @@ export function AddressConfirmationCard({
       <p className="mt-1 text-[15px] font-extrabold leading-snug text-[#1E3A8A]">
         {candidate.displayAddress}
       </p>
+
+      {candidate.adminDistrictMismatch ? (
+        <p
+          className="mt-3 rounded-[12px] border border-[#F59E0B] bg-[#FFFBEB] px-3 py-2 text-[12px] font-bold leading-snug text-[#92400E]"
+          role="alert"
+        >
+          {copy.adminMismatchWarning}
+        </p>
+      ) : null}
 
       <dl className="mt-3 space-y-1.5 text-[12px] text-[#1E3A8A]">
         {candidate.propertyId ? (

@@ -34,6 +34,9 @@ type NominatimResult = {
   display_name?: string;
   lat?: string;
   lon?: string;
+  class?: string;
+  type?: string;
+  addresstype?: string;
   address?: {
     city?: string;
     town?: string;
@@ -43,17 +46,53 @@ type NominatimResult = {
     suburb?: string;
     neighbourhood?: string;
     country_code?: string;
+    city_district?: string;
+    quarter?: string;
   };
 };
 
 const USER_AGENT = "KanFangJi/0.1 (open-house recorder; contact@localhost)";
 
+/** Mutually exclusive Taiwan city-level admin names (臺 normalized). */
+const TW_CITY_ADMINS = [
+  "臺北市",
+  "新北市",
+  "桃園市",
+  "臺中市",
+  "臺南市",
+  "高雄市",
+  "基隆市",
+  "新竹市",
+  "嘉義市",
+] as const;
+
+const NOMINATIM_NON_ADDRESS_CLASSES = new Set([
+  "leisure",
+  "tourism",
+  "natural",
+  "amenity",
+  "shop",
+  "office",
+  "craft",
+  "historic",
+]);
+
+const NOMINATIM_NON_ADDRESS_TYPES = new Set([
+  "park",
+  "garden",
+  "playground",
+  "pitch",
+  "nature_reserve",
+  "attraction",
+  "museum",
+  "viewpoint",
+  "picnic_site",
+  "recreation_ground",
+]);
+
 function googleKey(): string | null {
-  return (
-    process.env.GOOGLE_MAPS_API_KEY?.trim() ||
-    process.env.GOOGLE_PLACES_API_KEY?.trim() ||
-    null
-  );
+  // Suggest/geocode only — do not fall back to Places-only keys.
+  return process.env.GOOGLE_MAPS_API_KEY?.trim() || null;
 }
 
 /** Heuristic region for routing geocoders (suggest only — not authoritative). */
@@ -84,9 +123,133 @@ export function detectSuggestRegion(query: string): SuggestRegion {
   return "OTHER";
 }
 
+/** Normalize 台 → 臺 so Taipei/Taichung tokens compare consistently. */
+export function normalizeTwAdminText(text: string): string {
+  return text.replace(/台/g, "臺");
+}
+
+/**
+ * Extract Taiwan admin tokens (市 / 縣 / 區 / 鄉 / 鎮) from free text.
+ * Returns 臺-normalized tokens in appearance order (deduped).
+ *
+ * City-level `市` uses a 2-char prefix so「臺北市市府路」does not become「臺北市市」.
+ */
+export function extractTwAdminTokens(text: string): string[] {
+  const normalized = normalizeTwAdminText(text);
+  const matches =
+    normalized.match(
+      /[\u4e00-\u9fff]{2}市|[\u4e00-\u9fff]{1,3}(?:縣|區|鄉|鎮)/g,
+    ) ?? [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const token of matches) {
+    if (seen.has(token)) continue;
+    seen.add(token);
+    out.push(token);
+  }
+  return out;
+}
+
+function twCityFromTokens(tokens: string[]): string | null {
+  for (const token of tokens) {
+    if ((TW_CITY_ADMINS as readonly string[]).includes(token)) return token;
+  }
+  return null;
+}
+
+/**
+ * True when query and candidate imply different Taiwan city-level admins
+ * (e.g. 臺北市 vs 新北市).
+ */
+export function twAdminDistrictMismatch(query: string, candidate: string): boolean {
+  const qCity = twCityFromTokens(extractTwAdminTokens(query));
+  const cCity = twCityFromTokens(extractTwAdminTokens(candidate));
+  if (!qCity || !cCity) return false;
+  return qCity !== cCity;
+}
+
+/** True when Nominatim row is a park / leisure POI rather than a street address. */
+export function nominatimLooksLikeNonAddress(row: {
+  class?: string;
+  type?: string;
+  addresstype?: string;
+  display_name?: string;
+}): boolean {
+  const cls = (row.class ?? "").toLowerCase();
+  const typ = (row.type ?? "").toLowerCase();
+  const addrType = (row.addresstype ?? "").toLowerCase();
+  if (NOMINATIM_NON_ADDRESS_CLASSES.has(cls)) return true;
+  if (NOMINATIM_NON_ADDRESS_TYPES.has(typ) || NOMINATIM_NON_ADDRESS_TYPES.has(addrType)) {
+    return true;
+  }
+  const name = row.display_name ?? "";
+  // POI names like「福祿1號公園」are not street addresses even when they contain「號」.
+  if (/公園|游樂場|風景區|動物園|植物園/.test(name)) return true;
+  return false;
+}
+
+/**
+ * Require query admin tokens (市/區) to appear in the Nominatim label when present.
+ * City-level conflicts (臺北 vs 新北) fail.
+ */
+export function nominatimAdminCompatible(query: string, displayName: string): boolean {
+  if (twAdminDistrictMismatch(query, displayName)) return false;
+  const tokens = extractTwAdminTokens(query);
+  if (tokens.length === 0) return true;
+  const hay = normalizeTwAdminText(displayName);
+  // Prefer city-level match when query names a city.
+  const qCity = twCityFromTokens(tokens);
+  if (qCity && !hay.includes(qCity)) return false;
+  // District tokens (區) must also overlap when present.
+  const districts = tokens.filter((t) => t.endsWith("區"));
+  if (districts.length > 0 && !districts.some((d) => hay.includes(d))) {
+    return false;
+  }
+  return true;
+}
+
+function filterNominatimRows(
+  query: string,
+  rows: NominatimResult[],
+  region: SuggestRegion,
+): NominatimResult[] {
+  return rows.filter((row) => {
+    if (!row.display_name) return false;
+    if (nominatimLooksLikeNonAddress(row)) return false;
+    if (region === "TW" && !nominatimAdminCompatible(query, row.display_name)) {
+      return false;
+    }
+    return true;
+  });
+}
+
+/**
+ * Autocomplete is usable when non-empty; for TW, also require admin-token overlap
+ * when the query includes city/district cues (avoids empty-ish wrong region hits).
+ */
+export function isReasonableGoogleAutocomplete(
+  query: string,
+  suggestions: AddressSuggestion[],
+  region: SuggestRegion,
+): boolean {
+  if (suggestions.length === 0) return false;
+  if (region !== "TW") return true;
+  const tokens = extractTwAdminTokens(query);
+  if (tokens.length === 0) return true;
+  const qCity = twCityFromTokens(tokens);
+  return suggestions.some((s) => {
+    const hay = normalizeTwAdminText(`${s.label} ${s.secondary ?? ""}`);
+    if (qCity && hay.includes(qCity)) return true;
+    if (!qCity && tokens.some((t) => hay.includes(normalizeTwAdminText(t)))) return true;
+    return false;
+  });
+}
+
 /**
  * Autocomplete suggestions for address entry.
- * CA/BC → BC Geocoder first; US/TW/OTHER → Google (when keyed) then Nominatim.
+ * CA/BC → BC Geocoder first.
+ * TW + Google key → Autocomplete (if reasonable) → Geocode → filtered Nominatim.
+ * US/OTHER → Google Autocomplete → Nominatim → Geocode fallback.
  * Never invent addresses — empty list if all upstreams miss.
  */
 export async function suggestAddresses(
@@ -102,6 +265,16 @@ export async function suggestAddresses(
   if (region === "CA") {
     const bc = await suggestViaBc(trimmed, limit);
     if (bc.length > 0) return bc;
+  }
+
+  if (region === "TW" && googleKey()) {
+    const google = await suggestViaGoogleAutocomplete(trimmed, limit, region);
+    if (isReasonableGoogleAutocomplete(trimmed, google, region)) return google;
+
+    const geocode = await suggestViaGoogleGeocode(trimmed, limit, region);
+    if (geocode.length > 0) return geocode;
+
+    return suggestViaNominatim(trimmed, limit, region);
   }
 
   const google = await suggestViaGoogleAutocomplete(trimmed, limit, region);
@@ -164,7 +337,8 @@ async function suggestViaNominatim(
   url.searchParams.set("q", query);
   url.searchParams.set("format", "json");
   url.searchParams.set("addressdetails", "1");
-  url.searchParams.set("limit", String(limit));
+  // Fetch a few extras so park/admin filters can still leave `limit` rows.
+  url.searchParams.set("limit", String(Math.min(limit + 4, 12)));
   if (region === "US") url.searchParams.set("countrycodes", "us");
   if (region === "CA") url.searchParams.set("countrycodes", "ca");
   if (region === "TW") url.searchParams.set("countrycodes", "tw");
@@ -179,8 +353,8 @@ async function suggestViaNominatim(
   if (!res.ok) return [];
 
   const rows = (await res.json()) as NominatimResult[];
-  return rows
-    .filter((row) => Boolean(row.display_name))
+  return filterNominatimRows(query, rows, region)
+    .slice(0, limit)
     .map((row, index) => {
       const city = row.address?.city || row.address?.town || row.address?.village;
       const lat = row.lat ? Number(row.lat) : NaN;

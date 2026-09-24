@@ -20,6 +20,7 @@ const candidate: AddressConfirmationCandidate = {
   tags: ["Coquitlam"],
   mapEmbedUrl: "https://www.openstreetmap.org/export/embed.html?marker=1",
   openMapUrl: "https://www.openstreetmap.org/?mlat=49.28",
+  adminDistrictMismatch: false,
 };
 
 const copy = {
@@ -30,6 +31,7 @@ const copy = {
   coordinatesLabel: "Coordinates",
   openMap: "Open map",
   noCoordinates: "Not available",
+  adminMismatchWarning: "City/county mismatch — check carefully",
 };
 
 describe("AddressConfirmationCard", () => {
@@ -67,5 +69,24 @@ describe("AddressConfirmationCard", () => {
     await user.click(screen.getByRole("button", { name: copy.rejectResearch }));
     expect(onConfirm).toHaveBeenCalledTimes(1);
     expect(onReject).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a prominent alert when admin districts conflict", () => {
+    render(
+      <AddressConfirmationCard
+        candidate={{
+          ...candidate,
+          displayAddress: "新北市新莊區福祿1號公園",
+          market: "TW",
+          adminDistrictMismatch: true,
+        }}
+        copy={copy}
+        onConfirm={vi.fn()}
+        onReject={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toBeTruthy();
+    expect(screen.getByText(copy.adminMismatchWarning)).toBeTruthy();
   });
 });

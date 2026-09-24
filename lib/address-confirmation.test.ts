@@ -36,6 +36,7 @@ describe("buildAddressConfirmationCandidate", () => {
         market: "CA",
         source: "bc-geocoder",
         tags: ["Coquitlam"],
+        adminDistrictMismatch: false,
       }),
     );
     expect(candidate?.mapEmbedUrl).toContain("openstreetmap.org");
@@ -71,5 +72,27 @@ describe("buildAddressConfirmationCandidate", () => {
     );
     expect(candidate?.mapEmbedUrl).toBeNull();
     expect(candidate?.openMapUrl).toBeNull();
+  });
+
+  it("flags Taiwan city-level admin mismatch between query and display", () => {
+    const candidate = buildAddressConfirmationCandidate(
+      {
+        displayAddress: "新北市新莊區福祿街附近",
+        market: "TW",
+      },
+      "台北市市府路1號",
+    );
+    expect(candidate?.adminDistrictMismatch).toBe(true);
+  });
+
+  it("does not flag matching Taipei admin tokens (台/臺)", () => {
+    const candidate = buildAddressConfirmationCandidate(
+      {
+        displayAddress: "臺北市信義區市府路1號",
+        market: "TW",
+      },
+      "台北市市府路1號",
+    );
+    expect(candidate?.adminDistrictMismatch).toBe(false);
   });
 });

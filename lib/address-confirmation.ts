@@ -3,6 +3,8 @@
  * the viewing stays unbound (`identified=false`) until the user confirms.
  */
 
+import { twAdminDistrictMismatch } from "@/lib/address-suggest";
+
 export type AddressLookupPayloadLike = {
   error?: string;
   market?: "CA" | "US" | "TW" | "TH" | "OTHER";
@@ -23,6 +25,8 @@ export type AddressConfirmationCandidate = {
   tags: string[];
   mapEmbedUrl: string | null;
   openMapUrl: string | null;
+  /** Query city admin conflicts with geocoded display (e.g. 臺北市 vs 新北市). */
+  adminDistrictMismatch: boolean;
 };
 
 function asFiniteNumber(value: unknown): number | null {
@@ -98,5 +102,6 @@ export function buildAddressConfirmationCandidate(
     tags: payload.tags?.length ? [...payload.tags] : [],
     mapEmbedUrl: map.mapEmbedUrl,
     openMapUrl: map.openMapUrl,
+    adminDistrictMismatch: twAdminDistrictMismatch(queryAddress, display),
   };
 }

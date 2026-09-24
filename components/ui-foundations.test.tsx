@@ -129,6 +129,7 @@ const setupMessages: StepSetupMessages = {
     coordinatesLabel: "Coordinates",
     openMap: "Open map",
     noCoordinates: "Not available",
+    adminMismatchWarning: "City/county mismatch — check carefully",
   },
   setup: {
     title: "Create a new viewing",

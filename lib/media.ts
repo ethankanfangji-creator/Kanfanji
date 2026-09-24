@@ -1,7 +1,6 @@
 import { getSupabase, MEDIA_BUCKET } from "./supabase";
 import { extensionFor, toStoragePath } from "./media-paths";
-
-const SIGNED_TTL_SECONDS = 60 * 60; // 1 hour
+import { MEDIA_SIGNED_TTL_SECONDS } from "./media-sign";
 
 async function requireAuthedClient() {
   const supabase = getSupabase();
@@ -54,7 +53,7 @@ export async function uploadViewingFile(
 
 export async function createSignedMediaUrl(
   pathOrUrl: string,
-  expiresIn = SIGNED_TTL_SECONDS,
+  expiresIn = MEDIA_SIGNED_TTL_SECONDS,
 ): Promise<string | null> {
   const path = toStoragePath(pathOrUrl);
   if (!path) return pathOrUrl.startsWith("http") ? pathOrUrl : null;
@@ -71,7 +70,7 @@ export async function createSignedMediaUrl(
 
 export async function createSignedMediaUrls(
   pathsOrUrls: string[],
-  expiresIn = SIGNED_TTL_SECONDS,
+  expiresIn = MEDIA_SIGNED_TTL_SECONDS,
 ): Promise<string[]> {
   const results = await Promise.all(
     pathsOrUrls.map(async (item) => (await createSignedMediaUrl(item, expiresIn)) ?? ""),
@@ -110,4 +109,4 @@ export async function appendViewingUrl(
   await appendViewingPath(viewingId, column, path);
 }
 
-export { extensionFor };
+export { extensionFor, MEDIA_SIGNED_TTL_SECONDS };

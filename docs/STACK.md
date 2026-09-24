@@ -8,9 +8,9 @@ Last updated: 2026-09-19. Living inventory for agents and humans.
 | --- | --- | --- |
 | Framework | Next.js 16 (App Router) + React 19 + TypeScript | See `package.json` |
 | Styling | Tailwind CSS 4 | Mobile-first wizard UI |
-| Database | Supabase Postgres + RLS | SQL under `supabase/` |
+| Database | Supabase Postgres + RLS | SQL under `supabase/migrations/` (+ legacy `migrate-*.sql`) |
 | Auth | Supabase Auth (`@supabase/ssr`) | Cookie session; guest drafts in IndexedDB |
-| Storage | Supabase Storage `viewing-media` | Private objects + signed URLs |
+| Storage | Supabase Storage `viewing-media` | **Private** objects + short-TTL signed URLs (`lib/media.ts`, `/api/media/sign`) |
 | Local draft | IndexedDB (`lib/idb`, `lib/draft-db`) | Guests can create/read without login |
 | AI | OpenAI (`gpt-4o-mini`, Whisper) | **Server routes only** via `lib/ai-boundary` + `AiService` |
 | Geocoding | BC + Google Places/Geocode + OSM Nominatim | **Server only** via `AddressService` (US/TW prefer Google) |

@@ -1,9 +1,13 @@
 # Release migration runbook
 
-Last verified: 2026-09-16 13:53 UTC
+Last verified: 2026-09-24
 
-This runbook records the current remote state. It is not authorization to apply,
-replay, or edit an applied migration.
+**CLI workflow (preferred going forward):** see [`supabase/README.md`](../supabase/README.md).
+New changes live in `supabase/migrations/`. Legacy `supabase/migrate-*.sql` files remain as
+historical apply scripts; do not add new one-offs there.
+
+This runbook still records remote history for forensics. It is not authorization to
+replay or edit an applied migration.
 
 ## Least-privilege forward fix
 

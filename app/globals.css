@@ -77,6 +77,10 @@
   --page-max-width-narrow: 420px;
   --touch-target: 44px;
   --touch-target-comfortable: 48px;
+  /* Mobile bottom tab bar (content) + home-indicator safe area */
+  --mobile-nav-content-height: 56px;
+  --mobile-nav-safe-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
+  --mobile-nav-offset: calc(var(--mobile-nav-content-height) + var(--mobile-nav-safe-bottom));
 }
 
 body {

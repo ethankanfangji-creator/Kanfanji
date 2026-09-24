@@ -753,6 +753,10 @@ const zhHans: Messages = {
     mediaLibraryFailed: "媒体库操作失败",
     tabAccount: "账号",
     mobileNavLabel: "主要导航",
+    guestPlanTitle: "访客方案",
+    guestPlanBody:
+      "未登录时，此设备可保留 {guestLimit} 笔看房。登录后享有最多 {freeLimit} 间免费云端看房、同步与分享；升级 Pro 则不限笔数。",
+    guestPlanCta: "了解免费与 Pro",
     composerPlaceholder: "记录现场观察、对话摘要…",
     send: "发送",
     recording: "录音中",

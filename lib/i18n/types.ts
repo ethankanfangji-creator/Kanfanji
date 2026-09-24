@@ -716,6 +716,10 @@ export type Messages = {
     tabAccount: string;
     /** Accessible name for the mobile bottom tab bar. */
     mobileNavLabel: string;
+    /** Guest plan blurb shown in the account sheet. */
+    guestPlanTitle: string;
+    guestPlanBody: string;
+    guestPlanCta: string;
     composerPlaceholder: string;
     send: string;
     recording: string;

@@ -74,9 +74,10 @@ export function MobileBottomNav({
 
   return (
     <nav
-      className="z-[var(--z-sticky)] flex shrink-0 border-t border-black/8 bg-white/95 backdrop-blur md:hidden"
-      style={{ paddingBottom: "max(0.35rem, env(safe-area-inset-bottom, 0px))" }}
+      className="mobile-bottom-nav z-[var(--z-sticky)] flex shrink-0 border-t border-black/8 bg-white/95 backdrop-blur md:hidden"
+      style={{ paddingBottom: "var(--mobile-nav-safe-bottom)" }}
       aria-label={labels.nav}
+      data-safe-area="bottom"
     >
       <ul className="flex w-full items-stretch justify-between px-1 pt-1">
         {tabs.map((tab) => {

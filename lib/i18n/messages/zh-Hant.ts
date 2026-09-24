@@ -753,6 +753,10 @@ const zhHant: Messages = {
     mediaLibraryFailed: "媒體庫操作失敗",
     tabAccount: "帳號",
     mobileNavLabel: "主要導覽",
+    guestPlanTitle: "訪客方案",
+    guestPlanBody:
+      "未登入時，此裝置可保留 {guestLimit} 筆看房。登入後享有最多 {freeLimit} 間免費雲端看房、同步與分享；升級 Pro 則不限筆數。",
+    guestPlanCta: "了解免費與 Pro",
     composerPlaceholder: "記錄現場觀察、對話摘要…",
     send: "送出",
     recording: "錄音中",

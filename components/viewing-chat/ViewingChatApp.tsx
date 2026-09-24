@@ -263,13 +263,18 @@ export function ViewingChatApp() {
         clearShellOffset();
         return;
       }
-      shell.style.height = `${Math.round(vv.height)}px`;
-      shell.style.transform = vv.offsetTop ? `translateY(${Math.round(vv.offsetTop)}px)` : "";
+      // Hide tabs immediately so they never cover the focused field.
       setKeyboardOpen(true);
+      shell.style.height = `${Math.round(vv.height)}px`;
+      shell.style.transform = vv.offsetTop
+        ? `translateY(${Math.round(vv.offsetTop)}px)`
+        : "";
     };
 
     const onFocusIn = (event: FocusEvent) => {
-      if (isTextEditingTarget(event.target)) syncShellToKeyboard();
+      if (!isTextEditingTarget(event.target)) return;
+      setKeyboardOpen(true);
+      syncShellToKeyboard();
     };
     const onFocusOut = () => {
       window.setTimeout(() => {
@@ -1572,6 +1577,7 @@ export function ViewingChatApp() {
               <ViewingChatComposer
                 busy={busy || sourceBusy}
                 processing={busy || sourceBusy}
+                keyboardOpen={keyboardOpen}
                 processingHint={
                   busy || sourceBusy
                     ? status || c.turnProcessing

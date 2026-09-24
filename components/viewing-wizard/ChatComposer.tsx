@@ -285,7 +285,7 @@ export function ChatComposer({
   const canSend = !busy && !recording && Boolean(text.trim() || imageFile || audioBlob);
 
   return (
-    <div className="fixed bottom-[calc(56px+env(safe-area-inset-bottom))] inset-x-0 z-40 flex justify-center pointer-events-none">
+    <div className="fixed bottom-[var(--mobile-nav-offset)] inset-x-0 z-40 flex justify-center pointer-events-none">
       <div className="pointer-events-auto box-border w-full max-w-[min(420px,100%)] px-3 pb-1">
         <div className="rounded-[22px] border border-black/10 bg-white/95 shadow-[0_-8px_28px_rgba(0,0,0,0.08)] backdrop-blur-md">
           {suggestions.length > 0 ? (

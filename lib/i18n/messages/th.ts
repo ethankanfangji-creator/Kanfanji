@@ -770,6 +770,10 @@ const th: Messages = {
     mediaLibraryFailed: "จัดการคลังสื่อไม่สำเร็จ",
     tabAccount: "บัญชี",
     mobileNavLabel: "เมนูหลัก",
+    guestPlanTitle: "แผนสำหรับแขก",
+    guestPlanBody:
+      "ถ้ายังไม่เข้าสู่ระบบ อุปกรณ์นี้เก็บได้ {guestLimit} รายการ เข้าสู่ระบบเพื่อบ้านฟรีสูงสุด {freeLimit} หลัง พร้อมซิงก์และแชร์ หรืออัปเกรด Pro ไม่จำกัด",
+    guestPlanCta: "ดูแผนฟรีและ Pro",
     composerPlaceholder: "บันทึกสังเกตหน้างานหรือสรุปบทสนทนา…",
     send: "ส่ง",
     recording: "กำลังอัด",

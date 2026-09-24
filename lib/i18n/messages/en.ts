@@ -771,6 +771,10 @@ const en: Messages = {
     mediaLibraryFailed: "Media library action failed",
     tabAccount: "Account",
     mobileNavLabel: "Primary navigation",
+    guestPlanTitle: "Guest plan",
+    guestPlanBody:
+      "Without signing in, this device keeps {guestLimit} viewing. Sign in for up to {freeLimit} free cloud homes, sync, and sharing — or upgrade to Pro for unlimited.",
+    guestPlanCta: "Learn about free & Pro",
     composerPlaceholder: "On-site notes or dialogue summary…",
     send: "Send",
     recording: "Recording",

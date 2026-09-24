@@ -74,6 +74,7 @@ export function ViewingChatComposer({
   busy,
   processing,
   processingHint,
+  keyboardOpen = false,
   externalError,
   errorActions,
   errorActionLabels,
@@ -90,6 +91,8 @@ export function ViewingChatComposer({
   /** True while turn / upload is in flight */
   processing?: boolean;
   processingHint?: string | null;
+  /** Soft keyboard open — parent hides bottom tabs; keep composer flush above keyboard. */
+  keyboardOpen?: boolean;
   externalError?: string | null;
   errorActions?: AiUiAction[];
   errorActionLabels?: { retry: string; signIn: string; upgrade: string };
@@ -544,7 +547,14 @@ export function ViewingChatComposer({
   );
 
   return (
-    <div className="bg-transparent px-2.5 pb-1.5 pt-1.5 md:pb-[max(0.65rem,env(safe-area-inset-bottom))]">
+    <div
+      className={
+        keyboardOpen
+          ? "bg-transparent px-2.5 pb-1.5 pt-1.5"
+          : "bg-transparent px-2.5 pb-1.5 pt-1.5 md:pb-[max(0.65rem,env(safe-area-inset-bottom))]"
+      }
+      data-keyboard-open={keyboardOpen ? "true" : "false"}
+    >
       {replyTo ? (
         <div className="mb-1.5 flex items-start gap-2 rounded-2xl bg-[#EFF6FF] px-3 py-2">
           <div className="min-w-0 flex-1">

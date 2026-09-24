@@ -3,10 +3,15 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { LifeBuoy, LogIn, LogOut, X } from "lucide-react";
+import { Info, LifeBuoy, LogIn, LogOut, X } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useI18n } from "@/components/I18nProvider";
+import { formatMessage } from "@/lib/i18n";
+import {
+  FREE_VIEWING_LIMIT,
+  GUEST_LOCAL_VIEWING_LIMIT,
+} from "@/lib/viewing-wizard/free-tier";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 import { resetSyncEngineSingleton } from "@/lib/sync";
 import { setPersistenceAccountScope } from "@/lib/idb/draft-store";
@@ -39,9 +44,13 @@ export function MobileAccountSheet({
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(() => !isSupabaseConfigured());
+  const [guestPlanOpen, setGuestPlanOpen] = useState(false);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setGuestPlanOpen(false);
+      return;
+    }
     const supabase = getSupabase();
     if (!supabase) return;
     let cancelled = false;
@@ -63,6 +72,11 @@ export function MobileAccountSheet({
 
   if (!open) return null;
 
+  const guestPlanBody = formatMessage(messages.chat.guestPlanBody, {
+    guestLimit: GUEST_LOCAL_VIEWING_LIMIT,
+    freeLimit: FREE_VIEWING_LIMIT,
+  });
+
   return (
     <div
       className="fixed inset-0 z-[var(--z-modal)] md:hidden"
@@ -78,7 +92,7 @@ export function MobileAccountSheet({
       />
       <div
         className="absolute inset-x-0 bottom-0 rounded-t-[24px] border border-black/8 bg-white p-4 shadow-2xl"
-        style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom, 0px))" }}
+        style={{ paddingBottom: "max(1rem, var(--mobile-nav-safe-bottom))" }}
       >
         <div className="mb-3 flex items-center justify-between">
           <p className="text-[15px] font-bold">
@@ -99,6 +113,45 @@ export function MobileAccountSheet({
         ) : (
           <div className="space-y-2">
             <LanguageSwitcher className="w-full" />
+
+            {!user ? (
+              <div className="rounded-2xl border border-black/8 bg-[#FAF6F1] p-3">
+                <button
+                  type="button"
+                  onClick={() => setGuestPlanOpen((v) => !v)}
+                  className="flex w-full items-start gap-2 text-left"
+                  aria-expanded={guestPlanOpen}
+                >
+                  <Info className="mt-0.5 h-4 w-4 shrink-0 text-[#1D4ED8]" aria-hidden />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[13px] font-bold text-[#1A1A1A]">
+                      {messages.chat.guestPlanTitle}
+                    </span>
+                    <span className="mt-0.5 block text-[11px] font-semibold text-[#1D4ED8]">
+                      {messages.chat.guestPlanCta}
+                    </span>
+                  </span>
+                </button>
+                {guestPlanOpen ? (
+                  <div className="mt-2 space-y-2 border-t border-black/8 pt-2">
+                    <p className="text-[12px] leading-snug text-[#4B5563]">
+                      {guestPlanBody}
+                    </p>
+                    <p className="text-[11px] leading-snug text-[#6B7280]">
+                      {messages.paywall.body}
+                    </p>
+                    <Link
+                      href="/login"
+                      onClick={onClose}
+                      className="inline-flex min-h-[var(--touch-target)] items-center justify-center rounded-2xl bg-black px-3 text-[13px] font-bold text-white"
+                    >
+                      {messages.nav.signIn}
+                    </Link>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
             <a
               href={supportMailto(locale, user?.email)}
               onClick={onClose}

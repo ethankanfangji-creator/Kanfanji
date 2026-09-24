@@ -56,4 +56,24 @@ describe("MobileBottomNav", () => {
     );
     expect(container).toBeEmptyDOMElement();
   });
+
+  it("applies bottom safe-area padding for the home indicator", () => {
+    render(
+      <MobileBottomNav
+        activeTab={null}
+        onSelect={() => undefined}
+        labels={{
+          nav: "Primary navigation",
+          new: "New",
+          history: "History",
+          search: "Search",
+          media: "Media",
+          account: "Account",
+        }}
+      />,
+    );
+    const nav = screen.getByRole("navigation", { name: "Primary navigation" });
+    expect(nav.getAttribute("data-safe-area")).toBe("bottom");
+    expect(nav.getAttribute("style") || "").toContain("mobile-nav-safe-bottom");
+  });
 });

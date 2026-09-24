@@ -8,12 +8,17 @@ import {
   type AddressAutocompleteCopy,
 } from "@/components/viewing-wizard/AddressAutocomplete";
 import {
+  AddressConfirmationCard,
+  type AddressConfirmationCopy,
+} from "@/components/viewing-wizard/AddressConfirmationCard";
+import {
   PropertyBasicsCard,
   type PropertyBasicsCopy,
 } from "@/components/viewing-wizard/PropertyBasicsCard";
 import { defaultPhotoExifReader } from "@/lib/photo-metadata/exif-reader";
 import type { GpsCoordinates } from "@/lib/photo-metadata/types";
 import type { AddressSuggestion } from "@/lib/address-suggest";
+import type { AddressConfirmationCandidate } from "@/lib/address-confirmation";
 import type { PropertyBasicsSnapshot } from "@/lib/property-basics/types";
 
 export type StepSetupMessages = {
@@ -50,6 +55,13 @@ export type StepSetupMessages = {
     changeAddress: string;
     confirmedLabel: string;
     selectToConfirm: string;
+    pendingConfirmTitle: string;
+    confirmUseThisAddress: string;
+    rejectResearch: string;
+    propertyIdLabel: string;
+    coordinatesLabel: string;
+    openMap: string;
+    noCoordinates: string;
   };
   setup: {
     title: string;
@@ -69,6 +81,9 @@ export function StepSetup({
   onConfirmAddress,
   onConfirmSuggestion,
   onReselectAddress,
+  pendingCandidate = null,
+  onAcceptPendingAddress,
+  onRejectPendingAddress,
   identified,
   tags,
   propertyDraft,
@@ -93,6 +108,10 @@ export function StepSetup({
   onConfirmAddress: () => void;
   onConfirmSuggestion: (suggestion: AddressSuggestion) => void;
   onReselectAddress: () => void;
+  /** Normalized lookup result awaiting explicit user confirm before bind. */
+  pendingCandidate?: AddressConfirmationCandidate | null;
+  onAcceptPendingAddress?: () => void;
+  onRejectPendingAddress?: () => void;
   identified: boolean;
   tags: string[];
   propertyDraft: Record<string, unknown>;
@@ -123,6 +142,16 @@ export function StepSetup({
     empty: messages.address.suggestEmpty,
     error: messages.address.suggestError,
     listLabel: messages.address.suggestListLabel,
+  };
+
+  const confirmationCopy: AddressConfirmationCopy = {
+    pendingTitle: messages.address.pendingConfirmTitle,
+    confirmUse: messages.address.confirmUseThisAddress,
+    rejectResearch: messages.address.rejectResearch,
+    propertyIdLabel: messages.address.propertyIdLabel,
+    coordinatesLabel: messages.address.coordinatesLabel,
+    openMap: messages.address.openMap,
+    noCoordinates: messages.address.noCoordinates,
   };
 
   async function handlePhotoMetaFile(file: File | undefined) {
@@ -170,6 +199,7 @@ export function StepSetup({
   }
 
   const busy = lookingUp || locating || applyingExifGps;
+  const awaitingConfirm = pendingCandidate != null && !identified;
 
   return (
     <form
@@ -177,7 +207,11 @@ export function StepSetup({
       aria-label={messages.setup.title}
       onSubmit={(event) => {
         event.preventDefault();
-        if (!identified && address.trim() && !busy) onConfirmAddress();
+        if (awaitingConfirm && onAcceptPendingAddress && !busy) {
+          onAcceptPendingAddress();
+          return;
+        }
+        if (!identified && !awaitingConfirm && address.trim() && !busy) onConfirmAddress();
       }}
     >
       <div>
@@ -240,6 +274,14 @@ export function StepSetup({
               </div>
             ) : null}
           </div>
+        ) : awaitingConfirm && pendingCandidate ? (
+          <AddressConfirmationCard
+            candidate={pendingCandidate}
+            copy={confirmationCopy}
+            busy={busy}
+            onConfirm={() => onAcceptPendingAddress?.()}
+            onReject={() => onRejectPendingAddress?.()}
+          />
         ) : (
           <>
             <div className="flex min-w-0 items-start gap-[var(--space-2)]">
@@ -293,7 +335,7 @@ export function StepSetup({
           </>
         )}
 
-        {!identified ? (
+        {!identified && !awaitingConfirm ? (
           <div className="relative mt-[var(--space-4)] border-t border-[var(--color-border)] pt-[var(--space-4)]">
             <input
               ref={photoInputRef}
@@ -392,7 +434,11 @@ export function StepSetup({
           {startingViewing ? messages.address.lookingUp : messages.setup.startViewing}
         </button>
         <p className="text-center text-[var(--font-size-xs)] text-[var(--color-text-muted)]">
-          {identified ? messages.setup.startViewingHint : messages.address.selectToConfirm}
+          {identified
+            ? messages.setup.startViewingHint
+            : awaitingConfirm
+              ? messages.address.pendingConfirmTitle
+              : messages.address.selectToConfirm}
         </p>
       </div>
 

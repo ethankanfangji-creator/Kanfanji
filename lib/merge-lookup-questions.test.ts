@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   mergeQuestionBankOnAddressLookup,
   shouldPreserveLookupQuestions,
+  shouldReplaceQuestionBank,
   type LookupQuestion,
 } from "./merge-lookup-questions";
 
@@ -86,6 +87,43 @@ describe("shouldPreserveLookupQuestions", () => {
         nextAddress: "1200 Westwood St",
       }),
     ).toBe(false);
+  });
+});
+
+describe("shouldReplaceQuestionBank", () => {
+  it("is the inverse of shouldPreserveLookupQuestions (different property → replace)", () => {
+    const different = {
+      wasIdentified: true,
+      previousPropertyId: "prop-1",
+      nextPropertyId: "prop-2",
+      previousAddress: "1200 Westwood St",
+      nextAddress: "88 Kingsway",
+    };
+    expect(shouldPreserveLookupQuestions(different)).toBe(false);
+    expect(shouldReplaceQuestionBank(different)).toBe(true);
+  });
+
+  it("does not replace when re-confirming the same property", () => {
+    const same = {
+      wasIdentified: true,
+      previousPropertyId: "prop-1",
+      nextPropertyId: "prop-1",
+      previousAddress: "1200 Westwood St",
+      nextAddress: "1200 Westwood Street, Coquitlam",
+    };
+    expect(shouldReplaceQuestionBank(same)).toBe(false);
+  });
+
+  it("replaces on a first bind (nothing committed yet)", () => {
+    expect(
+      shouldReplaceQuestionBank({
+        wasIdentified: false,
+        previousPropertyId: null,
+        nextPropertyId: "prop-1",
+        previousAddress: "",
+        nextAddress: "1200 Westwood St",
+      }),
+    ).toBe(true);
   });
 });
 

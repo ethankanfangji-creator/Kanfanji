@@ -162,6 +162,13 @@ const zhHant: Messages = {
     changeAddress: "重新選擇地址",
     confirmedLabel: "已確認地址",
     selectToConfirm: "請從建議中選擇，或確認地址以建立看房紀錄",
+    pendingConfirmTitle: "請確認正規化後的地址",
+    confirmUseThisAddress: "確認使用此地址",
+    rejectResearch: "不對，重找",
+    propertyIdLabel: "Property ID",
+    coordinatesLabel: "座標",
+    openMap: "開啟地圖",
+    noCoordinates: "無法取得",
   },
   propertyBasics: {
     title: "房源基本資訊（AI）",

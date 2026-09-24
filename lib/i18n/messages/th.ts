@@ -163,6 +163,13 @@ const th: Messages = {
     changeAddress: "เปลี่ยนที่อยู่",
     confirmedLabel: "ที่อยู่ที่ยืนยันแล้ว",
     selectToConfirm: "เลือกจากรายการ หรือยืนยันที่อยู่เพื่อสร้างรายการดูบ้าน",
+    pendingConfirmTitle: "ยืนยันที่อยู่ที่ปรับมาตรฐานแล้ว",
+    confirmUseThisAddress: "ใช้ที่อยู่นี้",
+    rejectResearch: "ไม่ถูก — ค้นหาใหม่",
+    propertyIdLabel: "Property ID",
+    coordinatesLabel: "พิกัด",
+    openMap: "เปิดแผนที่",
+    noCoordinates: "ไม่มีข้อมูล",
   },
   propertyBasics: {
     title: "ข้อมูลพื้นฐานบ้าน (AI)",

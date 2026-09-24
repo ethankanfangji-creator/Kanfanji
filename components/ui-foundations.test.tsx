@@ -122,6 +122,13 @@ const setupMessages: StepSetupMessages = {
     changeAddress: "Change address",
     confirmedLabel: "Confirmed address",
     selectToConfirm: "Pick a suggestion or confirm",
+    pendingConfirmTitle: "Confirm this normalized address",
+    confirmUseThisAddress: "Use this address",
+    rejectResearch: "Wrong — search again",
+    propertyIdLabel: "Property ID",
+    coordinatesLabel: "Coordinates",
+    openMap: "Open map",
+    noCoordinates: "Not available",
   },
   setup: {
     title: "Create a new viewing",

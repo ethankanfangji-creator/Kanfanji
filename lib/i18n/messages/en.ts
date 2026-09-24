@@ -163,6 +163,13 @@ const en: Messages = {
     changeAddress: "Change address",
     confirmedLabel: "Confirmed address",
     selectToConfirm: "Pick a suggestion or confirm the address to create a viewing",
+    pendingConfirmTitle: "Confirm this normalized address",
+    confirmUseThisAddress: "Use this address",
+    rejectResearch: "Wrong — search again",
+    propertyIdLabel: "Property ID",
+    coordinatesLabel: "Coordinates",
+    openMap: "Open map",
+    noCoordinates: "Not available",
   },
   propertyBasics: {
     title: "Property basics (AI)",

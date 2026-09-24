@@ -55,9 +55,11 @@ import type { ShareLinkRecord } from "@/lib/share-access/types";
 import { isActiveSubscriptionStatus } from "@/lib/billing-status";
 import { bankQuestions } from "@/lib/i18n";
 import { mergeRecordingAnswers } from "@/lib/merge-recording-answers";
+import { buildAddressConfirmationCandidate } from "@/lib/address-confirmation";
+import type { AddressConfirmationCandidate } from "@/lib/address-confirmation";
 import {
   mergeQuestionBankOnAddressLookup,
-  shouldPreserveLookupQuestions,
+  shouldReplaceQuestionBank,
 } from "@/lib/merge-lookup-questions";
 import {
   attachMediaToMarkers,
@@ -428,6 +430,22 @@ export function ClientPage() {
       propertyId?: string;
       details?: Record<string, unknown>;
     };
+  } | null>(null);
+  /** Lookup succeeded but viewing is not bound until the user confirms. */
+  const [pendingLookupConfirmation, setPendingLookupConfirmation] = useState<{
+    payload: {
+      error?: string;
+      market?: "CA" | "US" | "TW" | "TH" | "OTHER";
+      displayAddress?: string;
+      tags?: string[];
+      source?: string;
+      propertyId?: string;
+      details?: Record<string, unknown>;
+    };
+    queryAddress: string;
+    preferExistingAddress: boolean;
+    fromExifGps?: boolean;
+    candidate: AddressConfirmationCandidate;
   } | null>(null);
   const mediaUrlsReadyRef = useRef(false);
   const pendingMediaRef = useRef<
@@ -3139,9 +3157,10 @@ export function ClientPage() {
       typeof propertyDraft.propertyId === "string" ? propertyDraft.propertyId : null;
     const nextPropertyIdRaw = payload.propertyId ?? payload.details?.propertyId;
     const nextPropertyId = typeof nextPropertyIdRaw === "string" ? nextPropertyIdRaw : null;
+    // Same-address reconfirm preserves answers (PR #4/#8). Different property → replace bank.
     const preserveRecorded =
       !options.forceNewSession &&
-      shouldPreserveLookupQuestions({
+      !shouldReplaceQuestionBank({
         wasIdentified: identified,
         previousPropertyId,
         nextPropertyId,
@@ -3210,6 +3229,7 @@ export function ClientPage() {
 
   function cancelAddressSwitch() {
     setPendingAddressSwitch(null);
+    setPendingLookupConfirmation(null);
     setAddress(committedAddressRef.current);
     setIdentified(Boolean(committedAddressRef.current));
     setLookupError(false);
@@ -3231,6 +3251,7 @@ export function ClientPage() {
   }
 
   function reselectAddress() {
+    setPendingLookupConfirmation(null);
     setIdentified(false);
     setLookupError(false);
     setPropertyBasics(null);
@@ -3246,6 +3267,55 @@ export function ClientPage() {
     setIdentified(true);
   }
 
+  function stageAddressLookupConfirmation(options: {
+    payload: AddressLookupPayload;
+    queryAddress: string;
+    preferExistingAddress: boolean;
+    fromExifGps?: boolean;
+  }) {
+    const candidate = buildAddressConfirmationCandidate(
+      options.payload,
+      options.queryAddress,
+    );
+    if (!candidate) {
+      throw new Error("地址查詢失敗");
+    }
+    // Do not set identified / bind question bank until the user confirms.
+    setPendingLookupConfirmation({
+      payload: options.payload,
+      queryAddress: options.queryAddress,
+      preferExistingAddress: options.preferExistingAddress,
+      fromExifGps: options.fromExifGps,
+      candidate,
+    });
+    setAddress(candidate.displayAddress);
+    setIdentified(false);
+    setLookupError(false);
+    setSyncMessage("");
+  }
+
+  async function acceptPendingLookupConfirmation() {
+    if (!pendingLookupConfirmation) return;
+    const pending = pendingLookupConfirmation;
+    setPendingLookupConfirmation(null);
+    await applyAddressLookupPayload(pending.payload, {
+      preferExistingAddress: pending.preferExistingAddress,
+      fromExifGps: pending.fromExifGps,
+      addressOverride: pending.queryAddress,
+    });
+  }
+
+  function rejectPendingLookupConfirmation() {
+    if (!pendingLookupConfirmation) return;
+    const query = pendingLookupConfirmation.queryAddress;
+    setPendingLookupConfirmation(null);
+    setLookupError(false);
+    setSyncMessage("");
+    // Back to search; keep recorded Q&A. identified stays false until a new confirm.
+    setIdentified(false);
+    setAddress(query);
+  }
+
   async function confirmAddressLookup(options: {
     address: string;
     preferGeocoderDisplay?: boolean;
@@ -3258,6 +3328,7 @@ export function ClientPage() {
     setLookingUp(true);
     setLookupError(false);
     setSyncMessage("");
+    setPendingLookupConfirmation(null);
 
     try {
       const response = await fetch("/api/lookup-address", {
@@ -3271,13 +3342,14 @@ export function ClientPage() {
         throw new Error(payload.error || "地址查詢失敗");
       }
 
-      // Different confirmed address → applyAddressLookupPayload prompts switch / new viewing.
-      await applyAddressLookupPayload(payload, {
+      stageAddressLookupConfirmation({
+        payload,
+        queryAddress: nextAddress,
         preferExistingAddress: !options.preferGeocoderDisplay,
         fromExifGps: options.fromExifGps,
-        addressOverride: nextAddress,
       });
     } catch (error) {
+      // Invalid / failed lookup must not clear identified or recorded answers.
       restoreCommittedIdentification();
       setLookupError(true);
       setSyncMessage(error instanceof Error ? error.message : "查詢失敗");
@@ -3311,6 +3383,7 @@ export function ClientPage() {
       setLookingUp(true);
       setLookupError(false);
       setSyncMessage("");
+      setPendingLookupConfirmation(null);
       const response = await fetch("/api/lookup-address", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -3322,10 +3395,11 @@ export function ClientPage() {
       }
       const display = payload.displayAddress?.trim() || "";
       if (display) setAddress(display);
-      await applyAddressLookupPayload(payload, {
+      stageAddressLookupConfirmation({
+        payload,
+        queryAddress: display || `GPS ${lat.toFixed(5)}, ${lng.toFixed(5)}`,
         preferExistingAddress: false,
         fromExifGps: false,
-        addressOverride: display || undefined,
       });
     } catch (error) {
       setLocationError(
@@ -3405,6 +3479,7 @@ export function ClientPage() {
     setLookingUp(true);
     setLookupError(false);
     setSyncMessage("");
+    setPendingLookupConfirmation(null);
 
     try {
       const response = await fetch("/api/lookup-address", {
@@ -3418,7 +3493,11 @@ export function ClientPage() {
         throw new Error(payload.error || "GPS 查詢失敗");
       }
 
-      await applyAddressLookupPayload(payload, {
+      stageAddressLookupConfirmation({
+        payload,
+        queryAddress:
+          payload.displayAddress?.trim() ||
+          `GPS ${gps.lat.toFixed(5)}, ${gps.lng.toFixed(5)}`,
         preferExistingAddress: false,
         fromExifGps: true,
       });
@@ -4993,12 +5072,16 @@ export function ClientPage() {
             address={address}
             onAddressChange={(value) => {
               if (identified) setIdentified(false);
+              setPendingLookupConfirmation(null);
               setAddress(value);
             }}
             lookingUp={lookingUp}
             onConfirmAddress={() => void lookupAddress()}
             onConfirmSuggestion={(suggestion) => void confirmSuggestion(suggestion)}
             onReselectAddress={reselectAddress}
+            pendingCandidate={pendingLookupConfirmation?.candidate ?? null}
+            onAcceptPendingAddress={() => void acceptPendingLookupConfirmation()}
+            onRejectPendingAddress={rejectPendingLookupConfirmation}
             identified={identified}
             tags={tags}
             propertyDraft={propertyDraft}

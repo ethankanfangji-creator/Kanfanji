@@ -3,6 +3,7 @@
 import { ChevronDown, ChevronUp, Clipboard, Search, Sparkles, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AddressAutocomplete } from "@/components/viewing-wizard/AddressAutocomplete";
+import { AddressConfirmationCard } from "@/components/viewing-wizard/AddressConfirmationCard";
 import { useI18n } from "@/components/I18nProvider";
 import { ChatMessageList } from "@/components/viewing-chat/ChatMessageList";
 import { HistorySearchPanel } from "@/components/viewing-chat/HistorySearchPanel";
@@ -21,6 +22,11 @@ import { ReviewCard, type ReviewFieldDraft } from "@/components/viewing-chat/Rev
 import { ViewingChatComposer } from "@/components/viewing-chat/ViewingChatComposer";
 import { AI_CONSENT_VERSION } from "@/lib/ai-boundary/client";
 import type { AddressSuggestion } from "@/lib/address-suggest";
+import {
+  buildAddressConfirmationCandidate,
+  type AddressConfirmationCandidate,
+  type AddressLookupPayloadLike,
+} from "@/lib/address-confirmation";
 import { shortenAddressLabel } from "@/lib/shorten-address";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 import {
@@ -108,6 +114,12 @@ export function ViewingChatApp() {
   const [threads, setThreads] = useState<ViewingChatThread[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [addressDraft, setAddressDraft] = useState("");
+  const [pendingAddressConfirm, setPendingAddressConfirm] = useState<{
+    queryAddress: string;
+    candidate: AddressConfirmationCandidate;
+    payload: AddressLookupPayloadLike;
+  } | null>(null);
+  const [addressLookingUp, setAddressLookingUp] = useState(false);
   const [busy, setBusy] = useState(false);
   const [sourceBusy, setSourceBusy] = useState(false);
   const [conflicts, setConflicts] = useState<FieldConflict[]>([]);
@@ -318,6 +330,7 @@ export function ViewingChatApp() {
   function startNewProperty() {
     setActiveId(null);
     setAddressDraft("");
+    setPendingAddressConfirm(null);
     setStatus("");
     setReplyTo(null);
     setListingIntakeOpen(false);
@@ -325,7 +338,8 @@ export function ViewingChatApp() {
     closeChatSearch();
   }
 
-  async function confirmAddress(label: string) {
+  /** Bind a confirmed normalized address to a new local viewing thread. */
+  async function bindConfirmedAddress(label: string) {
     const trimmed = label.trim();
     if (!trimmed) {
       setStatus(c.needAddress);
@@ -367,15 +381,69 @@ export function ViewingChatApp() {
     refreshLocal();
     setActiveId(thread.id);
     setAddressDraft(trimmed);
+    setPendingAddressConfirm(null);
     setStatus("");
     setTurnError(null);
     setConflicts([]);
     setListingIntakeOpen(false);
     setSoftFailCtas(false);
-    // Summary is a top drawer — don't auto-open over the chat
 
-    // Contextual (C): address intel → inferred fields (best-effort, non-blocking)
     void enrichAddressIntel(thread.id, trimmed, seedRecord);
+  }
+
+  /**
+   * Lookup → confirmation card. Viewing is not bound until the user accepts.
+   * Failed lookup shows an error and does not clear an existing thread.
+   */
+  async function lookupAddressForConfirmation(label: string) {
+    const trimmed = label.trim();
+    if (!trimmed) {
+      setStatus(c.needAddress);
+      return;
+    }
+    setAddressLookingUp(true);
+    setStatus(t.address.lookingUp);
+    setPendingAddressConfirm(null);
+    try {
+      const response = await fetch("/api/lookup-address", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address: trimmed }),
+      });
+      const payload = (await response.json()) as AddressLookupPayloadLike;
+      if (!response.ok) {
+        throw new Error(payload.error || t.address.suggestError);
+      }
+      const candidate = buildAddressConfirmationCandidate(payload, trimmed);
+      if (!candidate) {
+        throw new Error(t.address.suggestError);
+      }
+      setPendingAddressConfirm({ queryAddress: trimmed, candidate, payload });
+      setAddressDraft(candidate.displayAddress);
+      setStatus("");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : t.address.suggestError);
+    } finally {
+      setAddressLookingUp(false);
+    }
+  }
+
+  function acceptPendingAddress() {
+    if (!pendingAddressConfirm) return;
+    const { candidate } = pendingAddressConfirm;
+    void bindConfirmedAddress(candidate.displayAddress);
+  }
+
+  function rejectPendingAddress() {
+    if (!pendingAddressConfirm) return;
+    const query = pendingAddressConfirm.queryAddress;
+    setPendingAddressConfirm(null);
+    setAddressDraft(query);
+    setStatus("");
+  }
+
+  async function confirmAddress(label: string) {
+    await lookupAddressForConfirmation(label);
   }
 
   function fieldIdToAgenda(fieldId: PropertyFieldId | undefined): string | null {
@@ -1722,28 +1790,54 @@ export function ViewingChatApp() {
                   {t.brand.subtitle}
                 </p>
               </div>
-              <AddressAutocomplete
-                value={addressDraft}
-                onChange={setAddressDraft}
-                onSelect={onSelectSuggestion}
-                onCommit={(label) => void confirmAddress(label)}
-                copy={{
-                  placeholder: c.addressPlaceholder,
-                  loading: t.address.suggestLoading,
-                  empty: t.address.suggestEmpty,
-                  error: t.address.suggestError,
-                  listLabel: t.address.suggestListLabel,
-                  search: c.confirmAddress,
-                }}
-              />
-              {status ? (
+              {pendingAddressConfirm ? (
+                <AddressConfirmationCard
+                  candidate={pendingAddressConfirm.candidate}
+                  copy={{
+                    pendingTitle: t.address.pendingConfirmTitle,
+                    confirmUse: t.address.confirmUseThisAddress,
+                    rejectResearch: t.address.rejectResearch,
+                    propertyIdLabel: t.address.propertyIdLabel,
+                    coordinatesLabel: t.address.coordinatesLabel,
+                    openMap: t.address.openMap,
+                    noCoordinates: t.address.noCoordinates,
+                  }}
+                  busy={addressLookingUp}
+                  onConfirm={acceptPendingAddress}
+                  onReject={rejectPendingAddress}
+                />
+              ) : (
+                <AddressAutocomplete
+                  value={addressDraft}
+                  onChange={(value) => {
+                    setPendingAddressConfirm(null);
+                    setAddressDraft(value);
+                  }}
+                  onSelect={onSelectSuggestion}
+                  onCommit={(label) => void confirmAddress(label)}
+                  disabled={addressLookingUp}
+                  copy={{
+                    placeholder: c.addressPlaceholder,
+                    loading: t.address.suggestLoading,
+                    empty: t.address.suggestEmpty,
+                    error: t.address.suggestError,
+                    listLabel: t.address.suggestListLabel,
+                    search: c.confirmAddress,
+                  }}
+                />
+              )}
+              {addressLookingUp ? (
+                <p className="text-center text-[12px] text-[#6B7280]" role="status">
+                  {t.address.lookingUp}
+                </p>
+              ) : status ? (
                 <p
                   className="text-center text-[12px] font-semibold text-[#92400E]"
                   role="status"
                 >
                   {status}
                 </p>
-              ) : (
+              ) : pendingAddressConfirm ? null : (
                 <p className="text-center text-[13px] text-[#6B7280]">{c.emptyChat}</p>
               )}
             </div>

@@ -162,6 +162,13 @@ const zhHans: Messages = {
     changeAddress: "重新选择地址",
     confirmedLabel: "已确认地址",
     selectToConfirm: "请从建议中选择，或确认地址以建立看房记录",
+    pendingConfirmTitle: "请确认规范化后的地址",
+    confirmUseThisAddress: "确认使用此地址",
+    rejectResearch: "不对，重找",
+    propertyIdLabel: "Property ID",
+    coordinatesLabel: "坐标",
+    openMap: "打开地图",
+    noCoordinates: "无法取得",
   },
   propertyBasics: {
     title: "房源基本信息（AI）",

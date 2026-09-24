@@ -30,6 +30,12 @@ function isSameProperty(input: {
  * A first lookup (nothing committed) still refreshes the bank.
  * `wasIdentified` may already be false: the address field is reopened by
  * clearing that flag before the user searches again.
+ *
+ * Strategy (aligned with PR #4 / #8):
+ * - Same property (id or normalized address) → preserve recorded answers.
+ * - Different property → replace the bank (see `shouldReplaceQuestionBank`).
+ * - Rejecting a pending confirmation / lookup failure must not clear answers;
+ *   only a confirmed bind onto a different property replaces the bank.
  */
 export function shouldPreserveLookupQuestions(input: {
   wasIdentified: boolean;
@@ -42,6 +48,24 @@ export function shouldPreserveLookupQuestions(input: {
   if (input.wasIdentified) return true;
   if (input.previousPropertyId?.trim()) return true;
   return normalizeAddress(input.previousAddress).length > 0;
+}
+
+/**
+ * Whether confirming a lookup should replace the question bank (drop prior
+ * answers for a different house). Inverse of `shouldPreserveLookupQuestions`.
+ *
+ * Different-property strategy: replace recorded Q&A with the new market bank,
+ * but keep photo-generated (`isDynamic`) questions via
+ * `mergeQuestionBankOnAddressLookup(..., preserveRecorded=false)`.
+ */
+export function shouldReplaceQuestionBank(input: {
+  wasIdentified: boolean;
+  previousPropertyId?: string | null;
+  nextPropertyId?: string | null;
+  previousAddress: string;
+  nextAddress: string;
+}): boolean {
+  return !shouldPreserveLookupQuestions(input);
 }
 
 function hasRecordedContent<T extends LookupQuestion>(question: T): boolean {

@@ -156,6 +156,13 @@ export type Messages = {
     changeAddress: string;
     confirmedLabel: string;
     selectToConfirm: string;
+    pendingConfirmTitle: string;
+    confirmUseThisAddress: string;
+    rejectResearch: string;
+    propertyIdLabel: string;
+    coordinatesLabel: string;
+    openMap: string;
+    noCoordinates: string;
   };
   propertyBasics: {
     title: string;

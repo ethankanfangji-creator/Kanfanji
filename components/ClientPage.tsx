@@ -54,6 +54,11 @@ import type { ViewingReport } from "@/lib/viewing-report/types";
 import type { ShareLinkRecord } from "@/lib/share-access/types";
 import { isActiveSubscriptionStatus } from "@/lib/billing-status";
 import { bankQuestions } from "@/lib/i18n";
+import { mergeRecordingAnswers } from "@/lib/merge-recording-answers";
+import {
+  mergeQuestionBankOnAddressLookup,
+  shouldPreserveLookupQuestions,
+} from "@/lib/merge-lookup-questions";
 import {
   attachMediaToMarkers,
   removeAudioMarker,
@@ -2430,59 +2435,24 @@ export function ClientPage() {
       let nextQuestions: Question[] = [];
       setQuestions((current) => {
         const base = current.length > 0 ? current : bank;
-        const updated = base.map((q) => {
-          const hit = payload.answers?.find((item) => item.id === q.id);
-          if (!hit) {
-            if (pendingId != null && q.id === pendingId && !q.checked && !q.answer?.trim()) {
-              return {
-                ...q,
-                checked: true,
-                answer: messages.bank.captureAudioSummary,
-                analysisStatus: undefined,
-                answerPreview: {
-                  ...q.answerPreview,
-                  noteSummary: messages.bank.captureAudioSummary,
-                },
-              };
-            }
-            if (pendingId != null && q.id === pendingId) {
-              return { ...q, analysisStatus: undefined };
-            }
-            return q;
+        const merged = mergeRecordingAnswers(base, payload.answers, generated);
+        nextQuestions = merged.map((question) => {
+          if (pendingId == null || question.id !== pendingId) return question;
+          if (question.analysisStatus !== "analyzing") return question;
+          if (!question.checked && !question.answer?.trim()) {
+            return {
+              ...question,
+              checked: true,
+              answer: messages.bank.captureAudioSummary,
+              analysisStatus: undefined,
+              answerPreview: {
+                ...question.answerPreview,
+                noteSummary: messages.bank.captureAudioSummary,
+              },
+            };
           }
-          return {
-            ...q,
-            checked: hit.status === "answered",
-            answer: hit.answer,
-            analysisStatus: undefined,
-            answerPreview: {
-              ...q.answerPreview,
-              noteSummary: hit.answer || q.answerPreview?.noteSummary,
-            },
-          };
+          return { ...question, analysisStatus: undefined };
         });
-
-        const existingTexts = new Set(updated.map((q) => q.text.trim().toLowerCase()));
-        let nextId = updated.reduce((max, q) => Math.max(max, q.id), 0) + 1;
-        const extras: Question[] = [];
-        for (const item of generated) {
-          const text = item.text.trim();
-          if (!text || existingTexts.has(text.toLowerCase())) continue;
-          existingTexts.add(text.toLowerCase());
-          extras.push({
-            id: nextId,
-            text,
-            checked: item.status === "answered",
-            answer: item.answer || (item.status === "answered" ? "" : "待確認"),
-            isFollowUp: true,
-            basedOn: item.based_on || item.reason || "",
-            isDynamic: true,
-            source: "audio",
-          });
-          nextId += 1;
-        }
-
-        nextQuestions = [...updated, ...extras];
         return nextQuestions;
       });
 
@@ -3161,10 +3131,26 @@ export function ClientPage() {
       })
     ) {
       setPendingAddressSwitch({ nextAddress, payload });
-      setIdentified(false);
       setSyncMessage("");
       return;
     }
+
+    const previousPropertyId =
+      typeof propertyDraft.propertyId === "string" ? propertyDraft.propertyId : null;
+    const nextPropertyIdRaw = payload.propertyId ?? payload.details?.propertyId;
+    const nextPropertyId = typeof nextPropertyIdRaw === "string" ? nextPropertyIdRaw : null;
+    const preserveRecorded =
+      !options.forceNewSession &&
+      shouldPreserveLookupQuestions({
+        wasIdentified: identified,
+        previousPropertyId,
+        nextPropertyId,
+        previousAddress: committedAddressRef.current,
+        nextAddress,
+      });
+    const mergedQuestions = options.forceNewSession
+      ? nextQuestions
+      : mergeQuestionBankOnAddressLookup(questions, nextQuestions, preserveRecorded);
 
     const sessionId =
       options.sessionId ??
@@ -3176,14 +3162,7 @@ export function ClientPage() {
     setAddress(nextAddress);
     setMarketCode(nextMarket);
     setTags(nextTags);
-    setQuestions((current) => {
-      if (options.forceNewSession) {
-        return nextQuestions;
-      }
-      const dynamic = current.filter((q) => q.isDynamic);
-      const texts = new Set(dynamic.map((q) => q.text.toLowerCase()));
-      return [...dynamic, ...nextQuestions.filter((q) => !texts.has(q.text.toLowerCase()))];
-    });
+    setQuestions(mergedQuestions);
     setIdentified(true);
     const nextWorkflow: ViewingWorkflowStatus = "draft";
     setWorkflowStatus(nextWorkflow);
@@ -3216,17 +3195,7 @@ export function ClientPage() {
       identified: true,
       localSessionId: sessionId,
       workflowStatus: nextWorkflow,
-      questions: options.forceNewSession
-        ? nextQuestions
-        : [
-            ...questions.filter((q) => q.isDynamic),
-            ...nextQuestions.filter(
-              (q) =>
-                !questions
-                  .filter((item) => item.isDynamic)
-                  .some((d) => d.text.toLowerCase() === q.text.toLowerCase()),
-            ),
-          ],
+      questions: mergedQuestions,
       propertyDraft: nextPropertyDraft,
     });
     if (!persisted) return;
@@ -3270,6 +3239,13 @@ export function ClientPage() {
     // Keep text so the user can edit; clear committed only after a new confirm.
   }
 
+  function restoreCommittedIdentification() {
+    const committed = committedAddressRef.current.trim();
+    if (!committed) return;
+    setAddress(committed);
+    setIdentified(true);
+  }
+
   async function confirmAddressLookup(options: {
     address: string;
     preferGeocoderDisplay?: boolean;
@@ -3280,11 +3256,8 @@ export function ClientPage() {
     if (!nextAddress) return;
 
     setLookingUp(true);
-    setIdentified(false);
     setLookupError(false);
     setSyncMessage("");
-    setPropertyBasics(null);
-    setPropertyBasicsStatus("idle");
 
     try {
       const response = await fetch("/api/lookup-address", {
@@ -3305,7 +3278,7 @@ export function ClientPage() {
         addressOverride: nextAddress,
       });
     } catch (error) {
-      setIdentified(false);
+      restoreCommittedIdentification();
       setLookupError(true);
       setSyncMessage(error instanceof Error ? error.message : "查詢失敗");
     } finally {
@@ -3331,17 +3304,13 @@ export function ClientPage() {
         else if (position.code === "unsupported") {
           setLocationError(messages.address.locationUnsupported);
         } else setLocationError(messages.address.locationFailed);
-        setIdentified(false);
-        setLookupError(true);
+        restoreCommittedIdentification();
         return;
       }
       const { lat, lng } = position;
       setLookingUp(true);
-      setIdentified(false);
       setLookupError(false);
       setSyncMessage("");
-      setPropertyBasics(null);
-      setPropertyBasicsStatus("idle");
       const response = await fetch("/api/lookup-address", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -3362,7 +3331,7 @@ export function ClientPage() {
       setLocationError(
         error instanceof Error ? error.message : messages.address.locationFailed,
       );
-      setIdentified(false);
+      restoreCommittedIdentification();
       setLookupError(true);
     } finally {
       setLocating(false);
@@ -3434,7 +3403,6 @@ export function ClientPage() {
 
   async function applyExifGpsLookup(gps: { lat: number; lng: number }) {
     setLookingUp(true);
-    setIdentified(false);
     setLookupError(false);
     setSyncMessage("");
 
@@ -3455,7 +3423,7 @@ export function ClientPage() {
         fromExifGps: true,
       });
     } catch (error) {
-      setIdentified(false);
+      restoreCommittedIdentification();
       setLookupError(true);
       setSyncMessage(error instanceof Error ? error.message : "查詢失敗");
       throw error;

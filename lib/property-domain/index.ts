@@ -76,7 +76,11 @@ export {
   type PropertyReportApiResponseBody,
   type PersistedPropertyReport,
 } from "./persist-report";
-export { erasePropertyData, type ErasePropertyDataResult } from "./erasure";
+export {
+  erasePropertyData,
+  requireAuthenticatedEraseUser,
+  type ErasePropertyDataResult,
+} from "./erasure";
 export { purgeExpiredPropertyData, propertyReportTtlHours } from "./retention";
 export { recordPropertyAudit, type PropertyAuditAction } from "./audit";
 export {

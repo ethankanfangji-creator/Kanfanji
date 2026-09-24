@@ -33,6 +33,7 @@ export async function POST(request: Request) {
       includeLegacyReport: true,
       includeDomainReport: true,
       includeFactCard,
+      createdBy: boundary.userId,
     });
 
     const factCard =

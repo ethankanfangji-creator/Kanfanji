@@ -760,6 +760,8 @@ const zhHant: Messages = {
     tabMedia: "媒體",
     tabAccount: "帳號",
     mobileNavLabel: "主要導覽",
+    newThreadAlreadyActive: "已在新看房",
+    startNewViewing: "開始新看房",
     chatFocusBack: "返回",
     chatFocusMore: "更多",
     composerPlaceholder: "記錄現場觀察、對話摘要…",

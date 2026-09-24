@@ -91,6 +91,7 @@ import type { RecordChange } from "@/lib/viewing-chat/collection/orchestrator-ty
 import { buildOpeningBubble } from "@/lib/viewing-chat/opening";
 import type { PropertyIntel } from "@/lib/property-intel/types";
 import type { Locale } from "@/lib/i18n/config";
+import { shouldStartNewViewing } from "@/lib/viewing-chat/should-start-new-viewing";
 import { isChatFocusMode } from "@/lib/viewing-chat/chat-focus-mode";
 function consentSessionId(): string {
   if (typeof window === "undefined") return "ssr";
@@ -328,7 +329,10 @@ export function ViewingChatApp() {
     setMobileNavTab(tab);
     if (tab === "new") {
       closeMobileOverlays();
-      startNewProperty();
+      // Already on address setup — keep the draft; do not wipe input.
+      if (shouldStartNewViewing(Boolean(active))) {
+        startNewProperty();
+      }
       return;
     }
     if (tab === "history") {
@@ -1294,9 +1298,11 @@ export function ViewingChatApp() {
           setMediaOpen(false);
         }}
         onNew={() => {
-          startNewProperty();
           setSearchOpen(false);
           setMediaOpen(false);
+          if (shouldStartNewViewing(Boolean(active))) {
+            startNewProperty();
+          }
         }}
         onOpenSearch={() => {
           setSearchOpen(true);
@@ -2035,7 +2041,18 @@ export function ViewingChatApp() {
                 ? "search"
                 : historyOpen && isMobileViewport
                   ? "history"
-                  : mobileNavTab
+                  : !active
+                    ? "new"
+                    : mobileNavTab
+        }
+        disabledTabs={
+          !active &&
+          !accountOpen &&
+          !mediaOpen &&
+          !searchOpen &&
+          !(historyOpen && isMobileViewport)
+            ? { new: c.newThreadAlreadyActive }
+            : undefined
         }
         labels={{
           nav: c.mobileNavLabel,
@@ -2059,6 +2076,13 @@ export function ViewingChatApp() {
         onSelectThread={selectThread}
         onDeleteThread={deleteThread}
         onTogglePinThread={togglePinThread}
+        onStartNew={() => {
+          closeMobileOverlays();
+          setMobileNavTab("new");
+          if (shouldStartNewViewing(Boolean(active))) {
+            startNewProperty();
+          }
+        }}
         labels={{
           title: c.historyTitle,
           empty: c.emptyHistory,
@@ -2066,6 +2090,7 @@ export function ViewingChatApp() {
           pin: c.pinHistory,
           unpin: c.unpinHistory,
           delete: c.deleteHistory,
+          startNew: c.startNewViewing,
         }}
       />
 

@@ -777,6 +777,8 @@ const th: Messages = {
     tabMedia: "สื่อ",
     tabAccount: "บัญชี",
     mobileNavLabel: "เมนูหลัก",
+    newThreadAlreadyActive: "กำลังเปิดชมบ้านใหม่แล้ว",
+    startNewViewing: "เริ่มชมบ้านใหม่",
     chatFocusBack: "กลับ",
     chatFocusMore: "เพิ่มเติม",
     composerPlaceholder: "บันทึกสังเกตหน้างานหรือสรุปบทสนทนา…",

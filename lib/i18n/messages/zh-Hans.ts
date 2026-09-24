@@ -760,6 +760,8 @@ const zhHans: Messages = {
     tabMedia: "媒体",
     tabAccount: "账号",
     mobileNavLabel: "主要导航",
+    newThreadAlreadyActive: "已在新看房",
+    startNewViewing: "开始新看房",
     chatFocusBack: "返回",
     chatFocusMore: "更多",
     composerPlaceholder: "记录现场观察、对话摘要…",

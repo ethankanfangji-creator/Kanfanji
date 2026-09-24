@@ -724,6 +724,10 @@ export type Messages = {
     tabAccount: string;
     /** Accessible name for the mobile bottom tab bar. */
     mobileNavLabel: string;
+    /** Aria when New tab is already the address-setup screen. */
+    newThreadAlreadyActive: string;
+    /** History empty-state CTA to open address setup. */
+    startNewViewing: string;
     /** Leave chat focus mode / close a deep panel (mobile). */
     chatFocusBack: string;
     /** Overflow menu while in chat focus mode (mobile). */

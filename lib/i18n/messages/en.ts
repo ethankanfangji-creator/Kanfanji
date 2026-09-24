@@ -778,6 +778,8 @@ const en: Messages = {
     tabMedia: "Media",
     tabAccount: "Account",
     mobileNavLabel: "Primary navigation",
+    newThreadAlreadyActive: "Already starting a new viewing",
+    startNewViewing: "Start a new viewing",
     chatFocusBack: "Back",
     chatFocusMore: "More",
     composerPlaceholder: "On-site notes or dialogue summary…",

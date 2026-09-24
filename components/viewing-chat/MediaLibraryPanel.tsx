@@ -65,14 +65,28 @@ export function MediaLibraryPanel({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex bg-black/40">
-      <button type="button" className="absolute inset-0" aria-label={labels.close} onClick={onClose} />
+    <div
+      className="fixed inset-0 z-50 flex items-end bg-black/40 md:items-stretch"
+      role="dialog"
+      aria-modal="true"
+      aria-label={labels.title}
+    >
+      <button
+        type="button"
+        className="absolute inset-0"
+        aria-label={labels.close}
+        onClick={onClose}
+      />
       <div
-        className={`relative flex h-full w-full max-w-lg flex-col bg-white shadow-2xl md:ml-14 ${
+        className={`relative z-10 flex h-[90svh] w-full max-w-lg flex-col overflow-hidden rounded-t-[24px] border border-black/8 bg-white shadow-2xl md:ml-14 md:h-full md:max-h-none md:rounded-none md:border-0 ${
           railExpanded ? "md:ml-[240px]" : ""
         }`}
+        style={{
+          paddingBottom: "max(0.5rem, env(safe-area-inset-bottom, 0px))",
+        }}
       >
-        <div className="flex items-center gap-2 border-b border-black/8 px-4 py-3">
+        <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-black/15 md:hidden" aria-hidden />
+        <div className="flex shrink-0 items-center gap-2 border-b border-black/8 px-4 py-3">
           <Database className="h-4 w-4 shrink-0 text-[#6B7280]" />
           <div className="min-w-0 flex-1">
             <h2 className="text-[15px] font-bold">{labels.title}</h2>
@@ -89,14 +103,16 @@ export function MediaLibraryPanel({
         </div>
 
         {error ? (
-          <p className="border-b border-black/8 px-4 py-2 text-center text-[12px] font-semibold text-[#991B1B]">
+          <p className="shrink-0 border-b border-black/8 px-4 py-2 text-center text-[12px] font-semibold text-[#991B1B]">
             {error}
           </p>
         ) : null}
 
-        <ul className="flex-1 space-y-2 overflow-y-auto p-3">
+        <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain p-3">
           {items.length === 0 ? (
-            <li className="px-2 py-10 text-center text-[13px] text-[#6B7280]">{labels.empty}</li>
+            <li className="px-2 py-10 text-center text-[13px] text-[#6B7280]">
+              {labels.empty}
+            </li>
           ) : (
             items.map((item) => (
               <li
@@ -120,13 +136,20 @@ export function MediaLibraryPanel({
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[13px] font-bold">{item.name}</p>
                   <p className="mt-0.5 text-[11px] text-[#6B7280]">
-                    {formatBytes(item.size)} · {new Date(item.createdAt).toLocaleString()}
+                    {formatBytes(item.size)} ·{" "}
+                    {new Date(item.createdAt).toLocaleString()}
                   </p>
                   {item.sourceLabel ? (
-                    <p className="mt-0.5 truncate text-[11px] text-[#9CA3AF]">{item.sourceLabel}</p>
+                    <p className="mt-0.5 truncate text-[11px] text-[#9CA3AF]">
+                      {item.sourceLabel}
+                    </p>
                   ) : null}
                   {item.kind === "video" && item.url ? (
-                    <video src={item.url} controls className="mt-2 max-h-36 w-full rounded-lg" />
+                    <video
+                      src={item.url}
+                      controls
+                      className="mt-2 max-h-36 w-full rounded-lg"
+                    />
                   ) : null}
                   {item.kind === "audio" && item.url ? (
                     <audio src={item.url} controls className="mt-2 w-full" />

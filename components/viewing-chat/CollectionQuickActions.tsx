@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  QuickActionChip,
+  QuickActionRow,
+} from "@/components/viewing-chat/QuickActionChip";
+
 export function CollectionQuickActions({
   labels,
   disabled,
@@ -26,33 +31,26 @@ export function CollectionQuickActions({
   onPasteText: () => void;
   onSkip: () => void;
 }) {
-  const btn =
-    "rounded-full border border-black/10 bg-white px-3 py-1.5 text-[12px] font-semibold text-[#1F2937] disabled:opacity-40";
+  const chips: { key: string; label: string; onClick: () => void }[] = [
+    { key: "url", label: labels.pasteUrl, onClick: onPasteUrl },
+    { key: "photo", label: labels.uploadPhoto, onClick: onUploadPhoto },
+    {
+      key: "screenshot",
+      label: labels.uploadScreenshot,
+      onClick: onUploadScreenshot,
+    },
+    { key: "hoa", label: labels.uploadHoaDoc, onClick: onUploadHoaDoc },
+    { key: "text", label: labels.pasteText, onClick: onPasteText },
+    { key: "skip", label: labels.skip, onClick: onSkip },
+  ];
+
   return (
-    <div className="flex flex-wrap gap-1.5 px-3 pb-2">
-      <button type="button" className={btn} disabled={disabled} onClick={onPasteUrl}>
-        {labels.pasteUrl}
-      </button>
-      <button type="button" className={btn} disabled={disabled} onClick={onUploadPhoto}>
-        {labels.uploadPhoto}
-      </button>
-      <button
-        type="button"
-        className={btn}
-        disabled={disabled}
-        onClick={onUploadScreenshot}
-      >
-        {labels.uploadScreenshot}
-      </button>
-      <button type="button" className={btn} disabled={disabled} onClick={onUploadHoaDoc}>
-        {labels.uploadHoaDoc}
-      </button>
-      <button type="button" className={btn} disabled={disabled} onClick={onPasteText}>
-        {labels.pasteText}
-      </button>
-      <button type="button" className={btn} disabled={disabled} onClick={onSkip}>
-        {labels.skip}
-      </button>
-    </div>
+    <QuickActionRow>
+      {chips.map((chip) => (
+        <QuickActionChip key={chip.key} disabled={disabled} onClick={chip.onClick}>
+          {chip.label}
+        </QuickActionChip>
+      ))}
+    </QuickActionRow>
   );
 }

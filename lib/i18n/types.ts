@@ -712,6 +712,14 @@ export type Messages = {
     mediaLibraryUpload: string;
     mediaLibraryDelete: string;
     mediaLibraryFailed: string;
+    /** Short label for the mobile bottom tab (new). */
+    tabNew: string;
+    /** Short label for the mobile bottom tab (history). */
+    tabHistory: string;
+    /** Short label for the mobile bottom tab (search). */
+    tabSearch: string;
+    /** Short label for the mobile bottom tab (media). */
+    tabMedia: string;
     /** Short label for the mobile bottom tab (account). */
     tabAccount: string;
     /** Accessible name for the mobile bottom tab bar. */
@@ -720,6 +728,10 @@ export type Messages = {
     newThreadAlreadyActive: string;
     /** History empty-state CTA to open address setup. */
     startNewViewing: string;
+    /** Leave chat focus mode / close a deep panel (mobile). */
+    chatFocusBack: string;
+    /** Overflow menu while in chat focus mode (mobile). */
+    chatFocusMore: string;
     composerPlaceholder: string;
     send: string;
     recording: string;

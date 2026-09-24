@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  QuickActionChip,
+  QuickActionRow,
+} from "@/components/viewing-chat/QuickActionChip";
+
 export type CollectionActionId =
   | "supplement"
   | "correct"
@@ -12,7 +17,7 @@ export type CollectionActionItem = {
   label: string;
 };
 
-/** Reuses the existing ReportQuickActions chip style for collection intents. */
+/** Collection / coach quick intents — shared chip language with CollectionQuickActions. */
 export function ReportQuickActions({
   items,
   disabled,
@@ -30,35 +35,32 @@ export function ReportQuickActions({
 }) {
   if (actions?.length) {
     return (
-      <div className="flex flex-wrap gap-1.5 px-3 pb-2">
+      <QuickActionRow>
         {actions.map((action) => (
-          <button
+          <QuickActionChip
             key={action.id}
-            type="button"
             disabled={disabled}
+            accent={action.id === "finish"}
             onClick={() => onAction?.(action.id)}
-            className="rounded-full bg-[#DBEAFE] px-3 py-1.5 text-[12px] font-semibold text-[#1E40AF] disabled:opacity-40"
           >
             {action.label}
-          </button>
+          </QuickActionChip>
         ))}
-      </div>
+      </QuickActionRow>
     );
   }
 
   return (
-    <div className="flex flex-wrap gap-1.5 px-3 pb-2">
+    <QuickActionRow>
       {(items ?? []).map((label) => (
-        <button
+        <QuickActionChip
           key={label}
-          type="button"
           disabled={disabled}
           onClick={() => onPick?.(label)}
-          className="rounded-full bg-[#DBEAFE] px-3 py-1.5 text-[12px] font-semibold text-[#1E40AF] disabled:opacity-40"
         >
           {label}
-        </button>
+        </QuickActionChip>
       ))}
-    </div>
+    </QuickActionRow>
   );
 }

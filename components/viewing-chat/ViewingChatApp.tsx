@@ -2041,22 +2041,12 @@ export function ViewingChatApp() {
                 ? "search"
                 : historyOpen && isMobileViewport
                   ? "history"
-                  : !active
-                    ? "new"
+                  : mobileNavTab === "new"
+                    ? null
                     : mobileNavTab
-        }
-        disabledTabs={
-          !active &&
-          !accountOpen &&
-          !mediaOpen &&
-          !searchOpen &&
-          !(historyOpen && isMobileViewport)
-            ? { new: c.newThreadAlreadyActive }
-            : undefined
         }
         labels={{
           nav: c.mobileNavLabel,
-          new: c.tabNew,
           history: c.tabHistory,
           search: c.tabSearch,
           media: c.tabMedia,

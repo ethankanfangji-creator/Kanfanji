@@ -1,10 +1,11 @@
 "use client";
 
-import { Search, X } from "lucide-react";
+import { Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { ViewingChatThread } from "@/lib/viewing-chat/types";
 import { messageSearchHaystack } from "@/lib/viewing-chat/types";
 import { shortenAddressLabel } from "@/lib/shorten-address";
+import { SheetCloseButton } from "@/components/viewing-chat/shell/SheetCloseButton";
 
 export function HistorySearchPanel({
   threads,
@@ -129,14 +130,7 @@ export function HistorySearchPanel({
         <div className="flex shrink-0 items-center gap-2 border-b border-black/8 px-4 py-3">
           <Search className="h-4 w-4 shrink-0 text-[#6B7280]" />
           <h2 className="flex-1 text-[15px] font-bold">{labels.title}</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex h-9 w-9 items-center justify-center rounded-full hover:bg-black/5"
-            aria-label={labels.close}
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <SheetCloseButton label={labels.close} onClick={onClose} />
         </div>
         <div className="shrink-0 border-b border-black/8 px-4 py-3">{searchField}</div>
         {list}

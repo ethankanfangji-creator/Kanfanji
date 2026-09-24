@@ -8,7 +8,6 @@ import { MobileBottomNav } from "./MobileBottomNav";
 
 const shortLabels = {
   nav: "Primary navigation",
-  new: "New",
   history: "History",
   search: "Search",
   media: "Media",
@@ -18,26 +17,26 @@ const shortLabels = {
 afterEach(() => cleanup());
 
 describe("MobileBottomNav", () => {
-  it("renders short icon labels and reports selection", async () => {
+  it("renders four tabs without a New property entry", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
     render(
       <MobileBottomNav
-        activeTab="new"
+        activeTab="history"
         onSelect={onSelect}
         labels={shortLabels}
       />,
     );
 
     expect(screen.getByRole("navigation", { name: "Primary navigation" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "New" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /New/i })).toBeNull();
     expect(screen.getByRole("button", { name: "History" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Search" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Media" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Account" })).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "History" }));
-    expect(onSelect).toHaveBeenCalledWith("history");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    expect(onSelect).toHaveBeenCalledWith("search");
   });
 
   it("marks the selected tab for sighted and assistive users", () => {
@@ -52,7 +51,7 @@ describe("MobileBottomNav", () => {
     const search = screen.getByRole("button", { name: "Search" });
     expect(search).toHaveAttribute("aria-current", "page");
     expect(search).toHaveAttribute("data-active", "true");
-    expect(screen.getByRole("button", { name: "New" })).not.toHaveAttribute(
+    expect(screen.getByRole("button", { name: "History" })).not.toHaveAttribute(
       "aria-current",
     );
   });
@@ -77,47 +76,9 @@ describe("MobileBottomNav", () => {
         hidden={keyboardOpen || chatFocusMode}
         activeTab={null}
         onSelect={() => undefined}
-        labels={{
-          nav: "Primary navigation",
-          new: "New",
-          history: "History",
-          search: "Search",
-          media: "Media",
-          account: "Account",
-        }}
+        labels={shortLabels}
       />,
     );
     expect(container).toBeEmptyDOMElement();
-  });
-
-  it("keeps New selected but inert on address setup with an aria reason", async () => {
-    const user = userEvent.setup();
-    const onSelect = vi.fn();
-    render(
-      <MobileBottomNav
-        activeTab="new"
-        onSelect={onSelect}
-        disabledTabs={{ new: "Already starting a new viewing" }}
-        labels={{
-          nav: "Primary navigation",
-          new: "New property",
-          history: "Viewing history",
-          search: "Search records",
-          media: "Media library",
-          account: "Account",
-        }}
-      />,
-    );
-
-    const newTab = screen.getByRole("button", {
-      name: "Already starting a new viewing",
-    });
-    expect(newTab).toBeDisabled();
-    expect(newTab).toHaveAttribute("aria-current", "page");
-    await user.click(newTab);
-    expect(onSelect).not.toHaveBeenCalled();
-
-    await user.click(screen.getByRole("button", { name: "Viewing history" }));
-    expect(onSelect).toHaveBeenCalledWith("history");
   });
 });

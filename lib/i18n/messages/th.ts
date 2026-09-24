@@ -3,14 +3,18 @@ import type { Messages } from "../types";
 const th: Messages = {
   brand: {
     name: "KanFangJi บันทึกดูบ้าน",
-    subtitle: "OPEN HOUSE RECORDER",
-    cardEyebrow: "KANFANGJI · OPEN HOUSE RECORDER",
+    subtitle: "บันทึกชมบ้านเปิด",
+    cardEyebrow: "KanFangJi · บันทึกชมบ้านเปิด",
   },
   nav: {
     records: "ประวัติดูบ้าน",
     signIn: "เข้าสู่ระบบ",
     signOut: "ออกจากระบบ",
     contactSupport: "ติดต่อฝ่ายสนับสนุน",
+    loadingAccount: "กำลังโหลดบัญชี",
+    supportAccountGuest: "บัญชี: แขก",
+    supportAccountUser: "บัญชี: {email}",
+    supportDescribeIssue: "โปรดอธิบายปัญหา:",
   },
   status: {
     loggedIn: "เข้าสู่ระบบแล้ว · อัปโหลดเมื่อสร้างการ์ด",
@@ -59,6 +63,8 @@ const th: Messages = {
     needFieldContent: "เพิ่มคำตอบ โน้ต หรือสื่ออย่างน้อย 1 รายการก่อนสร้างรายงาน",
     highlightsLoading: "กำลังเตรียมประเด็นดูบ้านจากที่อยู่…",
     highlightsReady: "ประเด็นดูบ้านพร้อมแล้ว — ตอบหน้างานได้เลย",
+    aiHighlightDescription:
+      "คำถามติดตามเฉพาะที่อยู่จาก AI — โปรดตรวจหน้างาน",
     propertyDetailsTitle: "รายละเอียดบ้าน (ไม่บังคับ)",
     propertyDetailsHint: "เติมทีหลังได้ หรือให้ค้นหาที่อยู่ / AI ช่วย — ไม่บังคับก่อนไปต่อ",
     finishViewing: "จบการดูบ้าน / สร้าง Report",
@@ -748,6 +754,7 @@ const th: Messages = {
     addressPlaceholder: "กรอกที่อยู่…",
     confirmAddress: "ยืนยันแล้วเริ่ม",
     generateReport: "จบชมบ้าน / สร้างรายงาน",
+    generateReportFromSources: "สร้างรายงานเบื้องต้นจากแหล่งข้อมูลที่รวบรวมแล้ว",
     generatingReport: "กำลังสร้างรายงาน…",
     shareReport: "แชร์ลิงก์",
     openBank: "คำถาม",

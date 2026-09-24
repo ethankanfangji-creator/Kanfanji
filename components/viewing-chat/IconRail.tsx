@@ -23,21 +23,15 @@ import { resetSyncEngineSingleton } from "@/lib/sync";
 import { setPersistenceAccountScope } from "@/lib/idb/draft-store";
 import type { ViewingChatThread } from "@/lib/viewing-chat/types";
 import { shortenAddressLabel } from "@/lib/shorten-address";
+import { buildSupportMailto } from "@/lib/i18n/support-mailto";
 
-function supportMailto(locale: string, email?: string | null): string {
-  const to =
-    process.env.NEXT_PUBLIC_SUPPORT_EMAIL?.trim() || "support@kanfangji.app";
-  const subject = encodeURIComponent(`[Kanfangji] Support (${locale})`);
-  const body = encodeURIComponent(
-    [
-      email ? `Account: ${email}` : "Account: guest",
-      `Locale: ${locale}`,
-      "",
-      "Please describe the issue:",
-      "",
-    ].join("\n"),
-  );
-  return `mailto:${to}?subject=${subject}&body=${body}`;
+function supportHref(locale: string, copy: {
+  contactSupport: string;
+  supportAccountGuest: string;
+  supportAccountUser: string;
+  supportDescribeIssue: string;
+}, email?: string | null): string {
+  return buildSupportMailto({ locale, email, copy });
 }
 function RailButton({
   label,
@@ -313,7 +307,7 @@ export function IconRail({
                 expanded ? "h-11 w-full" : "h-11 w-11"
               }`}
               role="status"
-              aria-label="Loading account"
+              aria-label={messages.nav.loadingAccount}
             />
           ) : !isSupabaseConfigured() ? (
             <RailButton label="Supabase" expanded={expanded}>
@@ -350,7 +344,7 @@ export function IconRail({
                   <div className="my-1 border-t border-black/8" />
 
                   <a
-                    href={supportMailto(locale, user?.email)}
+                    href={supportHref(locale, messages.nav, user?.email)}
                     onClick={() => setProfileOpen(false)}
                     className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-[12px] font-bold hover:bg-[#FAF6F1]"
                   >

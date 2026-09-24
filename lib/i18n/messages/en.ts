@@ -11,6 +11,10 @@ const en: Messages = {
     signIn: "Sign in",
     signOut: "Sign out",
     contactSupport: "Contact support",
+    loadingAccount: "Loading account",
+    supportAccountGuest: "Account: guest",
+    supportAccountUser: "Account: {email}",
+    supportDescribeIssue: "Please describe the issue:",
   },
   status: {
     loggedIn: "Signed in · uploads when you generate a card",
@@ -59,6 +63,8 @@ const en: Messages = {
     needFieldContent: "Add at least one answer, note, or media before the report",
     highlightsLoading: "Preparing viewing highlights for this address…",
     highlightsReady: "Viewing highlights ready — answer them on site",
+    aiHighlightDescription:
+      "Address-specific follow-up suggested by AI — verify on site.",
     propertyDetailsTitle: "Property details (optional)",
     propertyDetailsHint: "Fill later or let address lookup / AI help — not required to continue",
     finishViewing: "Finish viewing / Generate report",
@@ -749,6 +755,7 @@ const en: Messages = {
     addressPlaceholder: "Enter viewing address…",
     confirmAddress: "Confirm & start",
     generateReport: "Finish viewing / Generate report",
+    generateReportFromSources: "Generate initial report from collected sources.",
     generatingReport: "Generating report…",
     shareReport: "Share link",
     openBank: "Questions",

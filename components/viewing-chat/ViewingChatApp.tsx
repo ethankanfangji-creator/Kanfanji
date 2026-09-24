@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ChevronUp, Clipboard, Search, Sparkles, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronUp, Clipboard, MoreHorizontal, Search, Sparkles, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AddressAutocomplete } from "@/components/viewing-wizard/AddressAutocomplete";
 import { AddressConfirmationCard } from "@/components/viewing-wizard/AddressConfirmationCard";
@@ -91,6 +91,7 @@ import type { RecordChange } from "@/lib/viewing-chat/collection/orchestrator-ty
 import { buildOpeningBubble } from "@/lib/viewing-chat/opening";
 import type { PropertyIntel } from "@/lib/property-intel/types";
 import type { Locale } from "@/lib/i18n/config";
+import { isChatFocusMode } from "@/lib/viewing-chat/chat-focus-mode";
 function consentSessionId(): string {
   if (typeof window === "undefined") return "ssr";
   const key = "kanfangji.chat.consentSession";
@@ -142,6 +143,7 @@ export function ViewingChatApp() {
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [mobileNavTab, setMobileNavTab] = useState<MobileNavTabId | null>(null);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [focusMoreOpen, setFocusMoreOpen] = useState(false);
   const [replyTo, setReplyTo] = useState<ChatReplyRef | null>(null);
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState("");
@@ -167,6 +169,15 @@ export function ViewingChatApp() {
     () => threads.find((thread) => thread.id === activeId) ?? null,
     [threads, activeId],
   );
+
+  const chatFocusMode = isChatFocusMode({
+    hasActiveThread: Boolean(active),
+    historyOpen,
+    searchOpen,
+    mediaOpen,
+    accountOpen,
+    isMobileViewport,
+  });
 
   const agenda = useMemo(() => {
     if (!active) return [];
@@ -295,7 +306,25 @@ export function ViewingChatApp() {
     setAccountOpen(false);
   }
 
+  /** Close a deep panel first; otherwise leave the thread for the empty start state. */
+  function exitChatFocus() {
+    setFocusMoreOpen(false);
+    if (
+      accountOpen ||
+      searchOpen ||
+      mediaOpen ||
+      (historyOpen && isMobileViewport)
+    ) {
+      closeMobileOverlays();
+      setMobileNavTab(null);
+      return;
+    }
+    startNewProperty();
+    setMobileNavTab(null);
+  }
+
   function handleMobileNav(tab: MobileNavTabId) {
+    setFocusMoreOpen(false);
     setMobileNavTab(tab);
     if (tab === "new") {
       closeMobileOverlays();
@@ -341,6 +370,7 @@ export function ViewingChatApp() {
     setReplyTo(null);
     setListingIntakeOpen(false);
     setSoftFailCtas(false);
+    setFocusMoreOpen(false);
     closeChatSearch();
   }
 
@@ -1288,7 +1318,17 @@ export function ViewingChatApp() {
       <section className="mx-auto flex min-h-0 min-w-0 max-w-[1200px] flex-1 flex-col">
         {active ? (
           <>
-            <header className="relative z-40 flex shrink-0 items-center justify-end gap-2 border-b border-black/8 bg-[#FAF6F1]/95 px-3 py-2.5 pt-[max(0.65rem,env(safe-area-inset-top))] backdrop-blur">
+            <header className="relative z-40 flex shrink-0 items-center gap-1 border-b border-black/8 bg-[#FAF6F1]/95 px-2 py-2.5 pt-[max(0.65rem,env(safe-area-inset-top))] backdrop-blur sm:px-3">
+              <button
+                type="button"
+                onClick={exitChatFocus}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[#4B5563] hover:bg-black/5 md:hidden"
+                aria-label={c.chatFocusBack}
+                title={c.chatFocusBack}
+              >
+                <ChevronLeft className="h-5 w-5" strokeWidth={2.25} />
+              </button>
+              <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setSummaryOpen((v) => !v)}
@@ -1341,6 +1381,63 @@ export function ViewingChatApp() {
                     ? c.reviewConfirm
                     : c.actionFinish}
               </button>
+              <div className="relative md:hidden">
+                <button
+                  type="button"
+                  onClick={() => setFocusMoreOpen((v) => !v)}
+                  className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${
+                    focusMoreOpen
+                      ? "bg-black text-white"
+                      : "text-[#4B5563] hover:bg-black/5"
+                  }`}
+                  aria-label={c.chatFocusMore}
+                  title={c.chatFocusMore}
+                  aria-expanded={focusMoreOpen}
+                  aria-haspopup="menu"
+                >
+                  <MoreHorizontal className="h-5 w-5" />
+                </button>
+                {focusMoreOpen ? (
+                  <>
+                    <button
+                      type="button"
+                      className="fixed inset-0 z-40 cursor-default"
+                      aria-label={c.searchClose}
+                      onClick={() => setFocusMoreOpen(false)}
+                    />
+                    <div
+                      role="menu"
+                      className="absolute right-0 top-[calc(100%+6px)] z-50 min-w-[11rem] overflow-hidden rounded-2xl border border-black/8 bg-white py-1 shadow-[0_8px_28px_rgba(0,0,0,0.12)]"
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="flex w-full px-3.5 py-2.5 text-left text-[13px] font-bold text-[#1A1A1A] active:bg-black/5"
+                        onClick={() => handleMobileNav("new")}
+                      >
+                        {c.newThread}
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="flex w-full px-3.5 py-2.5 text-left text-[13px] font-bold text-[#1A1A1A] active:bg-black/5"
+                        onClick={() => handleMobileNav("history")}
+                      >
+                        {c.openHistory}
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="flex w-full px-3.5 py-2.5 text-left text-[13px] font-bold text-[#1A1A1A] active:bg-black/5"
+                        onClick={() => handleMobileNav("media")}
+                      >
+                        {c.mediaLibrary}
+                      </button>
+                    </div>
+                  </>
+                ) : null}
+              </div>
+              </div>
             </header>
             <div className="relative flex min-h-0 flex-1">
               <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -1572,6 +1669,7 @@ export function ViewingChatApp() {
               <ViewingChatComposer
                 busy={busy || sourceBusy}
                 processing={busy || sourceBusy}
+                edgeToBottom={chatFocusMode}
                 processingHint={
                   busy || sourceBusy
                     ? status || c.turnProcessing
@@ -1927,7 +2025,7 @@ export function ViewingChatApp() {
       </div>
 
       <MobileBottomNav
-        hidden={keyboardOpen}
+        hidden={keyboardOpen || chatFocusMode}
         activeTab={
           accountOpen
             ? "account"

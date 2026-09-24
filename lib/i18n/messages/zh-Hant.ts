@@ -756,6 +756,8 @@ const zhHant: Messages = {
     mediaLibraryFailed: "媒體庫操作失敗",
     tabAccount: "帳號",
     mobileNavLabel: "主要導覽",
+    chatFocusBack: "返回",
+    chatFocusMore: "更多",
     composerPlaceholder: "記錄現場觀察、對話摘要…",
     send: "送出",
     recording: "錄音中",

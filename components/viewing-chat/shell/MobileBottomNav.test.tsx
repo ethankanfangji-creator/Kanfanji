@@ -56,4 +56,25 @@ describe("MobileBottomNav", () => {
     );
     expect(container).toBeEmptyDOMElement();
   });
+
+  it("hides when callers OR chat-focus into the hidden flag", () => {
+    const keyboardOpen = false;
+    const chatFocusMode = true;
+    const { container } = render(
+      <MobileBottomNav
+        hidden={keyboardOpen || chatFocusMode}
+        activeTab={null}
+        onSelect={() => undefined}
+        labels={{
+          nav: "Primary navigation",
+          new: "New",
+          history: "History",
+          search: "Search",
+          media: "Media",
+          account: "Account",
+        }}
+      />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
 });

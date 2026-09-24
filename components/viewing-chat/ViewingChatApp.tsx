@@ -1941,10 +1941,10 @@ export function ViewingChatApp() {
         }
         labels={{
           nav: c.mobileNavLabel,
-          new: c.newThread,
-          history: c.openHistory,
-          search: c.searchRecords,
-          media: c.mediaLibrary,
+          new: c.tabNew,
+          history: c.tabHistory,
+          search: c.tabSearch,
+          media: c.tabMedia,
           account: c.tabAccount,
         }}
         onSelect={handleMobileNav}

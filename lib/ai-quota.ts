@@ -27,7 +27,11 @@ export const AI_DAILY_LIMITS = {
   pro: 200,
 } as const satisfies Record<AiTier, number>;
 
-/** Secondary caps (anti-abuse); apply on top of the subject-tier limit. */
+/**
+ * Secondary caps (anti-abuse across identities on one device/IP).
+ * Applied as max(secondary, subjectLimit) so they never undercut the
+ * caller's advertised tier allowance (e.g. Pro 200).
+ */
 export const AI_SECONDARY_DAILY_LIMITS = {
   device: 40,
   ip: 60,

@@ -48,8 +48,16 @@ export async function consumeAiQuota(
   const subjectLimit = limitFor(tier);
   try {
     const windowSeconds = envLimit("AI_QUOTA_WINDOW_SECONDS", 86_400);
-    const deviceLimit = envLimit("AI_DEVICE_DAILY_LIMIT", AI_SECONDARY_DAILY_LIMITS.device);
-    const ipLimit = envLimit("AI_IP_DAILY_LIMIT", AI_SECONDARY_DAILY_LIMITS.ip);
+    // Floor secondary caps at the subject limit so Pro (200) is not shadowed
+    // by the lower guest/free anti-abuse defaults (device 40 / ip 60).
+    const deviceLimit = Math.max(
+      envLimit("AI_DEVICE_DAILY_LIMIT", AI_SECONDARY_DAILY_LIMITS.device),
+      subjectLimit,
+    );
+    const ipLimit = Math.max(
+      envLimit("AI_IP_DAILY_LIMIT", AI_SECONDARY_DAILY_LIMITS.ip),
+      subjectLimit,
+    );
     const dimensions =
       identity.kind === "guest"
         ? [

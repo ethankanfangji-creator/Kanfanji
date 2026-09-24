@@ -49,6 +49,9 @@ describe("atomic AI quota adapter", () => {
       tier: "free",
     });
     expect(rpc.mock.calls[0][1].p_limits[0]).toBe(20);
+    // Free subject (20) stays below secondary defaults — anti-abuse binds.
+    expect(rpc.mock.calls[0][1].p_limits[1]).toBe(40);
+    expect(rpc.mock.calls[0][1].p_limits[2]).toBe(60);
 
     rpc.mockClear();
     rpc.mockResolvedValue({ data: [{ allowed: true, retry_after_seconds: 0 }], error: null });
@@ -59,6 +62,9 @@ describe("atomic AI quota adapter", () => {
       tier: "pro",
     });
     expect(rpc.mock.calls[0][1].p_limits[0]).toBe(200);
+    // Secondary caps must not undercut Pro's advertised subject allowance.
+    expect(rpc.mock.calls[0][1].p_limits[1]).toBe(200);
+    expect(rpc.mock.calls[0][1].p_limits[2]).toBe(200);
   });
 
   it("returns tier/limit/resetAt when exceeded", async () => {

@@ -7,12 +7,15 @@ Cross-browser checks for mic / camera / photo / video. Prefer real devices for i
 - [ ] Cold start the app — **no** mic/camera prompt appears until a capture control is tapped.
 - [ ] **Audio / video:** first tap in a session may show a short explain sheet; Continue hands off to the **native** OS/browser permission prompt (or opens the video file picker).
 - [ ] **After mic is granted** (or the explain was already shown), later Record taps **start recording directly** — no custom permission dialog every time.
-- [ ] **Photos** use the native file picker (`accept="image/*" capture="environment"`) with **no** in-app permission dialog.
+- [ ] **Photos (wizard Add):** use the native file picker (`accept="image/*" capture="environment"`) with **no** in-app permission dialog.
+- [ ] **Viewing chat Camera:** first tap may show a short camera explain sheet; Continue opens capture input; Deny / Block shows settings guidance **and** gallery (`image/*`) import; typed composer notes stay intact.
+- [ ] **Viewing chat Mic:** Deny shows banner with **Import audio** (`audio/*`) into the same turn pipeline; composer text is not cleared.
 - [ ] Only one capture path can run at a time (audio vs photo/video picker); double-tapping Record must not start two MediaRecorders.
 - [ ] After **Stop**, the file is in IndexedDB immediately (reload within seconds still shows media / pending process).
 - [ ] **Cancel** discards the in-progress recording (no new note / no orphan intended clip).
 - [ ] Denied / blocked / revoked mic states show settings guidance **and** import **and** text-note alternatives.
 - [ ] Import audio / pick gallery photo-video works without granting live mic/camera.
+- [ ] Oversized imports respect `AI_LIMITS` (chat turn audio/image) and `MEDIA_IMPORT_LIMITS` (video).
 
 ## Security and data boundaries
 

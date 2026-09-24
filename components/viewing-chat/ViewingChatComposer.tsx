@@ -12,8 +12,26 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  MediaPermissionBanner,
+} from "@/components/media/MediaPermissionBanner";
+import {
+  PermissionPreflight,
+  type PermissionCopy,
+} from "@/components/media/PermissionPreflight";
 import { selectSupportedAudioMimeType } from "@/components/media/useMediaCapture";
-import { createBrowserMediaPermissionAdapter } from "@/lib/media-permissions";
+import { AI_LIMITS } from "@/lib/ai-boundary/config";
+import { MEDIA_IMPORT_LIMITS } from "@/lib/media-import";
+import {
+  createBrowserMediaPermissionAdapter,
+  decideCaptureStart,
+  hasCaptureExplained,
+  isBlockingPermissionStatus,
+  markCaptureExplained,
+  type CaptureKind,
+  type MediaPermissionAdapter,
+  type MediaPermissionStatus,
+} from "@/lib/media-permissions";
 import type { ChatReplyRef } from "@/lib/viewing-chat/types";
 
 export type ChatComposerLabels = {
@@ -28,6 +46,12 @@ export type ChatComposerLabels = {
   uploadVideo?: string;
   empty: string;
   micDenied: string;
+  importAudio: string;
+  audioTooLarge: string;
+  imageTooLarge: string;
+  imageBadType?: string;
+  emptyFile?: string;
+  videoTooLarge?: string;
   replyCancel?: string;
   replyingTo?: string;
   processing?: string;
@@ -35,8 +59,16 @@ export type ChatComposerLabels = {
   retry?: string;
 };
 
+type PermissionBannerState = {
+  status: MediaPermissionStatus;
+  message: string;
+  /** Which fallback picker to open from the banner. */
+  fallback: "audio" | "photo";
+};
+
 export function ViewingChatComposer({
   labels,
+  permissionCopy,
   busy,
   processing,
   processingHint,
@@ -45,8 +77,10 @@ export function ViewingChatComposer({
   replyTo,
   onClearReply,
   onSubmit,
+  mediaAdapter,
 }: {
   labels: ChatComposerLabels;
+  permissionCopy: PermissionCopy;
   busy?: boolean;
   /** True while turn / upload is in flight */
   processing?: boolean;
@@ -61,14 +95,18 @@ export function ViewingChatComposer({
     image: File | null;
     file: File | null;
   }) => void | Promise<void>;
+  /** Injectable for tests; defaults to browser MediaPermissionAdapter. */
+  mediaAdapter?: MediaPermissionAdapter;
 }) {
   const cameraRef = useRef<HTMLInputElement>(null);
   const imageRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const audioImportRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const attachWrapRef = useRef<HTMLDivElement>(null);
-  const media = useRef(createBrowserMediaPermissionAdapter()).current;
+  const mediaRef = useRef(mediaAdapter ?? createBrowserMediaPermissionAdapter());
+  if (mediaAdapter) mediaRef.current = mediaAdapter;
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
@@ -84,6 +122,12 @@ export function ViewingChatComposer({
   const [attachOpen, setAttachOpen] = useState(false);
   const [multiline, setMultiline] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [preflightKind, setPreflightKind] = useState<CaptureKind | null>(null);
+  const [preflightStatus, setPreflightStatus] =
+    useState<MediaPermissionStatus | null>(null);
+  const [preflightBusy, setPreflightBusy] = useState(false);
+  const [permissionBanner, setPermissionBanner] =
+    useState<PermissionBannerState | null>(null);
 
   function resizeTextarea(nextText = text) {
     const el = textareaRef.current;
@@ -117,7 +161,7 @@ export function ViewingChatComposer({
 
   useEffect(() => {
     return () => {
-      media.release(streamRef.current);
+      mediaRef.current.release(streamRef.current);
       if (recorderRef.current && recorderRef.current.state !== "inactive") {
         try {
           recorderRef.current.stop();
@@ -126,7 +170,7 @@ export function ViewingChatComposer({
         }
       }
     };
-  }, [media]);
+  }, []);
 
   useEffect(() => {
     if (!attachOpen) return;
@@ -146,15 +190,39 @@ export function ViewingChatComposer({
     };
   }, [attachOpen]);
 
-  async function startRecording() {
+  function showPermissionBanner(
+    status: MediaPermissionStatus,
+    fallback: "audio" | "photo",
+  ) {
+    setPermissionBanner({
+      status,
+      fallback,
+      message: permissionCopy.status[status] || labels.micDenied,
+    });
+  }
+
+  async function beginRecording() {
+    setPreflightKind(null);
+    setPermissionBanner(null);
     setError(null);
-    setAttachOpen(false);
     if (busy || recording) return;
-    const requested = await media.request("microphone", { audio: true, video: false });
-    if (!requested.ok) {
-      setError(labels.micDenied);
+
+    const media = mediaRef.current;
+    if (!media.isMediaDevicesSupported() || !media.isMediaRecorderSupported()) {
+      showPermissionBanner("unsupported", "audio");
       return;
     }
+
+    const requested = await media.request("microphone", {
+      audio: true,
+      video: false,
+    });
+    if (!requested.ok) {
+      // Keep typed notes / attachments — only surface actionable fallback.
+      showPermissionBanner(requested.status, "audio");
+      return;
+    }
+
     streamRef.current = requested.stream;
     chunksRef.current = [];
     const mime = selectSupportedAudioMimeType(MediaRecorder.isTypeSupported);
@@ -166,16 +234,136 @@ export function ViewingChatComposer({
       if (event.data.size) chunksRef.current.push(event.data);
     };
     recorder.onstop = () => {
-      const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+      const blob = new Blob(chunksRef.current, {
+        type: recorder.mimeType || "audio/webm",
+      });
       chunksRef.current = [];
-      media.release(streamRef.current);
+      mediaRef.current.release(streamRef.current);
       streamRef.current = null;
       setRecording(false);
+      if (blob.size > AI_LIMITS.audioBytes) {
+        setError(labels.audioTooLarge);
+        setAudioBlob(null);
+        return;
+      }
       setAudioBlob(blob);
     };
+    markCaptureExplained("audio");
     setRecording(true);
     setAudioBlob(null);
     recorder.start(250);
+  }
+
+  async function openMicFlow() {
+    setError(null);
+    setAttachOpen(false);
+    setPermissionBanner(null);
+    if (busy || recording) return;
+
+    const media = mediaRef.current;
+    setPreflightBusy(true);
+    let status: MediaPermissionStatus = "prompt";
+    if (!media.isMediaDevicesSupported() || !media.isMediaRecorderSupported()) {
+      status = "unsupported";
+    } else {
+      status = await media.query("microphone");
+    }
+    setPreflightBusy(false);
+
+    const decision = decideCaptureStart({
+      kind: "audio",
+      status,
+      explained: hasCaptureExplained("audio"),
+    });
+
+    if (decision.action === "show-reauth") {
+      showPermissionBanner(decision.status, "audio");
+      return;
+    }
+    if (decision.action === "show-preflight") {
+      setPreflightKind("audio");
+      setPreflightStatus(decision.status);
+      return;
+    }
+    await beginRecording();
+  }
+
+  async function openCameraFlow() {
+    setError(null);
+    setAttachOpen(false);
+    setPermissionBanner(null);
+    if (busy || recording) return;
+
+    const media = mediaRef.current;
+    setPreflightBusy(true);
+    let status: MediaPermissionStatus = "prompt";
+    if (media.isMediaDevicesSupported()) {
+      status = await media.query("camera");
+    }
+    setPreflightBusy(false);
+
+    // Camera capture may be permanently blocked — offer gallery before OS picker.
+    if (isBlockingPermissionStatus(status)) {
+      showPermissionBanner(status, "photo");
+      return;
+    }
+
+    // Reuse the video explained flag: both need a one-shot camera explain.
+    const decision = decideCaptureStart({
+      kind: "video",
+      status,
+      explained: hasCaptureExplained("video"),
+    });
+
+    if (decision.action === "show-preflight") {
+      setPreflightKind("video");
+      setPreflightStatus(decision.status);
+      return;
+    }
+
+    cameraRef.current?.click();
+  }
+
+  async function onPreflightContinue() {
+    if (!preflightKind) return;
+    const kind = preflightKind;
+    if (kind === "audio") {
+      markCaptureExplained("audio");
+      await beginRecording();
+      return;
+    }
+    if (kind === "video") {
+      markCaptureExplained("video");
+      setPreflightKind(null);
+      setPermissionBanner(null);
+      cameraRef.current?.click();
+      return;
+    }
+    setPreflightKind(null);
+    imageRef.current?.click();
+  }
+
+  function onPreflightImport() {
+    const kind = preflightKind;
+    setPreflightKind(null);
+    if (kind === "audio") {
+      audioImportRef.current?.click();
+      return;
+    }
+    // Camera / photo: gallery without capture attribute
+    imageRef.current?.click();
+  }
+
+  function onPreflightCancel() {
+    setPreflightKind(null);
+    setPreflightBusy(false);
+    // Do not clear composer text / attachments.
+  }
+
+  function focusTextFallback() {
+    setPermissionBanner(null);
+    setPreflightKind(null);
+    textareaRef.current?.focus();
   }
 
   function stopRecording() {
@@ -186,19 +374,43 @@ export function ViewingChatComposer({
 
   function applyPickedFile(picked: File | null | undefined) {
     if (!picked) return;
+    if (picked.size === 0) {
+      setError(labels.emptyFile || labels.empty);
+      return;
+    }
     if (picked.type.startsWith("image/")) {
+      if (picked.size > AI_LIMITS.imageBytes) {
+        setError(labels.imageTooLarge);
+        return;
+      }
       setImage(picked);
       setFile(null);
+      setPermissionBanner(null);
+      setError(null);
       return;
     }
     if (picked.type.startsWith("audio/")) {
+      if (picked.size > AI_LIMITS.audioBytes) {
+        setError(labels.audioTooLarge);
+        return;
+      }
       setAudioBlob(picked);
       setFile(null);
+      setPermissionBanner(null);
+      setError(null);
       return;
+    }
+    if (picked.type.startsWith("video/")) {
+      if (picked.size > MEDIA_IMPORT_LIMITS.videoBytes) {
+        setError(labels.videoTooLarge || labels.empty);
+        return;
+      }
     }
     // Video and other docs travel as file attachments
     setFile(picked);
     setImage(null);
+    setPermissionBanner(null);
+    setError(null);
   }
 
   async function handleSend() {
@@ -209,6 +421,7 @@ export function ViewingChatComposer({
     }
     setError(null);
     setAttachOpen(false);
+    setPermissionBanner(null);
     await onSubmit({
       text: text.trim(),
       audio: audioBlob,
@@ -248,22 +461,39 @@ export function ViewingChatComposer({
         >
           <AttachItem
             label={labels.camera}
-            onClick={() => cameraRef.current?.click()}
+            onClick={() => void openCameraFlow()}
             icon={<Camera className="h-4 w-4" />}
           />
           <AttachItem
             label={labels.uploadImage}
-            onClick={() => imageRef.current?.click()}
+            onClick={() => {
+              setAttachOpen(false);
+              imageRef.current?.click();
+            }}
             icon={<ImagePlus className="h-4 w-4" />}
           />
           <AttachItem
+            label={labels.importAudio}
+            onClick={() => {
+              setAttachOpen(false);
+              audioImportRef.current?.click();
+            }}
+            icon={<Mic className="h-4 w-4" />}
+          />
+          <AttachItem
             label={labels.uploadVideo || "Video"}
-            onClick={() => videoRef.current?.click()}
+            onClick={() => {
+              setAttachOpen(false);
+              videoRef.current?.click();
+            }}
             icon={<Video className="h-4 w-4" />}
           />
           <AttachItem
             label={labels.uploadFile}
-            onClick={() => fileRef.current?.click()}
+            onClick={() => {
+              setAttachOpen(false);
+              fileRef.current?.click();
+            }}
             icon={<FileUp className="h-4 w-4" />}
           />
         </div>
@@ -287,7 +517,7 @@ export function ViewingChatComposer({
           type="button"
           disabled={busy}
           aria-label={labels.recording}
-          onClick={() => void startRecording()}
+          onClick={() => void openMicFlow()}
           className="flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center rounded-full text-[#4B5563] active:bg-black/5 disabled:opacity-40"
         >
           <Mic className="h-5 w-5" />
@@ -378,6 +608,7 @@ export function ViewingChatComposer({
         accept="image/*"
         capture="environment"
         className="hidden"
+        data-testid="camera-capture-input"
         onChange={(event) => {
           applyPickedFile(event.target.files?.[0]);
           event.target.value = "";
@@ -387,8 +618,21 @@ export function ViewingChatComposer({
       <input
         ref={imageRef}
         type="file"
-        accept="image/jpeg,image/png,image/webp,image/heic"
+        accept="image/jpeg,image/png,image/webp,image/heic,image/*"
         className="hidden"
+        data-testid="photo-gallery-input"
+        onChange={(event) => {
+          applyPickedFile(event.target.files?.[0]);
+          event.target.value = "";
+          setAttachOpen(false);
+        }}
+      />
+      <input
+        ref={audioImportRef}
+        type="file"
+        accept="audio/*,.m4a,.mp3,.wav,.webm,.ogg,.aac,.caf"
+        className="hidden"
+        data-testid="audio-import-input"
         onChange={(event) => {
           applyPickedFile(event.target.files?.[0]);
           event.target.value = "";
@@ -417,6 +661,40 @@ export function ViewingChatComposer({
           setAttachOpen(false);
         }}
       />
+
+      {preflightKind ? (
+        <PermissionPreflight
+          kind={preflightKind}
+          copy={permissionCopy}
+          status={preflightStatus}
+          busy={preflightBusy}
+          onContinue={() => void onPreflightContinue()}
+          onCancel={onPreflightCancel}
+          onImport={onPreflightImport}
+          onTextNote={focusTextFallback}
+        />
+      ) : null}
+
+      {permissionBanner ? (
+        <MediaPermissionBanner
+          status={permissionBanner.status}
+          message={permissionBanner.message}
+          settingsHint={permissionCopy.settingsHint}
+          importLabel={permissionCopy.importInstead}
+          onImport={() => {
+            const fallback = permissionBanner.fallback;
+            setPermissionBanner(null);
+            if (fallback === "audio") {
+              audioImportRef.current?.click();
+              return;
+            }
+            imageRef.current?.click();
+          }}
+          textNoteLabel={permissionCopy.textNoteInstead}
+          onTextNote={focusTextFallback}
+          onDismiss={() => setPermissionBanner(null)}
+        />
+      ) : null}
 
       {processing || processingHint ? (
         <p

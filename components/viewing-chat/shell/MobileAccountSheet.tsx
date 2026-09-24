@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { LifeBuoy, LogIn, LogOut, X } from "lucide-react";
+import { LifeBuoy, LogIn, LogOut } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useI18n } from "@/components/I18nProvider";
+import { MobileSheet } from "@/components/viewing-chat/shell/MobileSheet";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 import { resetSyncEngineSingleton } from "@/lib/sync";
 import { setPersistenceAccountScope } from "@/lib/idb/draft-store";
@@ -61,43 +62,19 @@ export function MobileAccountSheet({
     };
   }, [open]);
 
-  if (!open) return null;
-
   return (
-    <div
-      className="fixed inset-0 z-[var(--z-modal)] md:hidden"
-      role="dialog"
-      aria-modal="true"
-      aria-label={messages.nav.signIn}
+    <MobileSheet
+      open={open}
+      onClose={onClose}
+      title={user?.email || messages.nav.signIn}
+      closeLabel={messages.chat.searchClose}
+      ariaLabel={messages.nav.signIn}
     >
-      <button
-        type="button"
-        className="absolute inset-0 bg-black/40"
-        aria-label={messages.chat.searchClose}
-        onClick={onClose}
-      />
-      <div
-        className="absolute inset-x-0 bottom-0 rounded-t-[24px] border border-black/8 bg-white p-4 shadow-2xl"
-        style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom, 0px))" }}
-      >
-        <div className="mb-3 flex items-center justify-between">
-          <p className="text-[15px] font-bold">
-            {user?.email || messages.nav.signIn}
-          </p>
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center rounded-full text-[#4B5563]"
-            aria-label={messages.chat.searchClose}
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
+      <div className="space-y-2 px-4 py-3">
         {!ready ? (
           <div className="h-11 animate-pulse rounded-2xl bg-[#EFEAE4]" />
         ) : (
-          <div className="space-y-2">
+          <>
             <LanguageSwitcher className="w-full" />
             <a
               href={supportMailto(locale, user?.email)}
@@ -134,9 +111,9 @@ export function MobileAccountSheet({
                 {messages.nav.signIn}
               </Link>
             )}
-          </div>
+          </>
         )}
       </div>
-    </div>
+    </MobileSheet>
   );
 }

@@ -39,7 +39,7 @@ export function MobileBottomNav({
   labels: MobileNavLabels;
   activeTab: MobileNavTabId | null;
   onSelect: (tab: MobileNavTabId) => void;
-  /** Hide while the soft keyboard is open so it cannot cover the composer. */
+  /** Hide while the soft keyboard is open, or in mobile chat focus mode. */
   hidden?: boolean;
 }) {
   if (hidden) return null;

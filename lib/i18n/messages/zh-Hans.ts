@@ -756,6 +756,8 @@ const zhHans: Messages = {
     mediaLibraryFailed: "媒体库操作失败",
     tabAccount: "账号",
     mobileNavLabel: "主要导航",
+    chatFocusBack: "返回",
+    chatFocusMore: "更多",
     composerPlaceholder: "记录现场观察、对话摘要…",
     send: "发送",
     recording: "录音中",

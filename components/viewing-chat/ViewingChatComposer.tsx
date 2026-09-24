@@ -83,6 +83,8 @@ export function ViewingChatComposer({
   onClearReply,
   onSubmit,
   mediaAdapter,
+  /** When bottom nav is hidden (chat focus), pad for the home indicator. */
+  edgeToBottom,
 }: {
   labels: ChatComposerLabels;
   permissionCopy: PermissionCopy;
@@ -105,6 +107,7 @@ export function ViewingChatComposer({
   }) => void | Promise<void>;
   /** Injectable for tests; defaults to browser MediaPermissionAdapter. */
   mediaAdapter?: MediaPermissionAdapter;
+  edgeToBottom?: boolean;
 }) {
   const cameraRef = useRef<HTMLInputElement>(null);
   const imageRef = useRef<HTMLInputElement>(null);
@@ -544,7 +547,13 @@ export function ViewingChatComposer({
   );
 
   return (
-    <div className="bg-transparent px-2.5 pb-1.5 pt-1.5 md:pb-[max(0.65rem,env(safe-area-inset-bottom))]">
+    <div
+      className={`bg-transparent px-2.5 pt-1.5 ${
+        edgeToBottom
+          ? "pb-[max(0.45rem,env(safe-area-inset-bottom))]"
+          : "pb-1.5 md:pb-[max(0.65rem,env(safe-area-inset-bottom))]"
+      }`}
+    >
       {replyTo ? (
         <div className="mb-1.5 flex items-start gap-2 rounded-2xl bg-[#EFF6FF] px-3 py-2">
           <div className="min-w-0 flex-1">

@@ -716,6 +716,10 @@ export type Messages = {
     tabAccount: string;
     /** Accessible name for the mobile bottom tab bar. */
     mobileNavLabel: string;
+    /** Leave chat focus mode / close a deep panel (mobile). */
+    chatFocusBack: string;
+    /** Overflow menu while in chat focus mode (mobile). */
+    chatFocusMore: string;
     composerPlaceholder: string;
     send: string;
     recording: string;

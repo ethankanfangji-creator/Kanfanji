@@ -1801,6 +1801,7 @@ export function ViewingChatApp() {
                     coordinatesLabel: t.address.coordinatesLabel,
                     openMap: t.address.openMap,
                     noCoordinates: t.address.noCoordinates,
+                    adminMismatchWarning: t.address.adminMismatchWarning,
                   }}
                   busy={addressLookingUp}
                   onConfirm={acceptPendingAddress}

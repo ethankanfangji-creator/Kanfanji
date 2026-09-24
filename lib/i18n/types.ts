@@ -163,6 +163,7 @@ export type Messages = {
     coordinatesLabel: string;
     openMap: string;
     noCoordinates: string;
+    adminMismatchWarning: string;
   };
   propertyBasics: {
     title: string;

@@ -170,6 +170,8 @@ const en: Messages = {
     coordinatesLabel: "Coordinates",
     openMap: "Open map",
     noCoordinates: "Not available",
+    adminMismatchWarning:
+      "Warning: the city/county in this result does not match what you typed — check carefully before confirming.",
   },
   propertyBasics: {
     title: "Property basics (AI)",

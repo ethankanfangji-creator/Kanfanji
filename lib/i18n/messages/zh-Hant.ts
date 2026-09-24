@@ -169,6 +169,8 @@ const zhHant: Messages = {
     coordinatesLabel: "座標",
     openMap: "開啟地圖",
     noCoordinates: "無法取得",
+    adminMismatchWarning:
+      "注意：此結果的縣市與你輸入的不一致（例如台北 vs 新北）— 確認前請仔細核對。",
   },
   propertyBasics: {
     title: "房源基本資訊（AI）",

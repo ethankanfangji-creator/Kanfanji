@@ -62,6 +62,7 @@ export type StepSetupMessages = {
     coordinatesLabel: string;
     openMap: string;
     noCoordinates: string;
+    adminMismatchWarning: string;
   };
   setup: {
     title: string;
@@ -152,6 +153,7 @@ export function StepSetup({
     coordinatesLabel: messages.address.coordinatesLabel,
     openMap: messages.address.openMap,
     noCoordinates: messages.address.noCoordinates,
+    adminMismatchWarning: messages.address.adminMismatchWarning,
   };
 
   async function handlePhotoMetaFile(file: File | undefined) {

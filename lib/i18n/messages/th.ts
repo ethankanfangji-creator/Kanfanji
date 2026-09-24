@@ -170,6 +170,8 @@ const th: Messages = {
     coordinatesLabel: "พิกัด",
     openMap: "เปิดแผนที่",
     noCoordinates: "ไม่มีข้อมูล",
+    adminMismatchWarning:
+      "คำเตือน: จังหวัด/เมืองในผลลัพธ์ไม่ตรงกับที่พิมพ์ — ตรวจให้ดีก่อนยืนยัน",
   },
   propertyBasics: {
     title: "ข้อมูลพื้นฐานบ้าน (AI)",

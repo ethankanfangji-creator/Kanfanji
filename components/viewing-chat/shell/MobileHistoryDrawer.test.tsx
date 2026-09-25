@@ -16,6 +16,19 @@ const labels = {
   pin: "Pin",
   unpin: "Unpin",
   delete: "Delete",
+  compareToggle: "Compare",
+  compareCancel: "Cancel",
+  compareSelectedCount: "Selected {n}/3",
+  compareOpen: "Compare ({n})",
+  compareMaxReached: "Up to 3",
+};
+
+const compareProps = {
+  compareMode: false,
+  selectedIds: [] as string[],
+  onToggleCompareMode: vi.fn(),
+  onToggleSelect: vi.fn(),
+  onOpenCompare: vi.fn(),
 };
 
 function thread(partial: Partial<ViewingChatThread> & { id: string }): ViewingChatThread {
@@ -46,6 +59,7 @@ describe("MobileHistoryDrawer", () => {
         onSelectThread={vi.fn()}
         onDeleteThread={vi.fn()}
         onTogglePinThread={vi.fn()}
+        {...compareProps}
         labels={labels}
       />,
     );
@@ -72,6 +86,7 @@ describe("MobileHistoryDrawer", () => {
         onSelectThread={vi.fn()}
         onDeleteThread={vi.fn()}
         onTogglePinThread={vi.fn()}
+        {...compareProps}
         labels={labels}
       />,
     );
@@ -97,6 +112,7 @@ describe("MobileHistoryDrawer", () => {
         onSelectThread={onSelectThread}
         onDeleteThread={vi.fn()}
         onTogglePinThread={vi.fn()}
+        {...compareProps}
         labels={labels}
       />,
     );
@@ -115,9 +131,73 @@ describe("MobileHistoryDrawer", () => {
         onSelectThread={vi.fn()}
         onDeleteThread={vi.fn()}
         onTogglePinThread={vi.fn()}
+        {...compareProps}
         labels={labels}
       />,
     );
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("checks rows in compare mode without opening the thread", async () => {
+    const user = userEvent.setup();
+    const onSelectThread = vi.fn();
+    const onToggleSelect = vi.fn();
+    render(
+      <MobileHistoryDrawer
+        open
+        threads={[
+          thread({ id: "a", address: "Alpha Road" }),
+          thread({ id: "b", address: "Beta Road" }),
+        ]}
+        activeId={null}
+        onClose={vi.fn()}
+        onSelectThread={onSelectThread}
+        onDeleteThread={vi.fn()}
+        onTogglePinThread={vi.fn()}
+        compareMode
+        selectedIds={["a"]}
+        onToggleCompareMode={vi.fn()}
+        onToggleSelect={onToggleSelect}
+        onOpenCompare={vi.fn()}
+        labels={labels}
+      />,
+    );
+
+    await user.click(screen.getByRole("checkbox", { name: /Beta Road/i }));
+    expect(onSelectThread).not.toHaveBeenCalled();
+    expect(onToggleSelect).toHaveBeenCalledWith("b");
+    expect(screen.queryByRole("button", { name: "Pin" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Compare (1)" })).toBeDisabled();
+  });
+
+  it("does not select a fourth row and shows the limit once", async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    const onToggleSelect = vi.fn();
+    render(
+      <MobileHistoryDrawer
+        open
+        threads={["a", "b", "c", "d"].map((id) =>
+          thread({ id, address: `Home ${id}` }),
+        )}
+        activeId={null}
+        onClose={vi.fn()}
+        onSelectThread={vi.fn()}
+        onDeleteThread={vi.fn()}
+        onTogglePinThread={vi.fn()}
+        compareMode
+        selectedIds={["a", "b", "c"]}
+        onToggleCompareMode={vi.fn()}
+        onToggleSelect={onToggleSelect}
+        onOpenCompare={vi.fn()}
+        labels={labels}
+      />,
+    );
+
+    const fourth = screen.getByRole("checkbox", { name: /Home d/i });
+    expect(fourth).toHaveAttribute("aria-disabled", "true");
+    await user.click(fourth);
+    expect(onToggleSelect).not.toHaveBeenCalled();
+    expect(screen.getByRole("status").textContent).toBe("Up to 3");
   });
 });

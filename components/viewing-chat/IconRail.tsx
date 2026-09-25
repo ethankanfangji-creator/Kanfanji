@@ -8,6 +8,7 @@ import {
   LifeBuoy,
   LogIn,
   LogOut,
+  Check,
   PanelLeft,
   Pin,
   Plus,
@@ -23,6 +24,9 @@ import { resetSyncEngineSingleton } from "@/lib/sync";
 import { setPersistenceAccountScope } from "@/lib/idb/draft-store";
 import type { ViewingChatThread } from "@/lib/viewing-chat/types";
 import { shortenAddressLabel } from "@/lib/shorten-address";
+import { formatMessage } from "@/lib/i18n";
+import { COMPARE_LITE_MAX } from "@/lib/comparison/from-thread";
+import { CompareSelectionBar } from "@/components/viewing-chat/shell/CompareSelectionBar";
 
 function supportMailto(locale: string, email?: string | null): string {
   const to =
@@ -106,6 +110,11 @@ export function IconRail({
   onSelectThread,
   onDeleteThread,
   onTogglePinThread,
+  compareMode,
+  selectedIds,
+  onToggleCompareMode,
+  onToggleSelect,
+  onOpenCompare,
 }: {
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
@@ -119,12 +128,23 @@ export function IconRail({
   onSelectThread: (id: string) => void;
   onDeleteThread: (id: string) => void;
   onTogglePinThread: (id: string) => void;
+  compareMode: boolean;
+  selectedIds: string[];
+  onToggleCompareMode: () => void;
+  onToggleSelect: (id: string) => void;
+  onOpenCompare: () => void;
 }) {
   const { messages, locale } = useI18n();
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(() => !isSupabaseConfigured());
   const [profileOpen, setProfileOpen] = useState(false);
+  const [maxHintShown, setMaxHintShown] = useState(false);
+  const [seenCompareMode, setSeenCompareMode] = useState(compareMode);
+  if (compareMode !== seenCompareMode) {
+    setSeenCompareMode(compareMode);
+    setMaxHintShown(false);
+  }
   const profileRef = useRef<HTMLDivElement>(null);
   const expanded = sidebarOpen;
   const recent = threads.slice(0, 20);
@@ -207,9 +227,27 @@ export function IconRail({
 
       {expanded ? (
         <div className="mt-2 flex min-h-0 flex-1 flex-col border-t border-black/8 pt-2">
-          <p className="shrink-0 px-3 pb-1.5 text-[12px] font-bold text-[#6B7280]">
-            {messages.chat.historyTitle}
-          </p>
+          <div className="flex shrink-0 items-center justify-between gap-2 px-3 pb-1.5">
+            <p className="text-[12px] font-bold text-[#6B7280]">
+              {messages.chat.historyTitle}
+            </p>
+            {threads.length >= 2 ? (
+              <button
+                type="button"
+                onClick={onToggleCompareMode}
+                className="inline-flex min-h-[var(--touch-target)] items-center rounded-full border border-black/10 px-2.5 text-[12px] font-bold"
+              >
+                {compareMode
+                  ? messages.compareLite.compareCancel
+                  : messages.compareLite.compareToggle}
+              </button>
+            ) : null}
+          </div>
+          {compareMode && maxHintShown ? (
+            <p className="px-3 pb-1 text-[12px] font-semibold text-[#92400E]" role="status">
+              {messages.compareLite.compareMaxReached}
+            </p>
+          ) : null}
           <ul className="min-h-0 flex-1 overflow-y-auto">
             {recent.length === 0 ? (
               <li className="px-3 py-6 text-center text-[12px] text-[#6B7280]">
@@ -218,6 +256,9 @@ export function IconRail({
             ) : (
               recent.map((thread) => {
                 const active = thread.id === activeId;
+                const selected = selectedIds.includes(thread.id);
+                const locked =
+                  compareMode && !selected && selectedIds.length >= COMPARE_LITE_MAX;
                 const preview =
                   [...thread.messages]
                     .reverse()
@@ -225,14 +266,40 @@ export function IconRail({
                   [...thread.messages].reverse().find((m) => m.text)?.text ||
                   "";
                 return (
-                  <li key={thread.id} className="group relative">
+                  <li key={thread.id} className={`group relative ${locked ? "opacity-40" : ""}`}>
                     <button
                       type="button"
-                      onClick={() => onSelectThread(thread.id)}
-                      className={`w-full rounded-xl py-2.5 pl-3 pr-16 text-left ${
-                        active ? "bg-[#EFF6FF]" : "hover:bg-[#FAF6F1]"
-                      }`}
+                      role={compareMode ? "checkbox" : undefined}
+                      aria-checked={compareMode ? selected : undefined}
+                      aria-disabled={locked || undefined}
+                      onClick={() => {
+                        if (!compareMode) {
+                          onSelectThread(thread.id);
+                          return;
+                        }
+                        if (locked) {
+                          setMaxHintShown(true);
+                          return;
+                        }
+                        onToggleSelect(thread.id);
+                      }}
+                      className={`flex w-full items-start gap-2 rounded-xl py-2.5 pl-3 text-left ${
+                        compareMode ? "pr-3" : "pr-16"
+                      } ${!compareMode && active ? "bg-[#EFF6FF]" : "hover:bg-[#FAF6F1]"}`}
                     >
+                      {compareMode ? (
+                        <span
+                          className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${
+                            selected
+                              ? "border-black bg-black text-white"
+                              : "border-black/20 bg-white"
+                          }`}
+                          aria-hidden
+                        >
+                          {selected ? <Check className="h-3.5 w-3.5" /> : null}
+                        </span>
+                      ) : null}
+                      <span className="min-w-0 flex-1">
                       <p className="flex items-center gap-1 truncate text-[13px] font-bold text-[#1A1A1A]">
                         {thread.pinned ? (
                           <Pin
@@ -254,7 +321,9 @@ export function IconRail({
                       <p className="mt-1 text-[10px] text-[#9CA3AF]">
                         {new Date(thread.updatedAt).toLocaleString()}
                       </p>
+                      </span>
                     </button>
+                    {compareMode ? null : (
                     <div className="absolute right-1 top-2 flex items-center gap-0.5">
                       <button
                         type="button"
@@ -295,11 +364,24 @@ export function IconRail({
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
+                    )}
                   </li>
                 );
               })
             )}
           </ul>
+          {compareMode ? (
+            <CompareSelectionBar
+              selectedText={formatMessage(messages.compareLite.compareSelectedCount, {
+                n: selectedIds.length,
+              })}
+              openText={formatMessage(messages.compareLite.compareOpen, {
+                n: selectedIds.length,
+              })}
+              disabled={selectedIds.length < 2}
+              onOpen={onOpenCompare}
+            />
+          ) : null}
         </div>
       ) : null}
 

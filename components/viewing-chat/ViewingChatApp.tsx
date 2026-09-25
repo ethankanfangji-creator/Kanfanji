@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronDown, ChevronLeft, ChevronUp, Clipboard, MoreHorizontal, Search, Sparkles, X } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AddressAutocomplete } from "@/components/viewing-wizard/AddressAutocomplete";
 import { AddressConfirmationCard } from "@/components/viewing-wizard/AddressConfirmationCard";
@@ -32,6 +33,7 @@ import {
   type AddressConfirmationCandidate,
   type AddressLookupPayloadLike,
 } from "@/lib/address-confirmation";
+import { COMPARE_LITE_MAX } from "@/lib/comparison/from-thread";
 import { shortenAddressLabel } from "@/lib/shorten-address";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 import {
@@ -115,6 +117,7 @@ function isTextEditingTarget(target: EventTarget | null): boolean {
 export function ViewingChatApp() {
   const { messages: t, locale } = useI18n();
   const c = t.chat;
+  const router = useRouter();
   const configured = isSupabaseConfigured();
   const shellRef = useRef<HTMLDivElement>(null);
 
@@ -137,6 +140,8 @@ export function ViewingChatApp() {
   const photoInputRef = useRef<HTMLInputElement>(null);
   const hoaDocInputRef = useRef<HTMLInputElement>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [compareMode, setCompareMode] = useState(false);
+  const [compareSelectedIds, setCompareSelectedIds] = useState<string[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [mediaOpen, setMediaOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -1244,7 +1249,41 @@ export function ViewingChatApp() {
     if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
       setHistoryOpen(false);
       setMobileNavTab(null);
+      leaveCompareMode();
     }
+  }
+
+  function leaveCompareMode() {
+    setCompareMode(false);
+    setCompareSelectedIds([]);
+  }
+
+  function toggleCompareMode() {
+    setCompareMode((on) => {
+      if (on) setCompareSelectedIds([]);
+      return !on;
+    });
+  }
+
+  function toggleCompareSelect(id: string) {
+    setCompareSelectedIds((prev) => {
+      if (prev.includes(id)) return prev.filter((item) => item !== id);
+      if (prev.length >= COMPARE_LITE_MAX) return prev;
+      return [...prev, id];
+    });
+  }
+
+  function openCompare() {
+    if (compareSelectedIds.length < 2) return;
+    router.push(
+      `/compare?ids=${compareSelectedIds.map((id) => encodeURIComponent(id)).join(",")}`,
+    );
+  }
+
+  function closeHistoryDrawer() {
+    setHistoryOpen(false);
+    setMobileNavTab(null);
+    leaveCompareMode();
   }
 
   function deleteThread(id: string) {
@@ -1300,6 +1339,11 @@ export function ViewingChatApp() {
         onSelectThread={selectThread}
         onDeleteThread={deleteThread}
         onTogglePinThread={togglePinThread}
+        compareMode={compareMode}
+        selectedIds={compareSelectedIds}
+        onToggleCompareMode={toggleCompareMode}
+        onToggleSelect={toggleCompareSelect}
+        onOpenCompare={openCompare}
       />
 
       <section className="mx-auto flex min-h-0 min-w-0 max-w-[1200px] flex-1 flex-col">
@@ -2035,13 +2079,15 @@ export function ViewingChatApp() {
         open={historyOpen && isMobileViewport}
         threads={threads}
         activeId={activeId}
-        onClose={() => {
-          setHistoryOpen(false);
-          setMobileNavTab(null);
-        }}
+        onClose={closeHistoryDrawer}
         onSelectThread={selectThread}
         onDeleteThread={deleteThread}
         onTogglePinThread={togglePinThread}
+        compareMode={compareMode}
+        selectedIds={compareSelectedIds}
+        onToggleCompareMode={toggleCompareMode}
+        onToggleSelect={toggleCompareSelect}
+        onOpenCompare={openCompare}
         onStartNew={() => {
           closeMobileOverlays();
           setMobileNavTab("new");
@@ -2057,6 +2103,11 @@ export function ViewingChatApp() {
           unpin: c.unpinHistory,
           delete: c.deleteHistory,
           startNew: c.startNewViewing,
+          compareToggle: t.compareLite.compareToggle,
+          compareCancel: t.compareLite.compareCancel,
+          compareSelectedCount: t.compareLite.compareSelectedCount,
+          compareOpen: t.compareLite.compareOpen,
+          compareMaxReached: t.compareLite.compareMaxReached,
         }}
       />
 

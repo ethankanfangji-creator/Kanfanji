@@ -8,7 +8,7 @@ export type {
   ComparisonDraft,
   ComparisonShareSnapshot,
 } from "./types";
-export { COMPARE_MAX, COMPARE_MIN } from "./types";
+export { COMPARE_MAX, COMPARE_MIN, COMPARE_SHARE_ENABLED } from "./types";
 export {
   displayOrEmpty,
   listOrEmpty,

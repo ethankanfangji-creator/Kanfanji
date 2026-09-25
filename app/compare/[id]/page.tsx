@@ -16,6 +16,7 @@ import { ComparisonBoard } from "@/components/comparison/ComparisonBoard";
 import { useI18n } from "@/components/I18nProvider";
 import { PageContainer } from "@/components/ui/primitives";
 import {
+  COMPARE_SHARE_ENABLED,
   getComparison,
   putComparison,
   putComparisonShare,
@@ -186,17 +187,19 @@ export default function ComparePage({
             {editing ? <Check className="w-3.5 h-3.5" /> : <Pencil className="w-3.5 h-3.5" />}
             {editing ? labels.doneEdit : labels.edit}
           </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void onShare()}
-            className="h-9 px-3 rounded-full text-[11px] font-bold bg-black text-white inline-flex items-center gap-1 disabled:opacity-50"
-          >
-            <Share2 className="w-3.5 h-3.5" /> {labels.share}
-          </button>
+          {COMPARE_SHARE_ENABLED ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void onShare()}
+              className="h-9 px-3 rounded-full text-[11px] font-bold bg-black text-white inline-flex items-center gap-1 disabled:opacity-50"
+            >
+              <Share2 className="w-3.5 h-3.5" /> {labels.share}
+            </button>
+          ) : null}
         </div>
 
-        {shareUrl ? (
+        {COMPARE_SHARE_ENABLED && shareUrl ? (
           <div
             role="status"
             aria-live="polite"

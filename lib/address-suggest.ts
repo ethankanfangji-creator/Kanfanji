@@ -2,6 +2,8 @@ export type AddressSuggestion = {
   id: string;
   /** Full address committed when the user picks this row. */
   label: string;
+  /** Canonical display from the same place id (not a second text search). */
+  formatted?: string;
   /** Short first line in the dropdown (street). Falls back to `label`. */
   title?: string;
   /** Optional second line (city / region). Omit when it only repeats `title`. */
@@ -12,22 +14,35 @@ export type AddressSuggestion = {
   province?: string;
   country?: string;
   score?: number;
-  source: "bc_geocoder" | "nominatim" | "google";
+  source: "bc_geocoder" | "nominatim" | "google" | "photon";
 };
+
+/** Metro Vancouver centre — open-house autocomplete bias, not a text re-geocode. */
+export const METRO_VANCOUVER_BIAS = {
+  latitude: 49.28,
+  longitude: -122.91,
+  radiusMeters: 45_000,
+} as const;
+
+/**
+ * Keep British Columbia rows. Drops US lookalikes (Illinois, California, Kentucky).
+ */
+export function isBritishColumbiaAddress(parts: {
+  label?: string;
+  formatted?: string;
+  secondary?: string;
+  province?: string;
+  country?: string;
+}): boolean {
+  const hay = [parts.province, parts.country, parts.formatted, parts.label, parts.secondary]
+    .filter(Boolean)
+    .join(" ");
+  if (/\b(Illinois|Kentucky|California)\b/i.test(hay)) return false;
+  if (/\b(USA|United States)\b/i.test(hay)) return false;
+  return /\b(BC|B\.C\.|British Columbia)\b/i.test(hay);
+}
 
 export type SuggestRegion = "CA" | "US" | "TW" | "OTHER";
-
-type BcFeature = {
-  geometry?: { coordinates?: [number, number] };
-  properties?: {
-    fullAddress?: string;
-    score?: number;
-    localityName?: string;
-    provinceCode?: string;
-    streetName?: string;
-    streetNumber?: string;
-  };
-};
 
 type NominatimResult = {
   place_id?: number;
@@ -254,84 +269,51 @@ export function isReasonableGoogleAutocomplete(
  */
 export async function suggestAddresses(
   query: string,
-  options?: { limit?: number },
+  options?: { limit?: number; signal?: AbortSignal },
 ): Promise<AddressSuggestion[]> {
   const trimmed = query.trim();
   if (trimmed.length < 3) return [];
+  if (options?.signal?.aborted) return [];
 
   const limit = Math.min(Math.max(options?.limit ?? 5, 1), 8);
   const region = detectSuggestRegion(trimmed);
+  const signal = options?.signal;
 
-  if (region === "CA") {
-    const bc = await suggestViaBc(trimmed, limit);
-    if (bc.length > 0) return bc;
+  // Taiwan stays on its own Google/Nominatim ranking — no Metro Vancouver bias.
+  if (region === "TW") {
+    if (googleKey()) {
+      const google = await suggestViaGoogleAutocomplete(trimmed, limit, region, signal);
+      if (isReasonableGoogleAutocomplete(trimmed, google, region)) return google;
+
+      const geocode = await suggestViaGoogleGeocode(trimmed, limit, region, signal);
+      if (geocode.length > 0) return geocode;
+    }
+    return suggestViaNominatim(trimmed, limit, region, signal);
   }
 
-  if (region === "TW" && googleKey()) {
-    const google = await suggestViaGoogleAutocomplete(trimmed, limit, region);
-    if (isReasonableGoogleAutocomplete(trimmed, google, region)) return google;
+  if (region === "US") {
+    const google = await suggestViaGoogleAutocomplete(trimmed, limit, region, signal);
+    if (google.length > 0) return google;
 
-    const geocode = await suggestViaGoogleGeocode(trimmed, limit, region);
-    if (geocode.length > 0) return geocode;
+    const osm = await suggestViaNominatim(trimmed, limit, region, signal);
+    if (osm.length > 0) return osm;
 
-    return suggestViaNominatim(trimmed, limit, region);
+    return suggestViaGoogleGeocode(trimmed, limit, region, signal);
   }
 
-  const google = await suggestViaGoogleAutocomplete(trimmed, limit, region);
-  if (google.length > 0) return google;
+  // CA and untagged open-house queries: one-shot Metro Vancouver list.
+  // Selecting a row is the object — never a follow-up label geocode.
+  const places = await suggestViaPlacesNewCa(trimmed, limit, signal);
+  if (places.length > 0) return places;
 
-  const osm = await suggestViaNominatim(trimmed, limit, region);
-  if (osm.length > 0) return osm;
-
-  // Full-string geocode as last resort (helps complete US street+ZIP queries)
-  return suggestViaGoogleGeocode(trimmed, limit, region);
-}
-
-async function suggestViaBc(query: string, limit: number): Promise<AddressSuggestion[]> {
-  const url = new URL("https://geocoder.api.gov.bc.ca/addresses.json");
-  url.searchParams.set("addressString", query);
-  url.searchParams.set("maxResults", String(limit));
-  url.searchParams.set("minScore", "40");
-  url.searchParams.set("autoComplete", "true");
-  url.searchParams.set("outputSRS", "4326");
-
-  const res = await fetch(url, {
-    headers: { Accept: "application/json" },
-    next: { revalidate: 0 },
-  });
-  if (!res.ok) return [];
-
-  const data = (await res.json()) as { features?: BcFeature[] };
-  const out: AddressSuggestion[] = [];
-  for (const [index, feature] of (data.features ?? []).entries()) {
-    const props = feature.properties;
-    const [lng, lat] = feature.geometry?.coordinates ?? [];
-    if (!props?.fullAddress) continue;
-    out.push({
-      id: `bc:${props.fullAddress}:${index}`,
-      label: props.fullAddress,
-      title:
-        [props.streetNumber, props.streetName].filter(Boolean).join(" ") ||
-        props.fullAddress,
-      secondary: [props.localityName, props.provinceCode || "BC"]
-        .filter(Boolean)
-        .join(", "),
-      lat: Number.isFinite(lat) ? lat : undefined,
-      lng: Number.isFinite(lng) ? lng : undefined,
-      city: props.localityName,
-      province: props.provinceCode || "BC",
-      country: "Canada",
-      score: props.score,
-      source: "bc_geocoder",
-    });
-  }
-  return out;
+  return suggestViaPhotonCa(trimmed, limit, signal);
 }
 
 async function suggestViaNominatim(
   query: string,
   limit: number,
   region: SuggestRegion,
+  signal?: AbortSignal,
 ): Promise<AddressSuggestion[]> {
   const url = new URL("https://nominatim.openstreetmap.org/search");
   url.searchParams.set("q", query);
@@ -344,6 +326,7 @@ async function suggestViaNominatim(
   if (region === "TW") url.searchParams.set("countrycodes", "tw");
 
   const res = await fetch(url, {
+    signal,
     headers: {
       Accept: "application/json",
       "User-Agent": USER_AGENT,
@@ -381,6 +364,7 @@ async function suggestViaGoogleAutocomplete(
   query: string,
   limit: number,
   region: SuggestRegion,
+  signal?: AbortSignal,
 ): Promise<AddressSuggestion[]> {
   const key = googleKey();
   if (!key) return [];
@@ -394,7 +378,7 @@ async function suggestViaGoogleAutocomplete(
     if (region === "CA") url.searchParams.set("components", "country:ca");
     if (region === "TW") url.searchParams.set("components", "country:tw");
 
-    const res = await fetch(url.toString(), { next: { revalidate: 0 } });
+    const res = await fetch(url.toString(), { signal, next: { revalidate: 0 } });
     if (!res.ok) return [];
     const data = (await res.json()) as {
       status?: string;
@@ -434,6 +418,7 @@ async function suggestViaGoogleGeocode(
   query: string,
   limit: number,
   region: SuggestRegion,
+  signal?: AbortSignal,
 ): Promise<AddressSuggestion[]> {
   const key = googleKey();
   if (!key) return [];
@@ -446,7 +431,7 @@ async function suggestViaGoogleGeocode(
     if (region === "CA") url.searchParams.set("components", "country:CA");
     if (region === "TW") url.searchParams.set("components", "country:TW");
 
-    const res = await fetch(url.toString(), { next: { revalidate: 0 } });
+    const res = await fetch(url.toString(), { signal, next: { revalidate: 0 } });
     if (!res.ok) return [];
     const data = (await res.json()) as {
       status?: string;
@@ -493,6 +478,202 @@ async function suggestViaGoogleGeocode(
           source: "google" as const,
         };
       });
+  } catch {
+    return [];
+  }
+}
+
+type PlacePrediction = {
+  placeId?: string;
+  text?: { text?: string };
+  structuredFormat?: {
+    mainText?: { text?: string };
+    secondaryText?: { text?: string };
+  };
+};
+
+/**
+ * Places Autocomplete (New) biased to Metro Vancouver, then Place Details
+ * for the same place id so lat/lng/formatted are the selection itself.
+ */
+async function suggestViaPlacesNewCa(
+  query: string,
+  limit: number,
+  signal?: AbortSignal,
+): Promise<AddressSuggestion[]> {
+  const key = googleKey();
+  if (!key) return [];
+
+  try {
+    const res = await fetch("https://places.googleapis.com/v1/places:autocomplete", {
+      method: "POST",
+      signal,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": key,
+        "X-Goog-FieldMask":
+          "suggestions.placePrediction.placeId,suggestions.placePrediction.text,suggestions.placePrediction.structuredFormat",
+      },
+      body: JSON.stringify({
+        input: query,
+        includedRegionCodes: ["ca"],
+        locationBias: {
+          circle: {
+            center: {
+              latitude: METRO_VANCOUVER_BIAS.latitude,
+              longitude: METRO_VANCOUVER_BIAS.longitude,
+            },
+            radius: METRO_VANCOUVER_BIAS.radiusMeters,
+          },
+        },
+      }),
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as {
+      suggestions?: Array<{ placePrediction?: PlacePrediction }>;
+    };
+    const predictions = (data.suggestions ?? [])
+      .map((row) => row.placePrediction)
+      .filter((row): row is PlacePrediction => Boolean(row?.placeId && row?.text?.text))
+      .slice(0, limit);
+
+    const detailed = await Promise.all(
+      predictions.map((prediction) => placeDetailsSuggestion(prediction, key, signal)),
+    );
+    return detailed.filter((row): row is AddressSuggestion => row != null).slice(0, limit);
+  } catch {
+    return [];
+  }
+}
+
+async function placeDetailsSuggestion(
+  prediction: PlacePrediction,
+  key: string,
+  signal?: AbortSignal,
+): Promise<AddressSuggestion | null> {
+  const placeId = prediction.placeId;
+  if (!placeId) return null;
+  try {
+    const res = await fetch(
+      `https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`,
+      {
+        signal,
+        headers: {
+          "X-Goog-Api-Key": key,
+          "X-Goog-FieldMask": "id,formattedAddress,location,addressComponents",
+        },
+      },
+    );
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      id?: string;
+      formattedAddress?: string;
+      location?: { latitude?: number; longitude?: number };
+      addressComponents?: Array<{
+        longText?: string;
+        shortText?: string;
+        types?: string[];
+      }>;
+    };
+    const lat = data.location?.latitude;
+    const lng = data.location?.longitude;
+    if (typeof lat !== "number" || typeof lng !== "number") return null;
+    const pick = (type: string, short = false) => {
+      const comp = data.addressComponents?.find((c) => c.types?.includes(type));
+      return short ? comp?.shortText : comp?.longText;
+    };
+    const formatted =
+      data.formattedAddress?.trim() || prediction.text?.text?.trim() || "";
+    if (!formatted) return null;
+    const province = pick("administrative_area_level_1", true);
+    const city = pick("locality") || pick("postal_town") || pick("sublocality");
+    const country = pick("country");
+    const main = prediction.structuredFormat?.mainText?.text?.trim();
+    const secondary = prediction.structuredFormat?.secondaryText?.text?.trim();
+    const row: AddressSuggestion = {
+      id: `gplace:${data.id || placeId}`,
+      label: formatted,
+      formatted,
+      title: main || formatted,
+      secondary: secondary && secondary !== main ? secondary : undefined,
+      lat,
+      lng,
+      city: city || undefined,
+      province: province || undefined,
+      country: country || undefined,
+      source: "google",
+    };
+    if (!isBritishColumbiaAddress(row)) return null;
+    return row;
+  } catch {
+    return null;
+  }
+}
+
+type PhotonFeature = {
+  geometry?: { coordinates?: [number, number] };
+  properties?: {
+    osm_id?: number;
+    housenumber?: string;
+    street?: string;
+    name?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+    countrycode?: string;
+  };
+};
+
+/** Photon fallback when Places is unavailable. Still Metro Vancouver biased; no Nominatim. */
+async function suggestViaPhotonCa(
+  query: string,
+  limit: number,
+  signal?: AbortSignal,
+): Promise<AddressSuggestion[]> {
+  try {
+    const url = new URL("https://photon.komoot.io/api/");
+    url.searchParams.set("q", query);
+    url.searchParams.set("lat", String(METRO_VANCOUVER_BIAS.latitude));
+    url.searchParams.set("lon", String(METRO_VANCOUVER_BIAS.longitude));
+    url.searchParams.set("limit", String(Math.min(limit + 4, 10)));
+    const res = await fetch(url, {
+      signal,
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as { features?: PhotonFeature[] };
+    const out: AddressSuggestion[] = [];
+    for (const feature of data.features ?? []) {
+      const props = feature.properties;
+      const [lng, lat] = feature.geometry?.coordinates ?? [];
+      if (typeof lat !== "number" || typeof lng !== "number") continue;
+      if ((props?.countrycode ?? "").toLowerCase() !== "ca") continue;
+      const title =
+        [props?.housenumber, props?.street].filter(Boolean).join(" ") ||
+        props?.name ||
+        "";
+      const formatted = [title, props?.city, props?.state, props?.country]
+        .filter(Boolean)
+        .join(", ");
+      if (!formatted) continue;
+      const row: AddressSuggestion = {
+        id: `photon:${props?.osm_id ?? formatted}`,
+        label: formatted,
+        formatted,
+        title: title || formatted,
+        secondary: [props?.city, props?.state].filter(Boolean).join(", ") || undefined,
+        lat,
+        lng,
+        city: props?.city,
+        province: props?.state,
+        country: props?.country,
+        source: "photon",
+      };
+      if (!isBritishColumbiaAddress(row)) continue;
+      out.push(row);
+      if (out.length >= limit) break;
+    }
+    return out;
   } catch {
     return [];
   }

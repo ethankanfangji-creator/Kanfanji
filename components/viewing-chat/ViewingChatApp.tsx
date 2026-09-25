@@ -28,7 +28,7 @@ import {
 } from "@/lib/ai-boundary/map-ai-error-ui";
 import type { AddressSuggestion } from "@/lib/address-suggest";
 import {
-  buildAddressConfirmationCandidate,
+  candidateFromSuggestion,
   type AddressConfirmationCandidate,
   type AddressLookupPayloadLike,
 } from "@/lib/address-confirmation";
@@ -126,7 +126,6 @@ export function ViewingChatApp() {
     candidate: AddressConfirmationCandidate;
     payload: AddressLookupPayloadLike;
   } | null>(null);
-  const [addressLookingUp, setAddressLookingUp] = useState(false);
   const [busy, setBusy] = useState(false);
   const [sourceBusy, setSourceBusy] = useState(false);
   const [conflicts, setConflicts] = useState<FieldConflict[]>([]);
@@ -432,43 +431,6 @@ export function ViewingChatApp() {
     void enrichAddressIntel(thread.id, trimmed, seedRecord);
   }
 
-  /**
-   * Lookup → confirmation card. Viewing is not bound until the user accepts.
-   * Failed lookup shows an error and does not clear an existing thread.
-   */
-  async function lookupAddressForConfirmation(label: string) {
-    const trimmed = label.trim();
-    if (!trimmed) {
-      setStatus(c.needAddress);
-      return;
-    }
-    setAddressLookingUp(true);
-    setStatus(t.address.lookingUp);
-    setPendingAddressConfirm(null);
-    try {
-      const response = await fetch("/api/lookup-address", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address: trimmed }),
-      });
-      const payload = (await response.json()) as AddressLookupPayloadLike;
-      if (!response.ok) {
-        throw new Error(payload.error || t.address.suggestError);
-      }
-      const candidate = buildAddressConfirmationCandidate(payload, trimmed);
-      if (!candidate) {
-        throw new Error(t.address.suggestError);
-      }
-      setPendingAddressConfirm({ queryAddress: trimmed, candidate, payload });
-      setAddressDraft(candidate.displayAddress);
-      setStatus("");
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : t.address.suggestError);
-    } finally {
-      setAddressLookingUp(false);
-    }
-  }
-
   function acceptPendingAddress() {
     if (!pendingAddressConfirm) return;
     const { candidate } = pendingAddressConfirm;
@@ -481,10 +443,6 @@ export function ViewingChatApp() {
     setPendingAddressConfirm(null);
     setAddressDraft(query);
     setStatus("");
-  }
-
-  async function confirmAddress(label: string) {
-    await lookupAddressForConfirmation(label);
   }
 
   function fieldIdToAgenda(fieldId: PropertyFieldId | undefined): string | null {
@@ -850,7 +808,30 @@ export function ViewingChatApp() {
   }
 
   function onSelectSuggestion(suggestion: AddressSuggestion) {
-    void confirmAddress(suggestion.label);
+    const candidate = candidateFromSuggestion(suggestion, suggestion.label);
+    if (!candidate) {
+      setStatus(t.address.suggestError);
+      return;
+    }
+    setPendingAddressConfirm({
+      queryAddress: suggestion.label,
+      candidate,
+      payload: {
+        displayAddress: candidate.displayAddress,
+        propertyId: candidate.propertyId ?? undefined,
+        market: candidate.market ?? undefined,
+        source: candidate.source ?? undefined,
+        details: { lat: candidate.lat, lng: candidate.lng },
+      },
+    });
+    setAddressDraft(candidate.displayAddress);
+    setStatus("");
+  }
+
+  function onCommitAddressDraft(label: string) {
+    const trimmed = label.trim();
+    if (!trimmed) return;
+    setStatus(t.address.suggestEmpty);
   }
 
   async function submitTurn(payload: {
@@ -1986,7 +1967,7 @@ export function ViewingChatApp() {
                     noCoordinates: t.address.noCoordinates,
                     adminMismatchWarning: t.address.adminMismatchWarning,
                   }}
-                  busy={addressLookingUp}
+                  busy={false}
                   onConfirm={acceptPendingAddress}
                   onReject={rejectPendingAddress}
                 />
@@ -1998,8 +1979,7 @@ export function ViewingChatApp() {
                     setAddressDraft(value);
                   }}
                   onSelect={onSelectSuggestion}
-                  onCommit={(label) => void confirmAddress(label)}
-                  disabled={addressLookingUp}
+                  onCommit={onCommitAddressDraft}
                   copy={{
                     placeholder: c.addressPlaceholder,
                     loading: t.address.suggestLoading,
@@ -2010,11 +1990,7 @@ export function ViewingChatApp() {
                   }}
                 />
               )}
-              {addressLookingUp ? (
-                <p className="text-center text-[12px] text-[#6B7280]" role="status">
-                  {t.address.lookingUp}
-                </p>
-              ) : status ? (
+              {status ? (
                 <p
                   className="text-center text-[12px] font-semibold text-[#92400E]"
                   role="status"

@@ -19,7 +19,7 @@ export function createServerAddressService(): AddressService {
         err.name = "AbortError";
         throw err;
       }
-      return suggestAddresses(query, { limit: 5 });
+      return suggestAddresses(query, { limit: 5, signal });
     },
     async lookupByAddress(address, signal) {
       if (signal?.aborted) {

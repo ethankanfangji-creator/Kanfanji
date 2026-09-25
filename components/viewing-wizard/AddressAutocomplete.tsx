@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { Loader2, MapPin, Search } from "lucide-react";
+import { useLocale } from "@/components/I18nProvider";
 import type { AddressSuggestion } from "@/lib/address-suggest";
 
 export type AddressAutocompleteCopy = {
@@ -40,6 +41,7 @@ export function AddressAutocomplete({
   confirmed?: boolean;
 }) {
   const listId = useId();
+  const locale = useLocale();
   const inputRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
@@ -59,9 +61,12 @@ export function AddressAutocomplete({
       const requestId = ++requestIdRef.current;
       setSuggest({ status: "loading" });
       setOpen(true);
-      void fetch(`/api/address-suggest?q=${encodeURIComponent(q)}`, {
-        signal: controller.signal,
-      })
+      void fetch(
+        `/api/address-suggest?q=${encodeURIComponent(q)}&locale=${encodeURIComponent(locale)}`,
+        {
+          signal: controller.signal,
+        },
+      )
         .then(async (response) => {
           if (requestId !== requestIdRef.current) return;
           if (!response.ok) {
@@ -88,7 +93,7 @@ export function AddressAutocomplete({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [value, confirmed, copy.error]);
+  }, [value, confirmed, copy.error, locale]);
 
   const items = suggest.status === "ready" ? suggest.items : [];
 

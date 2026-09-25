@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isLocale } from "@/lib/i18n/config";
 import { createServerAddressService } from "@/lib/services/address/server-adapter";
 
 export const runtime = "nodejs";
@@ -13,9 +14,12 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Query too long", code: "query_too_long" }, { status: 400 });
   }
 
+  const localeParam = searchParams.get("locale");
+  const locale = isLocale(localeParam) ? localeParam : undefined;
+
   try {
     const address = createServerAddressService();
-    const suggestions = await address.suggest(q, request.signal);
+    const suggestions = await address.suggest(q, request.signal, locale);
     return NextResponse.json({ suggestions });
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {

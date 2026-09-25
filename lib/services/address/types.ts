@@ -10,7 +10,7 @@ export type AddressServiceStatus = "ready" | "degraded" | "unconfigured" | "erro
 
 export type AddressService = {
   status(): AddressServiceStatus;
-  suggest(query: string, signal?: AbortSignal): Promise<AddressSuggestion[]>;
+  suggest(query: string, signal?: AbortSignal, locale?: string): Promise<AddressSuggestion[]>;
   lookupByAddress(address: string, signal?: AbortSignal): Promise<AddressLookupResult>;
   lookupByPlaceId(placeId: string, signal?: AbortSignal): Promise<AddressLookupResult>;
   lookupByOsmId(

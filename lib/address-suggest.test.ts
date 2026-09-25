@@ -190,10 +190,19 @@ describe("TW suggest ranking with mocked upstream", () => {
     const results = await suggestAddresses("台北市市府路1號", { limit: 5 });
     expect(results.length).toBeGreaterThan(0);
     expect(results[0]?.source).toBe("google");
-    expect(results[0]?.label).toMatch(/City Hall|市府/i);
+    expect(results[0]?.label).toBe("臺北市市府路1號");
+    expect(results[0]?.title).toBe("臺北市市府路1號");
+    expect(results[0]?.secondary).toMatch(/City Hall/);
+    expect(results[0]?.lat).toBeCloseTo(25.0375);
     expect(results.some((r) => /福祿1號公園/.test(r.label))).toBe(false);
 
     const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    const geocodeUrl = urls.find((u) => u.includes("/geocode/")) ?? "";
+    const autocompleteUrl = urls.find((u) => u.includes("place/autocomplete")) ?? "";
+    expect(geocodeUrl).toContain("language=zh-TW");
+    expect(geocodeUrl).toContain("region=tw");
+    expect(autocompleteUrl).toContain("language=zh-TW");
+    expect(autocompleteUrl).toContain("region=tw");
     expect(urls.some((u) => u.includes("place/autocomplete"))).toBe(true);
     expect(urls.some((u) => u.includes("/geocode/"))).toBe(true);
     expect(urls.some((u) => u.includes("places.googleapis.com"))).toBe(false);
@@ -203,6 +212,35 @@ describe("TW suggest ranking with mocked upstream", () => {
     const geoIdx = urls.findIndex((u) => u.includes("/geocode/"));
     expect(autoIdx).toBeGreaterThanOrEqual(0);
     expect(geoIdx).toBeGreaterThan(autoIdx);
+  });
+
+  it("asks Google for zh-CN when the locale is zh-Hans", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("place/autocomplete")) {
+        return jsonResponse({
+          status: "OK",
+          predictions: [
+            {
+              place_id: "tw-zh",
+              description: "台湾台北市信义区市府路1号",
+              structured_formatting: {
+                main_text: "市府路1号",
+                secondary_text: "台湾台北市信义区",
+              },
+            },
+          ],
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const results = await suggestAddresses("台北市市府路1號", {
+      locale: "zh-Hans",
+    });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("language=zh-CN");
+    expect(results[0]?.label).toContain("市府路");
+    expect(results[0]?.label).not.toMatch(/City Hall/);
   });
 
   it("does not call Google when only GOOGLE_PLACES_API_KEY is set", async () => {

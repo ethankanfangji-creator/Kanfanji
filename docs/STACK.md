@@ -13,7 +13,7 @@ Last updated: 2026-09-19. Living inventory for agents and humans.
 | Storage | Supabase Storage `viewing-media` | **Private** objects + short-TTL signed URLs (`lib/media.ts`, `/api/media/sign`) |
 | Local draft | IndexedDB (`lib/idb`, `lib/draft-db`) | Guests can create/read without login |
 | AI | OpenAI (`gpt-4o-mini`, Whisper) | **Server routes only** via `lib/ai-boundary` + `AiService` |
-| Geocoding | Google Places (New) for CA suggest; Geocode/Nominatim for free text and TW | **Server only.** `GOOGLE_MAPS_API_KEY` never `NEXT_PUBLIC_` |
+| Geocoding | Google Places (New) for CA suggest; TW Geocode uses `language=zh-TW` (zh-CN when locale is zh-Hans) and `region=tw` | **Server only.** `GOOGLE_MAPS_API_KEY` never `NEXT_PUBLIC_` |
 | Property intel | Property facts pipeline → projected intel; BC/Google/OSM/Bing evidence (+ optional ATTOM); DB cache | `/api/property-facts`, `/api/property-intel` — no crawling; LLM does not invent facts |
 | Payments | Stripe Checkout + webhook | Server secrets only |
 | i18n | `zh-Hant` / `zh-Hans` / `en` / `th` | `lib/i18n/*` — no hardcoded product copy in new UI |

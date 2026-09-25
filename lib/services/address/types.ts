@@ -12,6 +12,12 @@ export type AddressService = {
   status(): AddressServiceStatus;
   suggest(query: string, signal?: AbortSignal): Promise<AddressSuggestion[]>;
   lookupByAddress(address: string, signal?: AbortSignal): Promise<AddressLookupResult>;
+  lookupByPlaceId(placeId: string, signal?: AbortSignal): Promise<AddressLookupResult>;
+  lookupByOsmId(
+    osmId: string,
+    coords?: { lat?: number; lng?: number },
+    signal?: AbortSignal,
+  ): Promise<AddressLookupResult>;
   lookupByCoords(
     lat: number,
     lng: number,
@@ -44,6 +50,12 @@ export function createMockAddressService(seed: AddressSuggestion[] = []): Addres
     },
     async lookupByAddress(address) {
       return mockLookup(address);
+    },
+    async lookupByPlaceId(placeId) {
+      return mockLookup(placeId);
+    },
+    async lookupByOsmId(osmId, coords) {
+      return mockLookup(osmId, coords?.lat, coords?.lng);
     },
     async lookupByCoords(lat, lng) {
       return mockLookup(`Mock @ ${lat.toFixed(4)}, ${lng.toFixed(4)}`, lat, lng);

@@ -27,6 +27,48 @@ export const METRO_VANCOUVER_BIAS = {
 /**
  * Keep British Columbia rows. Drops US lookalikes (Illinois, California, Kentucky).
  */
+function containsCjk(text: string): boolean {
+  return /[\u4e00-\u9fff]/.test(text);
+}
+
+/**
+ * Google language for a Taiwan query. zh-Hans asks for zh-CN; everything else
+ * that is still a TW address asks for zh-TW so the doorplate is not Anglicized.
+ */
+export function googleTwLanguageParams(locale?: string): {
+  language: "zh-TW" | "zh-CN";
+  region: "tw";
+} {
+  return {
+    language: locale === "zh-Hans" ? "zh-CN" : "zh-TW",
+    region: "tw",
+  };
+}
+
+/**
+ * If Google still returns an English formatted address for a Chinese query,
+ * show the user's own (臺-normalized) string as the title/label and keep the
+ * English line as secondary. Coordinates stay on the Google result.
+ */
+export function preferTwQueryLabel(
+  query: string,
+  suggestion: AddressSuggestion,
+): AddressSuggestion {
+  if (!containsCjk(query)) return suggestion;
+  const googleText = `${suggestion.formatted ?? ""} ${suggestion.label} ${suggestion.title ?? ""}`;
+  if (containsCjk(googleText)) return suggestion;
+  const display = normalizeTwAdminText(query.trim());
+  if (!display) return suggestion;
+  const english = suggestion.formatted || suggestion.label;
+  return {
+    ...suggestion,
+    label: display,
+    formatted: display,
+    title: display,
+    secondary: english && english !== display ? english : suggestion.secondary,
+  };
+}
+
 export function isBritishColumbiaAddress(parts: {
   label?: string;
   formatted?: string;
@@ -269,7 +311,7 @@ export function isReasonableGoogleAutocomplete(
  */
 export async function suggestAddresses(
   query: string,
-  options?: { limit?: number; signal?: AbortSignal },
+  options?: { limit?: number; signal?: AbortSignal; locale?: string },
 ): Promise<AddressSuggestion[]> {
   const trimmed = query.trim();
   if (trimmed.length < 3) return [];
@@ -278,14 +320,21 @@ export async function suggestAddresses(
   const limit = Math.min(Math.max(options?.limit ?? 5, 1), 8);
   const region = detectSuggestRegion(trimmed);
   const signal = options?.signal;
+  const locale = options?.locale;
 
   // Taiwan stays on its own Google/Nominatim ranking — no Metro Vancouver bias.
   if (region === "TW") {
     if (googleKey()) {
-      const google = await suggestViaGoogleAutocomplete(trimmed, limit, region, signal);
+      const google = await suggestViaGoogleAutocomplete(
+        trimmed,
+        limit,
+        region,
+        signal,
+        locale,
+      );
       if (isReasonableGoogleAutocomplete(trimmed, google, region)) return google;
 
-      const geocode = await suggestViaGoogleGeocode(trimmed, limit, region, signal);
+      const geocode = await suggestViaGoogleGeocode(trimmed, limit, region, signal, locale);
       if (geocode.length > 0) return geocode;
     }
     return suggestViaNominatim(trimmed, limit, region, signal);
@@ -365,6 +414,7 @@ async function suggestViaGoogleAutocomplete(
   limit: number,
   region: SuggestRegion,
   signal?: AbortSignal,
+  locale?: string,
 ): Promise<AddressSuggestion[]> {
   const key = googleKey();
   if (!key) return [];
@@ -377,6 +427,11 @@ async function suggestViaGoogleAutocomplete(
     if (region === "US") url.searchParams.set("components", "country:us");
     if (region === "CA") url.searchParams.set("components", "country:ca");
     if (region === "TW") url.searchParams.set("components", "country:tw");
+    if (region === "TW") {
+      const lang = googleTwLanguageParams(locale);
+      url.searchParams.set("language", lang.language);
+      url.searchParams.set("region", lang.region);
+    }
 
     const res = await fetch(url.toString(), { signal, next: { revalidate: 0 } });
     if (!res.ok) return [];
@@ -401,13 +456,14 @@ async function suggestViaGoogleAutocomplete(
       .map((row, index) => {
         const main = row.structured_formatting?.main_text?.trim();
         const secondary = row.structured_formatting?.secondary_text?.trim();
-        return {
+        const suggestion: AddressSuggestion = {
           id: `gplace:${row.place_id ?? index}`,
           label: row.description!,
           title: main || row.description!,
           secondary: secondary && secondary !== main ? secondary : undefined,
-          source: "google" as const,
+          source: "google",
         };
+        return region === "TW" ? preferTwQueryLabel(query, suggestion) : suggestion;
       });
   } catch {
     return [];
@@ -419,6 +475,7 @@ async function suggestViaGoogleGeocode(
   limit: number,
   region: SuggestRegion,
   signal?: AbortSignal,
+  locale?: string,
 ): Promise<AddressSuggestion[]> {
   const key = googleKey();
   if (!key) return [];
@@ -430,6 +487,11 @@ async function suggestViaGoogleGeocode(
     if (region === "US") url.searchParams.set("components", "country:US");
     if (region === "CA") url.searchParams.set("components", "country:CA");
     if (region === "TW") url.searchParams.set("components", "country:TW");
+    if (region === "TW") {
+      const lang = googleTwLanguageParams(locale);
+      url.searchParams.set("language", lang.language);
+      url.searchParams.set("region", lang.region);
+    }
 
     const res = await fetch(url.toString(), { signal, next: { revalidate: 0 } });
     if (!res.ok) return [];
@@ -464,9 +526,10 @@ async function suggestViaGoogleGeocode(
           pick("locality") || pick("postal_town") || pick("sublocality") || undefined;
         const province = pick("administrative_area_level_1", true) || undefined;
         const country = pick("country") || undefined;
-        return {
+        const suggestion: AddressSuggestion = {
           id: `ggeo:${row.place_id ?? index}`,
           label: row.formatted_address!,
+          formatted: row.formatted_address!,
           title: [pick("street_number"), pick("route")].filter(Boolean).join(" ") ||
             row.formatted_address!,
           secondary: [city, province, country].filter(Boolean).join(", ") || undefined,
@@ -475,8 +538,9 @@ async function suggestViaGoogleGeocode(
           city,
           province,
           country,
-          source: "google" as const,
+          source: "google",
         };
+        return region === "TW" ? preferTwQueryLabel(query, suggestion) : suggestion;
       });
   } catch {
     return [];

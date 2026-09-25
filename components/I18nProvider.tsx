@@ -87,3 +87,8 @@ export function useI18n() {
   }
   return ctx;
 }
+
+/** Locale when a provider is mounted; otherwise the product default. */
+export function useLocale(): Locale {
+  return useContext(I18nContext)?.locale ?? DEFAULT_LOCALE;
+}

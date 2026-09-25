@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AI_GUEST_COOKIE,
   createGuestIdentityCookie,
   guestCookieOptions,
+  guestCookieSigningConfigured,
   verifyGuestIdentityCookie,
 } from "./guest-identity";
 
@@ -41,6 +42,18 @@ describe("signed guest AI identity", () => {
   it("fails closed when no signing secret exists", () => {
     delete process.env.AI_GUEST_COOKIE_SECRET;
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    expect(guestCookieSigningConfigured()).toBe(false);
     expect(createGuestIdentityCookie()).toBeNull();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("can fall back to the service role key but that is not a dedicated secret", () => {
+    delete process.env.AI_GUEST_COOKIE_SECRET;
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-fallback-only";
+    const issued = createGuestIdentityCookie();
+    expect(issued).not.toBeNull();
+    expect(verifyGuestIdentityCookie(issued!.value)?.guestId).toBe(issued!.identity.guestId);
   });
 });

@@ -13,6 +13,25 @@ function secret(): string | null {
   return process.env.AI_GUEST_COOKIE_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || null;
 }
 
+/** True when a signing key is present. Does not reveal which variable or its value. */
+export function guestCookieSigningConfigured(): boolean {
+  return secret() != null;
+}
+
+let missingSecretWarned = false;
+
+function warnMissingGuestSecret(): void {
+  if (missingSecretWarned) return;
+  missingSecretWarned = true;
+  if (process.env.NODE_ENV === "production") {
+    console.error("[ai] guest identity signing is not configured");
+    return;
+  }
+  console.warn(
+    "[ai] AI_GUEST_COOKIE_SECRET is unset. Guest AI returns 503 ai_identity_unavailable until it is set. SUPABASE_SERVICE_ROLE_KEY can sign as a fallback but should not be the only Production secret.",
+  );
+}
+
 function sign(payload: string, key: string): string {
   return createHmac("sha256", key).update(payload).digest("base64url");
 }
@@ -23,7 +42,10 @@ export function createGuestIdentityCookie(): {
   maxAge: number;
 } | null {
   const key = secret();
-  if (!key) return null;
+  if (!key) {
+    warnMissingGuestSecret();
+    return null;
+  }
   const identity = { guestId: randomUUID(), deviceId: randomUUID() };
   const payload = `${COOKIE_VERSION}.${identity.guestId}.${identity.deviceId}`;
   return {

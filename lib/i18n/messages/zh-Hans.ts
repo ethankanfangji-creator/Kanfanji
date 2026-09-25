@@ -568,6 +568,7 @@ const zhHans: Messages = {
     authRequired: "请先登录后再继续此 AI 请求。",
     consentRequired: "请先允许本看房使用 AI，再重试。",
     unavailable: "AI 当前安全停用，媒体仍保存在本机。",
+    identityUnavailable: "服务暂时无法识别访客，请稍后重试或刷新。媒体仍保存在本机。",
     failed: "AI 分析失败，媒体仍已保存，可再试一次。",
     timeout: "AI 服务超时。媒体仍已保存 — 请点重试。",
     validation: "此 AI 请求无法接受，请检查内容后重试。",

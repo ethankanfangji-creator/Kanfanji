@@ -40,6 +40,7 @@ git push origin main
 | NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY | prod | dev |
 | SUPABASE_SERVICE_ROLE_KEY | prod | dev |
 | OPENAI_API_KEY | (shared or separate) | (shared or separate) |
+| AI_GUEST_COOKIE_SECRET | **required** (own secret; do not rely only on the service role key) | set a separate value |
 | STRIPE_* | live | test |
 | NEXT_PUBLIC_SITE_URL | https://kanfanji.vercel.app | Preview URL / custom domain |
 

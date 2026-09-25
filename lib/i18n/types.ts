@@ -544,6 +544,7 @@ export type Messages = {
     authRequired: string;
     consentRequired: string;
     unavailable: string;
+    identityUnavailable: string;
     failed: string;
     timeout: string;
     validation: string;

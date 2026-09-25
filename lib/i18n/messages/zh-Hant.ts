@@ -568,6 +568,7 @@ const zhHant: Messages = {
     authRequired: "請先登入後再繼續此 AI 請求。",
     consentRequired: "請先允許本看房使用 AI，再重試。",
     unavailable: "AI 目前安全停用，媒體仍保存在本機。",
+    identityUnavailable: "服務暫時無法識別訪客，請稍後再試或重新整理。媒體仍保存在本機。",
     failed: "AI 分析失敗，媒體仍已保存，可再試一次。",
     timeout: "AI 服務逾時。媒體仍已保存 — 請點重試。",
     validation: "此 AI 請求無法接受，請檢查內容後重試。",

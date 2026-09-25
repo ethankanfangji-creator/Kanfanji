@@ -572,6 +572,8 @@ const en: Messages = {
     authRequired: "Sign in to continue this AI request.",
     consentRequired: "Allow AI for this viewing first, then try again.",
     unavailable: "AI is unavailable safely; your media remains local.",
+    identityUnavailable:
+      "We can’t identify this guest session right now. Try again or refresh. Your media stays on this device.",
     failed: "AI analysis failed; your media remains saved. You can retry.",
     timeout: "The AI provider timed out. Your media remains saved — tap retry.",
     validation: "That AI request could not be accepted. Check the input and retry.",

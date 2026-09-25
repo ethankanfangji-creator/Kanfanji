@@ -35,6 +35,8 @@ The easiest way to deploy your Next.js app is to use the [Vercel Platform](https
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
 
+Production guest AI needs `AI_GUEST_COOKIE_SECRET` in Vercel (server-only). Without it, guests get HTTP 503 `ai_identity_unavailable`. `SUPABASE_SERVICE_ROLE_KEY` can sign that cookie as a fallback, but do not use it as the only secret and never expose it to the client. See `DEPLOY.md` and `.env.example`.
+
 ## Billing (Stripe)
 
 - Checkout: `POST /api/create-checkout-session`

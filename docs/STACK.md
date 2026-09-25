@@ -30,10 +30,11 @@ Last updated: 2026-09-19. Living inventory for agents and humans.
 
 ### Server secrets (never ship to client)
 
-- `SUPABASE_SERVICE_ROLE_KEY`
 - `OPENAI_API_KEY`
 - `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID`, `STRIPE_WEBHOOK_SECRET`
-- `AI_GUEST_COOKIE_SECRET`, `AI_QUOTA_HASH_SECRET`
+- `AI_GUEST_COOKIE_SECRET` (**required in Production** — signs `kf_ai_guest`; without it guests get `503 ai_identity_unavailable`)
+- `AI_QUOTA_HASH_SECRET`
+- `SUPABASE_SERVICE_ROLE_KEY` (can sign guest cookies only as a fallback; do not use it as the sole Production secret, and never send it to the browser)
 - `SHARE_COOKIE_SECRET`
 - Optional quotas/timeouts: `AI_UPSTREAM_TIMEOUT_MS`, `AI_*_DAILY_LIMIT`, `AI_QUOTA_WINDOW_SECONDS`
 - Optional property intel: `GOOGLE_MAPS_API_KEY`, `BING_SEARCH_API_KEY`, `ATTOM_API_KEY`, `PROPERTY_INTEL_CACHE_TTL_HOURS`

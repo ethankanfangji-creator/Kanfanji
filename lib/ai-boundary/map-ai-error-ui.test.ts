@@ -7,6 +7,7 @@ const copy: AiErrorUiCopy = {
   authRequired: "AUTH",
   consentRequired: "CONSENT",
   unavailable: "UNAVAIL",
+  identityUnavailable: "GUEST_IDENTITY",
   failed: "FAILED",
   timeout: "TIMEOUT",
   validation: "VALIDATION",
@@ -65,6 +66,11 @@ describe("mapAiErrorToUi", () => {
     expect(mapAiErrorToUi({ status: 503, code: "ai_quota_unavailable" }, copy)).toEqual({
       kind: "unavailable",
       message: "UNAVAIL",
+      actions: ["retry"],
+    });
+    expect(mapAiErrorToUi({ status: 503, code: "ai_identity_unavailable" }, copy)).toEqual({
+      kind: "unavailable",
+      message: "GUEST_IDENTITY",
       actions: ["retry"],
     });
   });

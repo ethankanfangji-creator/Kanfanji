@@ -21,6 +21,8 @@ export type AiErrorUiCopy = {
   authRequired: string;
   consentRequired: string;
   unavailable: string;
+  /** Guest session could not be signed (ai_identity_unavailable). */
+  identityUnavailable: string;
   failed: string;
   timeout: string;
   validation: string;
@@ -87,10 +89,17 @@ export function mapAiErrorToUi(
     };
   }
 
+  if (code === "ai_identity_unavailable") {
+    return {
+      kind: "unavailable",
+      message: copy.identityUnavailable,
+      actions: ["retry"],
+    };
+  }
+
   if (
     code === "ai_quota_unavailable" ||
-    code === "ai_unavailable" ||
-    code === "ai_identity_unavailable"
+    code === "ai_unavailable"
   ) {
     return {
       kind: "unavailable",
@@ -151,6 +160,7 @@ export function aiErrorUiCopyFromBoundary(
     authRequired: string;
     consentRequired: string;
     unavailable: string;
+    identityUnavailable: string;
     failed: string;
     timeout: string;
     validation: string;
@@ -162,6 +172,7 @@ export function aiErrorUiCopyFromBoundary(
     authRequired: boundary.authRequired,
     consentRequired: boundary.consentRequired,
     unavailable: boundary.unavailable,
+    identityUnavailable: boundary.identityUnavailable,
     failed: boundary.failed,
     timeout: boundary.timeout,
     validation: boundary.validation,

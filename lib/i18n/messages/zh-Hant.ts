@@ -3,8 +3,8 @@ import type { Messages } from "../types";
 const zhHant: Messages = {
   brand: {
     name: "看房記 KanFangJi",
-    subtitle: "OPEN HOUSE RECORDER",
-    cardEyebrow: "KANFANGJI · OPEN HOUSE RECORDER",
+    subtitle: "現場速記",
+    cardEyebrow: "看房記 · 現場速記",
   },
   nav: {
     records: "看房紀錄",

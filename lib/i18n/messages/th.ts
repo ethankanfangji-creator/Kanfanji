@@ -3,8 +3,8 @@ import type { Messages } from "../types";
 const th: Messages = {
   brand: {
     name: "KanFangJi บันทึกดูบ้าน",
-    subtitle: "OPEN HOUSE RECORDER",
-    cardEyebrow: "KANFANGJI · OPEN HOUSE RECORDER",
+    subtitle: "จดหน้างาน",
+    cardEyebrow: "KANFANGJI · จดหน้างาน",
   },
   nav: {
     records: "ประวัติดูบ้าน",

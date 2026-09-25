@@ -128,6 +128,7 @@ async function enrichNeighborhood(result: AddressLookupResult): Promise<AddressL
 async function reverseGeocodeNominatim(
   lat: number,
   lng: number,
+  signal?: AbortSignal,
 ): Promise<AddressLookupResult> {
   const url = new URL("https://nominatim.openstreetmap.org/reverse");
   url.searchParams.set("lat", String(lat));
@@ -137,6 +138,7 @@ async function reverseGeocodeNominatim(
   url.searchParams.set("addressdetails", "1");
 
   const res = await fetch(url, {
+    signal,
     headers: {
       Accept: "application/json",
       "User-Agent": "KanFangJi/0.1 (open-house recorder; contact@localhost)",
@@ -189,6 +191,7 @@ async function reverseGeocodeNominatim(
 export async function lookupAddressDetailsFromGps(
   lat: number,
   lng: number,
+  signal?: AbortSignal,
 ): Promise<AddressLookupResult> {
   if (
     !Number.isFinite(lat) ||
@@ -201,7 +204,7 @@ export async function lookupAddressDetailsFromGps(
     throw new Error("GPS 座標無效");
   }
 
-  let result = await reverseGeocodeNominatim(lat, lng);
+  let result = await reverseGeocodeNominatim(lat, lng, signal);
   if (result.market === "CA") {
     result = await withMetroOpenData(await enrichNeighborhood(result));
   }
@@ -279,7 +282,15 @@ async function withPropertyRegistry(result: AddressLookupResult): Promise<Addres
   }
 }
 
-export async function lookupAddressDetails(query: string): Promise<AddressLookupResult> {
+export async function lookupAddressDetails(
+  query: string,
+  signal?: AbortSignal,
+): Promise<AddressLookupResult> {
+  if (signal?.aborted) {
+    const err = new Error("ADDRESS_LOOKUP_ABORTED");
+    err.name = "AbortError";
+    throw err;
+  }
   const trimmed = query.trim();
   if (!trimmed) {
     throw new Error("請輸入地址");
@@ -287,6 +298,11 @@ export async function lookupAddressDetails(query: string): Promise<AddressLookup
 
   // 1) Normalize via Geocode API → lat/lng + formatted_address
   const normalized = await normalizeAddress(trimmed);
+  if (signal?.aborted) {
+    const err = new Error("ADDRESS_LOOKUP_ABORTED");
+    err.name = "AbortError";
+    throw err;
+  }
   const market = detectMarketHint(
     normalized.formatted_address,
     normalized.country,
@@ -321,6 +337,170 @@ export async function lookupAddressDetails(query: string): Promise<AddressLookup
   result = await withPropertyRegistry(result);
 
   return result;
+}
+
+export type ClassifiedLookup =
+  | { ok: true; kind: "place"; placeId: string }
+  | { ok: true; kind: "osm"; osmId: string; lat?: number; lng?: number }
+  | { ok: true; kind: "coords"; lat: number; lng: number }
+  | { ok: true; kind: "free_text"; address: string }
+  | { ok: false; code: string; error: string };
+
+/** Decide which lookup path a request body is allowed to take. */
+export function classifyLookupBody(input: {
+  address?: string;
+  placeId?: string;
+  osmId?: string;
+  lat?: number;
+  lng?: number;
+  freeText?: boolean;
+}): ClassifiedLookup {
+  const address = input.address?.trim() || "";
+  const placeId = stripPlaceId(input.placeId ?? "");
+  const osmId = (input.osmId ?? "").trim();
+  const hasCoords = input.lat !== undefined || input.lng !== undefined;
+  const idCount = Number(Boolean(placeId)) + Number(Boolean(osmId));
+
+  if (idCount > 1 || ((placeId || osmId) && address)) {
+    return {
+      ok: false,
+      code: "lookup_ambiguous",
+      error: "Use placeId, osmId, coordinates, or a free-text address — not a mix",
+    };
+  }
+  if (placeId) {
+    return { ok: true, kind: "place", placeId };
+  }
+  if (osmId) {
+    return {
+      ok: true,
+      kind: "osm",
+      osmId,
+      lat: input.lat,
+      lng: input.lng,
+    };
+  }
+  if (hasCoords && input.lat !== undefined && input.lng !== undefined) {
+    return { ok: true, kind: "coords", lat: input.lat, lng: input.lng };
+  }
+  if (address) {
+    if (!input.freeText) {
+      return {
+        ok: false,
+        code: "address_requires_free_text",
+        error:
+          "Address-string lookup is only for free text that was not picked from suggestions. Send freeText:true, or send placeId / osmId for a selected row.",
+      };
+    }
+    return { ok: true, kind: "free_text", address };
+  }
+  return { ok: false, code: "address_required", error: "Address required" };
+}
+
+export function stripPlaceId(raw: string): string {
+  return raw.replace(/^gplace:/, "").replace(/^places\//, "").trim();
+}
+
+export async function lookupAddressDetailsByPlaceId(
+  placeId: string,
+  signal?: AbortSignal,
+): Promise<AddressLookupResult> {
+  if (signal?.aborted) {
+    const err = new Error("ADDRESS_LOOKUP_ABORTED");
+    err.name = "AbortError";
+    throw err;
+  }
+  const id = stripPlaceId(placeId);
+  const key = process.env.GOOGLE_MAPS_API_KEY?.trim();
+  if (!id || !key) {
+    throw new Error("無法用 placeId 查詢地址");
+  }
+  const res = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(id)}`, {
+    signal,
+    headers: {
+      "X-Goog-Api-Key": key,
+      "X-Goog-FieldMask": "id,formattedAddress,location,addressComponents",
+    },
+  });
+  if (!res.ok) throw new Error("無法用 placeId 查詢地址");
+  const data = (await res.json()) as {
+    formattedAddress?: string;
+    location?: { latitude?: number; longitude?: number };
+    addressComponents?: Array<{ longText?: string; shortText?: string; types?: string[] }>;
+  };
+  const formatted = data.formattedAddress?.trim() || "";
+  const lat = data.location?.latitude;
+  const lng = data.location?.longitude;
+  if (!formatted || typeof lat !== "number" || typeof lng !== "number") {
+    throw new Error("無法用 placeId 查詢地址");
+  }
+  const pick = (type: string, short = false) => {
+    const comp = data.addressComponents?.find((c) => c.types?.includes(type));
+    return short ? comp?.shortText : comp?.longText;
+  };
+  const city = pick("locality") || pick("postal_town") || pick("sublocality");
+  const province = pick("administrative_area_level_1", true);
+  const country = pick("country");
+  const countryCode = pick("country", true);
+  const market = detectMarketHint(formatted, country, countryCode);
+  let result: AddressLookupResult = {
+    market,
+    displayAddress: formatted,
+    tags: [city, province, country].filter(Boolean) as string[],
+    source: "Google Place Details",
+    details: {
+      city,
+      province,
+      country,
+      countryCode,
+      postalCode: pick("postal_code"),
+      lat,
+      lng,
+      normalizedAddress: formatted.toLowerCase(),
+    },
+  };
+  if (market === "CA") {
+    result = await withMetroOpenData(await enrichNeighborhood(result));
+  }
+  return withPropertyRegistry(result);
+}
+
+export async function lookupAddressDetailsByOsmId(
+  osmId: string,
+  coords?: { lat?: number; lng?: number },
+  signal?: AbortSignal,
+): Promise<AddressLookupResult> {
+  if (
+    typeof coords?.lat === "number" &&
+    typeof coords.lng === "number"
+  ) {
+    return lookupAddressDetailsFromGps(coords.lat, coords.lng, signal);
+  }
+  if (signal?.aborted) {
+    const err = new Error("ADDRESS_LOOKUP_ABORTED");
+    err.name = "AbortError";
+    throw err;
+  }
+  const lookupId = osmId.replace(/^photon:/, "").trim();
+  const osmIds = /^[NWR]\d+$/i.test(lookupId) ? lookupId.toUpperCase() : `N${lookupId}`;
+  const url = new URL("https://nominatim.openstreetmap.org/lookup");
+  url.searchParams.set("osm_ids", osmIds);
+  url.searchParams.set("format", "json");
+  url.searchParams.set("addressdetails", "1");
+  const res = await fetch(url, {
+    signal,
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "KanFangJi/0.1 (open-house recorder; contact@localhost)",
+    },
+  });
+  if (!res.ok) throw new Error("無法用 osmId 查詢地址");
+  const rows = (await res.json()) as NominatimResult[];
+  const row = rows[0];
+  if (!row?.display_name || !row.lat || !row.lon) {
+    throw new Error("無法用 osmId 查詢地址");
+  }
+  return lookupAddressDetailsFromGps(Number(row.lat), Number(row.lon), signal);
 }
 
 /** Re-export for callers that only need geocode normalization. */

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   detectSuggestRegion,
   extractTwAdminTokens,
+  isBritishColumbiaAddress,
   isReasonableGoogleAutocomplete,
   nominatimAdminCompatible,
   nominatimLooksLikeNonAddress,
@@ -195,6 +196,8 @@ describe("TW suggest ranking with mocked upstream", () => {
     const urls = fetchMock.mock.calls.map((c) => String(c[0]));
     expect(urls.some((u) => u.includes("place/autocomplete"))).toBe(true);
     expect(urls.some((u) => u.includes("/geocode/"))).toBe(true);
+    expect(urls.some((u) => u.includes("places.googleapis.com"))).toBe(false);
+    expect(urls.some((u) => u.includes("49.28"))).toBe(false);
     // Nominatim must not short-circuit before geocode for TW+key.
     const autoIdx = urls.findIndex((u) => u.includes("place/autocomplete"));
     const geoIdx = urls.findIndex((u) => u.includes("/geocode/"));
@@ -262,5 +265,134 @@ describe("TW suggest ranking with mocked upstream", () => {
     expect(results).toHaveLength(1);
     expect(results[0]?.label).toContain("市府路");
     expect(results[0]?.label).not.toContain("公園");
+  });
+});
+
+describe("one-shot Metro Vancouver suggest", () => {
+  function jsonResponse(body: unknown, ok = true) {
+    return Promise.resolve({
+      ok,
+      json: async () => body,
+    } as Response);
+  }
+
+  it("keeps only BC for 2143 clarke and does not text-geocode or Nominatim", async () => {
+    process.env.GOOGLE_MAPS_API_KEY = "test-google-key";
+    const details: Record<
+      string,
+      { formattedAddress: string; lat: number; lng: number; province: string; country: string }
+    > = {
+      il: {
+        formattedAddress: "2143 Clarke St, Illinois, USA",
+        lat: 40.1,
+        lng: -89.1,
+        province: "IL",
+        country: "United States",
+      },
+      "ca-us": {
+        formattedAddress: "2143 Clarke Ave, California, USA",
+        lat: 34.1,
+        lng: -118.2,
+        province: "CA",
+        country: "United States",
+      },
+      ky: {
+        formattedAddress: "2143 Clarke, Kentucky, USA",
+        lat: 38.2,
+        lng: -85.7,
+        province: "KY",
+        country: "United States",
+      },
+      "bc-1": {
+        formattedAddress: "2143 Clarke Street, Port Moody, BC, Canada",
+        lat: 49.277,
+        lng: -122.862,
+        province: "BC",
+        country: "Canada",
+      },
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("places:autocomplete")) {
+        const body = JSON.parse(String(init?.body)) as {
+          includedRegionCodes: string[];
+          locationBias: { circle: { center: { latitude: number } } };
+        };
+        expect(body.includedRegionCodes).toEqual(["ca"]);
+        expect(body.locationBias.circle.center.latitude).toBeCloseTo(49.28);
+        return jsonResponse({
+          suggestions: ["il", "ca-us", "ky", "bc-1"].map((id) => ({
+            placePrediction: {
+              placeId: id,
+              text: { text: details[id]!.formattedAddress },
+            },
+          })),
+        });
+      }
+      if (url.includes("/v1/places/")) {
+        const id = decodeURIComponent(url.split("/places/")[1] ?? "");
+        const row = details[id];
+        if (!row) throw new Error(`missing details ${id}`);
+        return jsonResponse({
+          id,
+          formattedAddress: row.formattedAddress,
+          location: { latitude: row.lat, longitude: row.lng },
+          addressComponents: [
+            {
+              shortText: row.province,
+              longText: row.province,
+              types: ["administrative_area_level_1"],
+            },
+            { longText: row.country, shortText: row.country, types: ["country"] },
+          ],
+        });
+      }
+      if (url.includes("nominatim") || url.includes("/geocode/")) {
+        throw new Error(`label re-search not allowed: ${url}`);
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const results = await suggestAddresses("2143 clarke");
+    expect(results).toHaveLength(1);
+    expect(results[0]).toEqual(
+      expect.objectContaining({
+        id: "gplace:bc-1",
+        formatted: "2143 Clarke Street, Port Moody, BC, Canada",
+        lat: 49.277,
+        lng: -122.862,
+        source: "google",
+      }),
+    );
+    expect(results.some((r) => /Illinois|California|Kentucky/i.test(r.label))).toBe(
+      false,
+    );
+  });
+
+  it("does not call upstream when the request is already aborted", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      suggestAddresses("2143 clarke", { signal: controller.signal }),
+    ).resolves.toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects US states in the BC filter", () => {
+    expect(
+      isBritishColumbiaAddress({
+        formatted: "2143 Clarke St, Illinois, USA",
+        province: "IL",
+      }),
+    ).toBe(false);
+    expect(
+      isBritishColumbiaAddress({
+        formatted: "2143 Clarke Street, Port Moody, BC, Canada",
+        province: "BC",
+      }),
+    ).toBe(true);
   });
 });

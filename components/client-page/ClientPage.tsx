@@ -348,6 +348,8 @@ export function ClientPage() {
     markers?: AudioMarker[];
   } | null>(null);
   const [lookingUp, setLookingUp] = useState(false);
+  const lookupRequestRef = useRef(0);
+  const lookupAbortRef = useRef<AbortController | null>(null);
   const [identified, setIdentified] = useState(false);
   const [locating, setLocating] = useState(false);
   const [locationError, setLocationError] = useState("");
@@ -3269,12 +3271,19 @@ export function ClientPage() {
     setSyncMessage("");
     setPendingLookupConfirmation(null);
 
+    const requestId = ++lookupRequestRef.current;
+    lookupAbortRef.current?.abort();
+    const controller = new AbortController();
+    lookupAbortRef.current = controller;
+
     try {
       const response = await fetch("/api/lookup-address", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address: nextAddress }),
+        signal: controller.signal,
+        body: JSON.stringify({ address: nextAddress, freeText: true }),
       });
+      if (requestId !== lookupRequestRef.current) return;
       const payload = (await response.json()) as AddressLookupPayload;
 
       if (!response.ok) {
@@ -3288,12 +3297,14 @@ export function ClientPage() {
         fromExifGps: options.fromExifGps,
       });
     } catch (error) {
+      if (requestId !== lookupRequestRef.current) return;
+      if (error instanceof DOMException && error.name === "AbortError") return;
       // Invalid / failed lookup must not clear identified or recorded answers.
       restoreCommittedIdentification();
       setLookupError(true);
       setSyncMessage(error instanceof Error ? error.message : "查詢失敗");
     } finally {
-      setLookingUp(false);
+      if (requestId === lookupRequestRef.current) setLookingUp(false);
     }
   }
 
@@ -3305,6 +3316,7 @@ export function ClientPage() {
       return;
     }
     setLocating(true);
+    let requestId = 0;
     try {
       const position = await geo.getCurrentPosition({
         enableHighAccuracy: true,
@@ -3319,6 +3331,10 @@ export function ClientPage() {
         return;
       }
       const { lat, lng } = position;
+      requestId = ++lookupRequestRef.current;
+      lookupAbortRef.current?.abort();
+      const controller = new AbortController();
+      lookupAbortRef.current = controller;
       setLookingUp(true);
       setLookupError(false);
       setSyncMessage("");
@@ -3326,8 +3342,10 @@ export function ClientPage() {
       const response = await fetch("/api/lookup-address", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({ lat, lng }),
       });
+      if (requestId !== lookupRequestRef.current) return;
       const payload = (await response.json()) as AddressLookupPayload;
       if (!response.ok) {
         throw new Error(payload.error || messages.address.locationFailed);
@@ -3341,14 +3359,18 @@ export function ClientPage() {
         fromExifGps: false,
       });
     } catch (error) {
+      if (requestId !== lookupRequestRef.current) return;
+      if (error instanceof DOMException && error.name === "AbortError") return;
       setLocationError(
         error instanceof Error ? error.message : messages.address.locationFailed,
       );
       restoreCommittedIdentification();
       setLookupError(true);
     } finally {
-      setLocating(false);
-      setLookingUp(false);
+      if (requestId === 0 || requestId === lookupRequestRef.current) {
+        setLocating(false);
+        if (requestId !== 0) setLookingUp(false);
+      }
     }
   }
 
@@ -3419,13 +3441,19 @@ export function ClientPage() {
     setLookupError(false);
     setSyncMessage("");
     setPendingLookupConfirmation(null);
+    const requestId = ++lookupRequestRef.current;
+    lookupAbortRef.current?.abort();
+    const controller = new AbortController();
+    lookupAbortRef.current = controller;
 
     try {
       const response = await fetch("/api/lookup-address", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({ lat: gps.lat, lng: gps.lng }),
       });
+      if (requestId !== lookupRequestRef.current) return;
       const payload = (await response.json()) as AddressLookupPayload;
 
       if (!response.ok) {
@@ -3441,12 +3469,14 @@ export function ClientPage() {
         fromExifGps: true,
       });
     } catch (error) {
+      if (requestId !== lookupRequestRef.current) return;
+      if (error instanceof DOMException && error.name === "AbortError") return;
       restoreCommittedIdentification();
       setLookupError(true);
       setSyncMessage(error instanceof Error ? error.message : "查詢失敗");
       throw error;
     } finally {
-      setLookingUp(false);
+      if (requestId === lookupRequestRef.current) setLookingUp(false);
     }
   }
 

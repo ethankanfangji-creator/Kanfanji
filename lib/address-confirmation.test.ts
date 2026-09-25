@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAddressConfirmationCandidate,
   buildMapUrls,
+  candidateFromSuggestion,
 } from "./address-confirmation";
 
 describe("buildMapUrls", () => {
@@ -94,5 +95,43 @@ describe("buildAddressConfirmationCandidate", () => {
       "台北市市府路1號",
     );
     expect(candidate?.adminDistrictMismatch).toBe(false);
+  });
+});
+
+describe("candidateFromSuggestion", () => {
+  it("copies formatted coordinates and id without a label lookup", () => {
+    const candidate = candidateFromSuggestion(
+      {
+        id: "gplace:clarke-2143",
+        label: "2143 Clarke Street, Port Moody, BC, Canada",
+        formatted: "2143 Clarke Street, Port Moody, BC, Canada",
+        lat: 49.277,
+        lng: -122.862,
+        province: "BC",
+        country: "Canada",
+        source: "google",
+      },
+      "2143 clarke",
+    );
+    expect(candidate).toEqual(
+      expect.objectContaining({
+        displayAddress: "2143 Clarke Street, Port Moody, BC, Canada",
+        propertyId: "gplace:clarke-2143",
+        lat: 49.277,
+        lng: -122.862,
+        market: "CA",
+        source: "google",
+      }),
+    );
+  });
+
+  it("returns null when the suggestion has no coordinates", () => {
+    expect(
+      candidateFromSuggestion({
+        id: "gplace:missing",
+        label: "somewhere",
+        source: "google",
+      }),
+    ).toBeNull();
   });
 });

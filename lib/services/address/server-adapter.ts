@@ -5,6 +5,8 @@
 
 import {
   lookupAddressDetails,
+  lookupAddressDetailsByOsmId,
+  lookupAddressDetailsByPlaceId,
   lookupAddressDetailsFromGps,
 } from "@/lib/address-lookup";
 import { suggestAddresses } from "@/lib/address-suggest";
@@ -19,7 +21,7 @@ export function createServerAddressService(): AddressService {
         err.name = "AbortError";
         throw err;
       }
-      return suggestAddresses(query, { limit: 5 });
+      return suggestAddresses(query, { limit: 5, signal });
     },
     async lookupByAddress(address, signal) {
       if (signal?.aborted) {
@@ -27,7 +29,23 @@ export function createServerAddressService(): AddressService {
         err.name = "AbortError";
         throw err;
       }
-      return lookupAddressDetails(address);
+      return lookupAddressDetails(address, signal);
+    },
+    async lookupByPlaceId(placeId, signal) {
+      if (signal?.aborted) {
+        const err = new Error("ADDRESS_LOOKUP_ABORTED");
+        err.name = "AbortError";
+        throw err;
+      }
+      return lookupAddressDetailsByPlaceId(placeId, signal);
+    },
+    async lookupByOsmId(osmId, coords, signal) {
+      if (signal?.aborted) {
+        const err = new Error("ADDRESS_LOOKUP_ABORTED");
+        err.name = "AbortError";
+        throw err;
+      }
+      return lookupAddressDetailsByOsmId(osmId, coords, signal);
     },
     async lookupByCoords(lat, lng, signal) {
       if (signal?.aborted) {
@@ -35,7 +53,7 @@ export function createServerAddressService(): AddressService {
         err.name = "AbortError";
         throw err;
       }
-      return lookupAddressDetailsFromGps(lat, lng);
+      return lookupAddressDetailsFromGps(lat, lng, signal);
     },
   };
 }

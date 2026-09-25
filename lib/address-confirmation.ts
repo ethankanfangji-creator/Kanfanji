@@ -3,7 +3,7 @@
  * the viewing stays unbound (`identified=false`) until the user confirms.
  */
 
-import { twAdminDistrictMismatch } from "@/lib/address-suggest";
+import { twAdminDistrictMismatch, type AddressSuggestion } from "@/lib/address-suggest";
 
 export type AddressLookupPayloadLike = {
   error?: string;
@@ -104,4 +104,42 @@ export function buildAddressConfirmationCandidate(
     openMapUrl: map.openMapUrl,
     adminDistrictMismatch: twAdminDistrictMismatch(queryAddress, display),
   };
+}
+
+/**
+ * Confirmation card from a suggestion row. The selection *is* the place —
+ * this does not geocode `label` again.
+ */
+export function candidateFromSuggestion(
+  suggestion: AddressSuggestion,
+  queryAddress?: string,
+): AddressConfirmationCandidate | null {
+  const display = (suggestion.formatted || suggestion.label).trim();
+  if (!display) return null;
+  if (typeof suggestion.lat !== "number" || typeof suggestion.lng !== "number") {
+    return null;
+  }
+  const map = buildMapUrls(suggestion.lat, suggestion.lng);
+  const hay = `${display} ${suggestion.country ?? ""} ${suggestion.province ?? ""}`;
+  const market = /台灣|臺灣|Taiwan/i.test(hay)
+    ? "TW"
+    : isCanadaHay(hay)
+      ? "CA"
+      : null;
+  return {
+    displayAddress: display,
+    propertyId: suggestion.id,
+    lat: suggestion.lat,
+    lng: suggestion.lng,
+    market,
+    source: suggestion.source,
+    tags: [],
+    mapEmbedUrl: map.mapEmbedUrl,
+    openMapUrl: map.openMapUrl,
+    adminDistrictMismatch: twAdminDistrictMismatch(queryAddress || suggestion.label, display),
+  };
+}
+
+function isCanadaHay(hay: string): boolean {
+  return /\b(Canada|BC|British Columbia)\b/i.test(hay) || /加拿大/.test(hay);
 }

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  CLIENT_SUBSCRIPTION_SELECT,
+  hasStripeCustomerFromClientRow,
   isActiveSubscriptionStatus,
   isProFromCheckoutReturn,
   resolveProEntitlement,
@@ -66,5 +68,27 @@ describe("resolveProEntitlement", () => {
       ),
       false,
     );
+  });
+});
+
+describe("CLIENT_SUBSCRIPTION_SELECT", () => {
+  it("only asks for columns authenticated clients are granted", () => {
+    assert.equal(CLIENT_SUBSCRIPTION_SELECT.includes("stripe_customer_id"), false);
+    assert.match(CLIENT_SUBSCRIPTION_SELECT, /\bstatus\b/);
+    assert.match(CLIENT_SUBSCRIPTION_SELECT, /\bplan\b/);
+    assert.match(CLIENT_SUBSCRIPTION_SELECT, /\bmanual_pro_until\b/);
+  });
+});
+
+describe("hasStripeCustomerFromClientRow", () => {
+  it("is false for a missing row or manual-Pro inactive row", () => {
+    assert.equal(hasStripeCustomerFromClientRow(null), false);
+    assert.equal(hasStripeCustomerFromClientRow({ status: "inactive" }), false);
+  });
+
+  it("is true when a Stripe plan or Stripe-like status is present", () => {
+    assert.equal(hasStripeCustomerFromClientRow({ status: "inactive", plan: "price_pro" }), true);
+    assert.equal(hasStripeCustomerFromClientRow({ status: "active" }), true);
+    assert.equal(hasStripeCustomerFromClientRow({ status: "canceled" }), true);
   });
 });

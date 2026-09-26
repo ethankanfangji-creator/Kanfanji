@@ -1,7 +1,14 @@
 /** Multi-viewing comparison — editable copy, never mutates source viewings. */
 
 export const COMPARE_MIN = 2;
-export const COMPARE_MAX = 5;
+export const COMPARE_MAX = 3;
+
+/**
+ * `/c/[token]` only reopens this browser's IndexedDB snapshot.
+ * Hide the share button until a real shared comparison exists.
+ * IndexedDB helpers stay so saved snapshots are not dropped.
+ */
+export const COMPARE_SHARE_ENABLED = false;
 
 export type CompareSortKey = "price" | "rating" | "riskCount";
 export type CompareSortDirection = "asc" | "desc";

@@ -11,14 +11,7 @@ import {
   FieldStatusBadge,
   type FieldDisplayStatus,
 } from "@/components/viewing-chat/FieldStatusBadge";
-
-function formatValue(value: string | number | boolean | null | undefined): string {
-  if (value === null || value === undefined || value === "") return "";
-  if (typeof value === "number" && value >= 10_000 && value % 10_000 === 0) {
-    return `${value / 10_000}萬`;
-  }
-  return String(value);
-}
+import { formatValue } from "@/lib/viewing-chat/collection/format-value";
 
 const SECTION_ORDER: FieldDisplayStatus[] = [
   "confirmed",

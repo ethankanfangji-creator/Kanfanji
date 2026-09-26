@@ -611,6 +611,38 @@ export type Messages = {
     close: string;
     error: string;
   };
+  /**
+   * Read-only chat-history compare. Separate from `compare`, which is the
+   * editable IndexedDB draft used by `/viewings`.
+   */
+  compareLite: {
+    compareToggle: string;
+    compareCancel: string;
+    compareSelectedCount: string;
+    compareOpen: string;
+    compareMaxReached: string;
+    compareNeedTwo: string;
+    compareTitle: string;
+    compareSubtitle: string;
+    compareMissingOnDevice: string;
+    compareBack: string;
+    compareBackHome: string;
+    compareEmptyCell: string;
+    compareSkipped: string;
+    compareInferred: string;
+    compareDiffSr: string;
+    compareViewedAt: string;
+    compareSectionBasic: string;
+    compareSectionNearby: string;
+    compareSectionFeel: string;
+    compareSectionCondition: string;
+    compareSectionNotes: string;
+    compareRowPropertyType: string;
+    compareRowStrata: string;
+    compareRowSupermarket: string;
+    compareRowPark: string;
+    compareRiskTagHint: string;
+  };
   language: {
     label: string;
   };

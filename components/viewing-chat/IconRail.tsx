@@ -17,6 +17,7 @@ import {
   UserRound,
 } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
+import { AnalyticsToggle } from "@/components/analytics/AnalyticsToggle";
 import { useI18n } from "@/components/I18nProvider";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
@@ -427,6 +428,7 @@ export function IconRail({
 
                   <div className="px-1 py-1">
                     <LanguageSwitcher className="w-full" />
+                    <AnalyticsToggle />
                   </div>
 
                   <div className="my-1 border-t border-black/8" />

@@ -14,6 +14,7 @@ import {
   putComparison,
 } from "@/lib/comparison";
 import { createClient } from "@/utils/supabase/client";
+import { track } from "@/lib/analytics/client";
 import type { Viewing } from "@/lib/types";
 
 function formatWhen(iso: string, locale: string) {
@@ -89,6 +90,12 @@ export default function ViewingsPage() {
         })),
       );
       await putComparison(draft);
+      if (picked.length === 2 || picked.length === 3) {
+        track({
+          name: "compare_opened",
+          props: { count: picked.length, source: "viewings_list" },
+        });
+      }
       router.push(`/compare/${draft.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : messages.compare.error);

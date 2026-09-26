@@ -11,6 +11,15 @@ const zhHant: Messages = {
     signIn: "登入",
     signOut: "登出",
     contactSupport: "聯絡支援",
+    privacy: "隱私權說明",
+  },
+  analytics: {
+    bannerBody:
+      "我們只記錄匿名的操作次數（例如按了哪個按鈕），不記錄地址、筆記或對話內容。",
+    allow: "允許",
+    deny: "不要",
+    privacyLink: "隱私權說明",
+    toggleLabel: "使用分析",
   },
   status: {
     loggedIn: "已登入 · 生成卡片時上傳",

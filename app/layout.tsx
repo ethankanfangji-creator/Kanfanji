@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Noto_Sans_TC } from "next/font/google";
+import { AnalyticsProvider } from "@/components/analytics/AnalyticsProvider";
 import { I18nProvider } from "@/components/I18nProvider";
 import { OfflineAppShell } from "@/components/OfflineAppShell";
 import "./globals.css";
@@ -26,8 +27,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html lang="zh-Hant" className={`${notoSansTc.className} h-full antialiased`}>
       <body className="min-h-full">
         <I18nProvider>
-          <OfflineAppShell />
-          <main id="main-content">{children}</main>
+          <AnalyticsProvider>
+            <OfflineAppShell />
+            <main id="main-content">{children}</main>
+          </AnalyticsProvider>
         </I18nProvider>
       </body>
     </html>

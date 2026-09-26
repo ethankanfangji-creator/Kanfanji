@@ -1,4 +1,4 @@
-import { isActiveSubscriptionStatus } from "@/lib/billing-status";
+import { isActiveSubscriptionStatus, resolveProEntitlement } from "@/lib/billing-status";
 import { throwOnSupabaseError } from "@/lib/supabase-write";
 import { createAdminClient } from "@/utils/supabase/admin";
 
@@ -10,6 +10,13 @@ export async function persistSubscriptionEntitlement(input: {
   plan: string | null;
 }) {
   const admin = createAdminClient();
+  const { data: preserved, error: preservedError } = await admin
+    .from("subscriptions")
+    .select("manual_pro_until")
+    .eq("user_id", input.userId)
+    .maybeSingle();
+  throwOnSupabaseError(preservedError, "subscriptions manual pro");
+
   const { error: upsertError } = await admin.from("subscriptions").upsert(
     {
       user_id: input.userId,
@@ -30,7 +37,10 @@ export async function persistSubscriptionEntitlement(input: {
 
   return {
     status: input.status,
-    isPro: isActiveSubscriptionStatus(input.status),
+    isPro: resolveProEntitlement({
+      status: input.status,
+      manual_pro_until: preserved?.manual_pro_until,
+    }),
     plan: input.plan,
   };
 }

@@ -49,7 +49,7 @@ import {
 import { buildViewingReport } from "@/lib/viewing-report/build";
 import type { ViewingReport } from "@/lib/viewing-report/types";
 import type { ShareLinkRecord } from "@/lib/share-access/types";
-import { isActiveSubscriptionStatus } from "@/lib/billing-status";
+import { resolveProEntitlement } from "@/lib/billing-status";
 import { bankQuestions } from "@/lib/i18n";
 import { mergeRecordingAnswers } from "@/lib/merge-recording-answers";
 import { buildAddressConfirmationCandidate } from "@/lib/address-confirmation";
@@ -4015,15 +4015,19 @@ export function ClientPage() {
             .eq("user_id", currentUser.id),
           supabase
             .from("subscriptions")
-            .select("status, stripe_customer_id")
+            .select("status, stripe_customer_id, manual_pro_until")
             .eq("user_id", currentUser.id)
             .maybeSingle(),
         ]);
         const nextCount = count ?? 0;
-        const nextPro = isActiveSubscriptionStatus(sub?.status);
+        const nextPro = resolveProEntitlement({
+          status: sub?.status,
+          manual_pro_until: sub?.manual_pro_until,
+        });
         applyServerEntitlement({
           freeCount: nextCount,
           status: sub?.status,
+          manualProUntil: sub?.manual_pro_until,
           stripeCustomerId: sub?.stripe_customer_id,
         });
         if (

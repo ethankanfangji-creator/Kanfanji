@@ -112,6 +112,12 @@ export default function LoginPage() {
           >
             {messages.loginPage.backHome}
           </Link>
+          <Link
+            href="/privacy"
+            className="ml-4 inline-flex min-h-11 items-center text-[12px] font-medium text-[#6B7280] underline-offset-2 hover:underline"
+          >
+            {messages.nav.privacy}
+          </Link>
         </div>
       </div>
     </div>

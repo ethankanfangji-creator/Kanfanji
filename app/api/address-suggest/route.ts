@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { isLocale } from "@/lib/i18n/config";
+import { detectSuggestRegion } from "@/lib/address-suggest";
 import { createServerAddressService } from "@/lib/services/address/server-adapter";
 
 export const runtime = "nodejs";
@@ -20,7 +21,10 @@ export async function GET(request: Request) {
   try {
     const address = createServerAddressService();
     const suggestions = await address.suggest(q, request.signal, locale);
-    return NextResponse.json({ suggestions });
+    return NextResponse.json({
+      suggestions,
+      region: detectSuggestRegion(q),
+    });
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       return NextResponse.json({ suggestions: [] });

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { serverTrack } from "@/lib/analytics/server";
 import { getStripe } from "@/lib/stripe";
 import { throwOnSupabaseError } from "@/lib/supabase-write";
 import { createClient } from "@/utils/supabase/server";
@@ -6,7 +7,7 @@ import { createAdminClient } from "@/utils/supabase/admin";
 
 export const runtime = "nodejs";
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
     const priceId = process.env.STRIPE_PRICE_ID;
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
@@ -24,6 +25,27 @@ export async function POST() {
     }
     if (!user) {
       return NextResponse.json({ error: "請先登入" }, { status: 401 });
+    }
+
+    let trigger: "ai_quota" | "paywall" | "account" | null = null;
+    const raw = await request.clone().text();
+    if (raw.trim()) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        return NextResponse.json({ error: "INVALID_BODY" }, { status: 400 });
+      }
+      const value =
+        parsed && typeof parsed === "object" && "trigger" in parsed
+          ? (parsed as { trigger?: unknown }).trigger
+          : undefined;
+      if (value !== undefined) {
+        if (value !== "ai_quota" && value !== "paywall" && value !== "account") {
+          return NextResponse.json({ error: "INVALID_BODY" }, { status: 400 });
+        }
+        trigger = value;
+      }
     }
 
     const stripe = getStripe();
@@ -71,6 +93,13 @@ export async function POST() {
 
     if (!session.url) {
       return NextResponse.json({ error: "無法建立 Checkout Session" }, { status: 500 });
+    }
+
+    if (trigger) {
+      await serverTrack(user.id, {
+        name: "checkout_started",
+        props: { trigger },
+      });
     }
 
     return NextResponse.json({ url: session.url });

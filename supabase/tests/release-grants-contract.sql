@@ -157,7 +157,9 @@ begin
     and table_name = 'subscriptions'
     and grantee = 'authenticated'
     and privilege_type = 'SELECT';
-  if actual_columns is distinct from array['plan', 'status', 'user_id']::text[] then
+  if actual_columns is distinct from array[
+    'manual_pro_until', 'plan', 'status', 'user_id'
+  ]::text[] then
     raise exception 'authenticated subscription SELECT columns differ: %',
       actual_columns;
   end if;
@@ -176,6 +178,30 @@ begin
       and grantee in ('PUBLIC', 'anon', 'authenticated')
   ) then
     raise exception 'a collaboration/property table retains client column grants';
+  end if;
+
+  if has_table_privilege('anon', 'public.admin_audit_log', 'SELECT, INSERT, UPDATE, DELETE')
+     or has_table_privilege('authenticated', 'public.admin_audit_log', 'SELECT, INSERT, UPDATE, DELETE') then
+    raise exception 'admin_audit_log is visible to a client role';
+  end if;
+
+  if exists (
+    select 1
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and p.proname in (
+        'admin_list_users',
+        'admin_get_ai_usage',
+        'admin_reset_ai_quota',
+        'admin_set_manual_pro'
+      )
+      and (
+        has_function_privilege('anon', p.oid, 'execute')
+        or has_function_privilege('authenticated', p.oid, 'execute')
+      )
+  ) then
+    raise exception 'an admin RPC is executable by a client role';
   end if;
 end
 $contract$;

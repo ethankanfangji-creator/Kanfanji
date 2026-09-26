@@ -9,6 +9,14 @@ export type Messages = {
     signIn: string;
     signOut: string;
     contactSupport: string;
+    privacy: string;
+  };
+  analytics: {
+    bannerBody: string;
+    allow: string;
+    deny: string;
+    privacyLink: string;
+    toggleLabel: string;
   };
   status: {
     loggedIn: string;

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { LifeBuoy, LogIn, LogOut } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
+import { AnalyticsToggle } from "@/components/analytics/AnalyticsToggle";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useI18n } from "@/components/I18nProvider";
 import { MobileSheet } from "@/components/viewing-chat/shell/MobileSheet";
@@ -76,6 +77,7 @@ export function MobileAccountSheet({
         ) : (
           <>
             <LanguageSwitcher className="w-full" />
+            <AnalyticsToggle />
             <a
               href={supportMailto(locale, user?.email)}
               onClick={onClose}

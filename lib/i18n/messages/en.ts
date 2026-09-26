@@ -11,6 +11,15 @@ const en: Messages = {
     signIn: "Sign in",
     signOut: "Sign out",
     contactSupport: "Contact support",
+    privacy: "Privacy",
+  },
+  analytics: {
+    bannerBody:
+      "We only count anonymous actions (for example, which button you pressed). We do not record addresses, notes, or conversation text.",
+    allow: "Allow",
+    deny: "No thanks",
+    privacyLink: "Privacy",
+    toggleLabel: "Product analytics",
   },
   status: {
     loggedIn: "Signed in · uploads when you generate a card",

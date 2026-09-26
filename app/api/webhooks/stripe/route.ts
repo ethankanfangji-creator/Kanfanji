@@ -5,6 +5,8 @@ import {
   projectStripeSubscription,
   type StripeSubscriptionProjection,
 } from "@/lib/billing";
+import { isActiveSubscriptionStatus } from "@/lib/billing-status";
+import { serverTrack } from "@/lib/analytics/server";
 import { getStripe } from "@/lib/stripe";
 import { throwOnSupabaseError } from "@/lib/supabase-write";
 import { createAdminClient } from "@/utils/supabase/admin";
@@ -76,6 +78,21 @@ export async function POST(request: Request) {
         break;
     }
     const outcome = await persistStripeEvent(event, projection);
+    if (
+      event.type === "checkout.session.completed" &&
+      outcome === "applied" &&
+      projection?.userId &&
+      isActiveSubscriptionStatus(projection.status)
+    ) {
+      try {
+        await serverTrack(projection.userId, {
+          name: "subscription_activated",
+          props: { plan: "pro" },
+        });
+      } catch {
+        // A tracking failure must not change the webhook status.
+      }
+    }
     return NextResponse.json({ received: true, outcome });
   } catch {
     // Stripe retries 5xx responses. Never leak provider/database details.

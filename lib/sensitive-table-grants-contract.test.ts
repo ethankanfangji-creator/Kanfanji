@@ -67,3 +67,26 @@ describe("sensitive table least-privilege migration", () => {
     expect(viewingGrantBlock).not.toContain("share_token");
   });
 });
+
+describe("admin backend grants", () => {
+  const admin = readFileSync(
+    new URL("../supabase/migrations/20260926043000_admin_backend.sql", import.meta.url),
+    "utf8",
+  );
+
+  it("keeps the audit log and admin RPCs off client roles", () => {
+    expect(admin).toContain("revoke all on public.admin_audit_log from public, anon, authenticated");
+    expect(admin).toContain("grant select, insert on public.admin_audit_log to service_role");
+    for (const name of [
+      "admin_list_users",
+      "admin_get_ai_usage",
+      "admin_reset_ai_quota",
+      "admin_set_manual_pro",
+    ]) {
+      expect(admin).toContain(`revoke all on function public.${name}`);
+      expect(admin).toContain("from public, anon, authenticated");
+      expect(admin).toContain(`grant execute on function public.${name}`);
+    }
+    expect(admin).toContain("to service_role");
+  });
+});

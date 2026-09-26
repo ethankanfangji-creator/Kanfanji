@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   isActiveSubscriptionStatus,
   isProFromCheckoutReturn,
+  resolveProEntitlement,
 } from "./billing-status.ts";
 
 describe("isProFromCheckoutReturn", () => {
@@ -28,5 +29,42 @@ describe("isActiveSubscriptionStatus", () => {
     assert.equal(isActiveSubscriptionStatus("past_due"), false);
     assert.equal(isActiveSubscriptionStatus("canceled"), false);
     assert.equal(isActiveSubscriptionStatus(undefined), false);
+  });
+});
+
+describe("resolveProEntitlement", () => {
+  const now = new Date("2026-09-25T12:00:00.000Z");
+
+  it("is true for an active or trialing Stripe status", () => {
+    assert.equal(resolveProEntitlement({ status: "active" }, now), true);
+    assert.equal(resolveProEntitlement({ status: "trialing" }, now), true);
+  });
+
+  it("uses a future manual override when Stripe is inactive", () => {
+    assert.equal(
+      resolveProEntitlement(
+        { status: "inactive", manual_pro_until: "2026-10-01T00:00:00.000Z" },
+        now,
+      ),
+      true,
+    );
+    assert.equal(
+      resolveProEntitlement(
+        { status: "canceled", manual_pro_until: "2026-10-01T00:00:00.000Z" },
+        now,
+      ),
+      true,
+    );
+  });
+
+  it("is false when the manual override is missing or already past", () => {
+    assert.equal(resolveProEntitlement({ status: "inactive" }, now), false);
+    assert.equal(
+      resolveProEntitlement(
+        { status: "inactive", manual_pro_until: "2026-09-01T00:00:00.000Z" },
+        now,
+      ),
+      false,
+    );
   });
 });

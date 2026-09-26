@@ -59,6 +59,8 @@ describe("AddressAutocomplete", () => {
     await user.keyboard("{ArrowDown}{Enter}");
     expect(onSelect).toHaveBeenCalledWith(
       expect.objectContaining({ id: "2", label: expect.stringContaining("1201") }),
+      1,
+      "OTHER",
     );
   });
 

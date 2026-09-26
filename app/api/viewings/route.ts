@@ -7,7 +7,8 @@ import {
   VIEWING_PROJECTION_SELECT,
 } from "@/lib/collaboration/projection";
 import { requireAuthenticatedUser } from "@/lib/billing-guards";
-import { isActiveSubscriptionStatus } from "@/lib/billing-status";
+import { resolveProEntitlement } from "@/lib/billing-status";
+import { serverTrack } from "@/lib/analytics/server";
 import { throwOnSupabaseError } from "@/lib/supabase-write";
 import {
   canCreateCloudViewing,
@@ -119,14 +120,17 @@ export async function POST(request: Request) {
           .eq("user_id", user!.id),
         admin
           .from("subscriptions")
-          .select("status")
+          .select("status, manual_pro_until")
           .eq("user_id", user!.id)
           .maybeSingle(),
       ]);
     throwOnSupabaseError(countError, "viewings count");
     throwOnSupabaseError(subError, "subscriptions lookup");
 
-    const isPro = isActiveSubscriptionStatus(sub?.status);
+    const isPro = resolveProEntitlement({
+      status: sub?.status,
+      manual_pro_until: sub?.manual_pro_until,
+    });
     const freeCount = count ?? 0;
     const decision = canCreateCloudViewing({
       viewingId: null,
@@ -198,6 +202,18 @@ export async function POST(request: Request) {
     if (!data?.id) {
       return NextResponse.json({ error: "存檔失敗：沒有回傳 id" }, { status: 500 });
     }
+
+    const market =
+      body.market === "US" ||
+      body.market === "CA" ||
+      body.market === "TW" ||
+      body.market === "OTHER"
+        ? body.market
+        : "OTHER";
+    await serverTrack(user!.id, {
+      name: "viewing_created",
+      props: { storage: "cloud", market },
+    });
 
     return NextResponse.json({
       id: data.id,

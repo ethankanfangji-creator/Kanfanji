@@ -34,8 +34,19 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
-  // Refresh auth token; do not remove.
-  await supabase.auth.getClaims();
+  const { data } = await supabase.auth.getClaims();
+  const path = request.nextUrl.pathname;
+  const isAdminPath =
+    path === "/admin" || path.startsWith("/admin/") || path.startsWith("/api/admin");
+  if (isAdminPath && !data?.claims?.sub) {
+    const missing = path.startsWith("/api/")
+      ? NextResponse.json({ error: "Not found" }, { status: 404 })
+      : new NextResponse("Not found", { status: 404 });
+    supabaseResponse.cookies.getAll().forEach((cookie) => {
+      missing.cookies.set(cookie);
+    });
+    return missing;
+  }
 
   return supabaseResponse;
 }

@@ -27,6 +27,8 @@ import {
   mapAiErrorToUi,
   type AiUiAction,
 } from "@/lib/ai-boundary/map-ai-error-ui";
+import { track } from "@/lib/analytics/client";
+import type { AddressSource, AnalyticsRegion } from "@/lib/analytics/events";
 import type { AddressSuggestion } from "@/lib/address-suggest";
 import {
   candidateFromSuggestion,
@@ -128,6 +130,8 @@ export function ViewingChatApp() {
     queryAddress: string;
     candidate: AddressConfirmationCandidate;
     payload: AddressLookupPayloadLike;
+    source: AddressSource | null;
+    region: AnalyticsRegion | null;
   } | null>(null);
   const [busy, setBusy] = useState(false);
   const [sourceBusy, setSourceBusy] = useState(false);
@@ -423,6 +427,10 @@ export function ViewingChatApp() {
       turnWarnings: [],
     });
     refreshLocal();
+    track({
+      name: "viewing_created",
+      props: { storage: "local", market },
+    });
     setActiveId(thread.id);
     setAddressDraft(trimmed);
     setPendingAddressConfirm(null);
@@ -436,17 +444,39 @@ export function ViewingChatApp() {
     void enrichAddressIntel(thread.id, trimmed, seedRecord);
   }
 
+  function noteQuotaUi(
+  ui: { kind?: string; actions?: AiUiAction[] } | null | undefined,
+    endpoint: "turn" | "report" | "intel" | "ingest",
+  ) {
+    if (!ui) return;
+    if (ui.kind === "quota") {
+      track({
+        name: "ai_quota_exceeded",
+        props: { identity: userId ? "user" : "guest", endpoint },
+      });
+    }
+    if (ui.actions?.includes("upgrade")) {
+      track({ name: "paywall_shown", props: { trigger: "ai_quota" } });
+    }
+  }
+
   function acceptPendingAddress() {
     if (!pendingAddressConfirm) return;
-    const { candidate } = pendingAddressConfirm;
+    const { candidate, source, region } = pendingAddressConfirm;
+    if (source && region) {
+      track({ name: "address_confirmed", props: { source, region } });
+    }
     void bindConfirmedAddress(candidate.displayAddress);
   }
 
   function rejectPendingAddress() {
     if (!pendingAddressConfirm) return;
-    const query = pendingAddressConfirm.queryAddress;
+    const { queryAddress, source, region } = pendingAddressConfirm;
+    if (source && region) {
+      track({ name: "address_rejected", props: { source, region } });
+    }
     setPendingAddressConfirm(null);
-    setAddressDraft(query);
+    setAddressDraft(queryAddress);
     setStatus("");
   }
 
@@ -772,13 +802,14 @@ export function ViewingChatApp() {
     } catch (error) {
       const aiUi =
         error && typeof error === "object" && "aiUi" in error
-          ? (error as { aiUi: { message: string; actions: AiUiAction[] } }).aiUi
+          ? (error as { aiUi: { kind?: string; message: string; actions: AiUiAction[] } }).aiUi
           : null;
       const message =
         aiUi?.message ?? (error instanceof Error ? error.message : c.sourceIngestFailed);
       setStatus(message);
       setTurnError(message);
       setTurnErrorActions(aiUi?.actions ?? ["retry"]);
+      noteQuotaUi(aiUi, "ingest");
     } finally {
       setSourceBusy(false);
     }
@@ -812,15 +843,22 @@ export function ViewingChatApp() {
     void ingestSource({ sourceType: "user_text", text: text.trim() });
   }
 
-  function onSelectSuggestion(suggestion: AddressSuggestion) {
+  function onSelectSuggestion(
+    suggestion: AddressSuggestion,
+    index: number,
+    region: AnalyticsRegion,
+  ) {
     const candidate = candidateFromSuggestion(suggestion, suggestion.label);
     if (!candidate) {
       setStatus(t.address.suggestError);
       return;
     }
+    const source = suggestion.source;
     setPendingAddressConfirm({
       queryAddress: suggestion.label,
       candidate,
+      source,
+      region,
       payload: {
         displayAddress: candidate.displayAddress,
         propertyId: candidate.propertyId ?? undefined,
@@ -831,6 +869,10 @@ export function ViewingChatApp() {
     });
     setAddressDraft(candidate.displayAddress);
     setStatus("");
+    track({
+      name: "address_suggestion_selected",
+      props: { source, region, rank: index },
+    });
   }
 
   function onCommitAddressDraft(label: string) {
@@ -966,6 +1008,17 @@ export function ViewingChatApp() {
         );
         throw Object.assign(new Error(ui.message), { aiUi: ui });
       }
+      const kind = payload.image
+        ? "photo"
+        : payload.audio
+          ? "audio"
+          : payload.file
+            ? "file"
+            : "text";
+      track({
+        name: "ai_message_sent",
+        props: { kind, is_reply: Boolean(replyTo) },
+      });
       let nextMessages = data.messages;
 
       if (payload.image) {
@@ -1075,12 +1128,13 @@ export function ViewingChatApp() {
       // Optimistic user message already saved — keep it visible
       const aiUi =
         error && typeof error === "object" && "aiUi" in error
-          ? (error as { aiUi: { message: string; actions: AiUiAction[] } }).aiUi
+          ? (error as { aiUi: { kind?: string; message: string; actions: AiUiAction[] } }).aiUi
           : null;
       const message = aiUi?.message ?? (error instanceof Error ? error.message : c.turnFailed);
       setStatus(message);
       setTurnError(message);
       setTurnErrorActions(aiUi?.actions ?? ["retry"]);
+      noteQuotaUi(aiUi, "turn");
     } finally {
       setBusy(false);
     }
@@ -1191,13 +1245,14 @@ export function ViewingChatApp() {
     } catch (error) {
       const aiUi =
         error && typeof error === "object" && "aiUi" in error
-          ? (error as { aiUi: { message: string; actions: AiUiAction[] } }).aiUi
+          ? (error as { aiUi: { kind?: string; message: string; actions: AiUiAction[] } }).aiUi
           : null;
       const message =
         aiUi?.message ?? (error instanceof Error ? error.message : c.reportFailed);
       setStatus(message);
       setTurnError(message);
       setTurnErrorActions(aiUi?.actions ?? ["retry"]);
+      noteQuotaUi(aiUi, "report");
     } finally {
       setBusy(false);
     }
@@ -1218,7 +1273,11 @@ export function ViewingChatApp() {
         return;
       }
       try {
-        const response = await fetch("/api/create-checkout-session", { method: "POST" });
+        const response = await fetch("/api/create-checkout-session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ trigger: "ai_quota" }),
+        });
         const payload = (await response.json()) as { url?: string; error?: string };
         if (payload.url) {
           window.location.href = payload.url;
@@ -1275,6 +1334,12 @@ export function ViewingChatApp() {
 
   function openCompare() {
     if (compareSelectedIds.length < 2) return;
+    if (compareSelectedIds.length === 2 || compareSelectedIds.length === 3) {
+      track({
+        name: "compare_opened",
+        props: { count: compareSelectedIds.length, source: "chat_history" },
+      });
+    }
     router.push(
       `/compare?ids=${compareSelectedIds.map((id) => encodeURIComponent(id)).join(",")}`,
     );

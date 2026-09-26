@@ -3,6 +3,8 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Loader2, MapPin, Search } from "lucide-react";
 import { useLocale } from "@/components/I18nProvider";
+import { track } from "@/lib/analytics/client";
+import type { AnalyticsRegion } from "@/lib/analytics/events";
 import type { AddressSuggestion } from "@/lib/address-suggest";
 
 export type AddressAutocompleteCopy = {
@@ -33,7 +35,7 @@ export function AddressAutocomplete({
 }: {
   value: string;
   onChange: (value: string) => void;
-  onSelect: (suggestion: AddressSuggestion) => void;
+  onSelect: (suggestion: AddressSuggestion, index: number, region: AnalyticsRegion) => void;
   /** Enter / search icon with no highlighted suggestion — commit free-typed address. */
   onCommit?: (value: string) => void;
   disabled?: boolean;
@@ -47,10 +49,13 @@ export function AddressAutocomplete({
   const [highlight, setHighlight] = useState(0);
   const [suggest, setSuggest] = useState<SuggestState>({ status: "idle" });
   const requestIdRef = useRef(0);
+  const searchTrackedRef = useRef(false);
+  const regionRef = useRef<AnalyticsRegion>("OTHER");
 
   useEffect(() => {
     const q = value.trim();
     if (confirmed || q.length < 3) {
+      searchTrackedRef.current = false;
       setSuggest({ status: "idle" });
       setOpen(false);
       return;
@@ -73,8 +78,23 @@ export function AddressAutocomplete({
             setSuggest({ status: "error", message: copy.error });
             return;
           }
-          const payload = (await response.json()) as { suggestions?: AddressSuggestion[] };
+          const payload = (await response.json()) as {
+            suggestions?: AddressSuggestion[];
+            region?: AnalyticsRegion;
+          };
           const items = Array.isArray(payload.suggestions) ? payload.suggestions : [];
+          if (
+            payload.region === "CA" ||
+            payload.region === "US" ||
+            payload.region === "TW" ||
+            payload.region === "OTHER"
+          ) {
+            regionRef.current = payload.region;
+            if (!searchTrackedRef.current) {
+              searchTrackedRef.current = true;
+              track({ name: "address_search_started", props: { region: payload.region } });
+            }
+          }
           if (items.length === 0) {
             setSuggest({ status: "empty" });
           } else {
@@ -100,7 +120,8 @@ export function AddressAutocomplete({
   function selectIndex(index: number) {
     const item = items[index];
     if (!item) return;
-    onSelect(item);
+    onSelect(item, index, regionRef.current);
+    searchTrackedRef.current = false;
     setOpen(false);
     setSuggest({ status: "idle" });
   }

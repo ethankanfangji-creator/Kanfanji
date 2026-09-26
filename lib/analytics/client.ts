@@ -73,16 +73,20 @@ async function loadClient(): Promise<PostHogLike | null> {
 
 export async function setAnalyticsConsent(value: "granted" | "denied") {
   if (!analyticsKey() || hasGlobalPrivacyControl()) return;
-  const posthog = await loadClient();
-  if (!posthog) return;
-  if (value === "granted") {
-    posthog.set_config({ persistence: "localStorage+cookie" });
-    posthog.opt_in_capturing();
-  } else {
+  if (value !== "granted") {
+    // A deny must not import posthog-js. Opt out only if Allow already loaded it.
+    if (!client && !loading) return;
+    const posthog = client ?? (await loading);
+    if (!posthog) return;
     posthog.opt_out_capturing();
     posthog.reset();
     posthog.set_config({ persistence: "memory" });
+    return;
   }
+  const posthog = await loadClient();
+  if (!posthog) return;
+  posthog.set_config({ persistence: "localStorage+cookie" });
+  posthog.opt_in_capturing();
 }
 
 export function track(event: AnalyticsEvent) {

@@ -49,6 +49,7 @@ import {
 import { buildViewingReport } from "@/lib/viewing-report/build";
 import type { ViewingReport } from "@/lib/viewing-report/types";
 import type { ShareLinkRecord } from "@/lib/share-access/types";
+import { publishAnalyticsConsentToAccount } from "@/lib/analytics/preferences";
 import { resolveProEntitlement } from "@/lib/billing-status";
 import { bankQuestions } from "@/lib/i18n";
 import { mergeRecordingAnswers } from "@/lib/merge-recording-answers";
@@ -4007,6 +4008,7 @@ export function ClientPage() {
       setUser(currentUser);
 
       if (currentUser) {
+        await publishAnalyticsConsentToAccount(supabase, currentUser.user_metadata ?? null);
         await claimGuestViewingData(currentUser.id);
         const [{ count }, { data: sub }] = await Promise.all([
           supabase

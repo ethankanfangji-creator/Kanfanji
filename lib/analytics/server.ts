@@ -1,5 +1,6 @@
 import "server-only";
 
+import { headers } from "next/headers";
 import { PostHog } from "posthog-node";
 import { createAdminClient } from "@/utils/supabase/admin";
 import type { AnalyticsEvent } from "./events";
@@ -20,7 +21,16 @@ function getClient(): PostHog | null {
   return client;
 }
 
+async function globalPrivacyControlRequested(): Promise<boolean> {
+  try {
+    return (await headers()).get("sec-gpc") === "1";
+  } catch {
+    return false;
+  }
+}
+
 async function consentGranted(userId: string): Promise<boolean> {
+  if (await globalPrivacyControlRequested()) return false;
   const admin = createAdminClient();
   const { data, error } = await admin.auth.admin.getUserById(userId);
   if (error || !data.user) return false;

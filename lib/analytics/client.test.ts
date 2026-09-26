@@ -53,6 +53,16 @@ describe("analytics client", () => {
     expect(capture).not.toHaveBeenCalled();
   });
 
+  it("does not load PostHog when consent is denied", async () => {
+    process.env.NEXT_PUBLIC_POSTHOG_KEY = "phc_test";
+    localStorage.setItem("kanfangji.analytics.consent.v1", "denied");
+    const analytics = await import("./client");
+    await analytics.setAnalyticsConsent("denied");
+    expect(init).not.toHaveBeenCalled();
+    await analytics.setAnalyticsConsent("granted");
+    await vi.waitFor(() => expect(init).toHaveBeenCalled());
+  });
+
   it("does not send when Global Privacy Control is on", async () => {
     process.env.NEXT_PUBLIC_POSTHOG_KEY = "phc_test";
     localStorage.setItem("kanfangji.analytics.consent.v1", "granted");

@@ -7,6 +7,7 @@ import {
   LoginAuthFields,
   type LoginGateCopy,
 } from "@/components/auth/LoginGateDialog";
+import { publishAnalyticsConsentToAccount } from "@/lib/analytics/preferences";
 import { claimGuestViewingData } from "@/lib/auth/claim-guest-data";
 import { safeInternalNextPath } from "@/lib/http/safe-next";
 import { createClient } from "@/utils/supabase/client";
@@ -68,6 +69,7 @@ export default function LoginPage() {
         } = await supabase.auth.getUser();
         if (!user) throw new Error(messages.loginPage.submitSignIn);
         await claimGuestViewingData(user.id);
+        await publishAnalyticsConsentToAccount(supabase, user.user_metadata ?? null);
         const next = new URLSearchParams(window.location.search).get("next");
         window.location.href = safeInternalNextPath(next);
         return;

@@ -28,3 +28,9 @@ export function writeAnalyticsConsent(value: AnalyticsConsent) {
 export function captureAllowed(): boolean {
   return readAnalyticsConsent() === "granted" && !hasGlobalPrivacyControl();
 }
+
+/** Value stored on the account so server events follow this device. */
+export function mirroredAnalyticsConsent(): AnalyticsConsent {
+  if (hasGlobalPrivacyControl()) return "denied";
+  return readAnalyticsConsent() === "granted" ? "granted" : "denied";
+}

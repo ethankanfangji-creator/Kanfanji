@@ -68,6 +68,23 @@ describe("sensitive table least-privilege migration", () => {
   });
 });
 
+describe("client subscription reads", () => {
+  it("do not select stripe_customer_id (not granted to authenticated)", () => {
+    const entitlement = readFileSync(
+      new URL("../components/client-page/useBillingEntitlement.ts", import.meta.url),
+      "utf8",
+    );
+    const clientPage = readFileSync(
+      new URL("../components/client-page/ClientPage.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(entitlement).toContain("CLIENT_SUBSCRIPTION_SELECT");
+    expect(clientPage).toContain("CLIENT_SUBSCRIPTION_SELECT");
+    expect(entitlement).not.toMatch(/\.select\([^)]*stripe_customer_id/);
+    expect(clientPage).not.toMatch(/\.select\([^)]*stripe_customer_id/);
+  });
+});
+
 describe("admin backend grants", () => {
   const admin = readFileSync(
     new URL("../supabase/migrations/20260926043000_admin_backend.sql", import.meta.url),

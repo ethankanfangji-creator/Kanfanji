@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
-import { resolveProEntitlement } from "@/lib/billing-status";
+import {
+  CLIENT_SUBSCRIPTION_SELECT,
+  hasStripeCustomerFromClientRow,
+  resolveProEntitlement,
+} from "@/lib/billing-status";
 import { getSupabase } from "@/lib/supabase";
 
 export type BillingPaywallCopy = {
@@ -71,13 +75,13 @@ export function useBillingEntitlement(options: {
           .eq("user_id", user.id),
         supabase
           .from("subscriptions")
-          .select("status, plan, stripe_customer_id, manual_pro_until")
+          .select(CLIENT_SUBSCRIPTION_SELECT)
           .eq("user_id", user.id)
           .maybeSingle(),
       ]);
       if (cancelled) return false;
       setFreeCount(count ?? 0);
-      setHasStripeCustomer(Boolean(sub?.stripe_customer_id));
+      setHasStripeCustomer(hasStripeCustomerFromClientRow(sub));
       const pro = resolveProEntitlement({
         status: sub?.status,
         manual_pro_until: sub?.manual_pro_until,
@@ -189,10 +193,10 @@ export function useBillingEntitlement(options: {
       freeCount: number;
       status?: string | null;
       manualProUntil?: string | null;
-      stripeCustomerId?: string | null;
+      hasStripeCustomer?: boolean;
     }) => {
       setFreeCount(input.freeCount);
-      setHasStripeCustomer(Boolean(input.stripeCustomerId));
+      setHasStripeCustomer(Boolean(input.hasStripeCustomer));
       setIsPro(
         resolveProEntitlement({
           status: input.status,

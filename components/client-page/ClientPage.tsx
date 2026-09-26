@@ -49,7 +49,11 @@ import {
 import { buildViewingReport } from "@/lib/viewing-report/build";
 import type { ViewingReport } from "@/lib/viewing-report/types";
 import type { ShareLinkRecord } from "@/lib/share-access/types";
-import { resolveProEntitlement } from "@/lib/billing-status";
+import {
+  CLIENT_SUBSCRIPTION_SELECT,
+  hasStripeCustomerFromClientRow,
+  resolveProEntitlement,
+} from "@/lib/billing-status";
 import { bankQuestions } from "@/lib/i18n";
 import { mergeRecordingAnswers } from "@/lib/merge-recording-answers";
 import { buildAddressConfirmationCandidate } from "@/lib/address-confirmation";
@@ -4015,7 +4019,7 @@ export function ClientPage() {
             .eq("user_id", currentUser.id),
           supabase
             .from("subscriptions")
-            .select("status, stripe_customer_id, manual_pro_until")
+            .select(CLIENT_SUBSCRIPTION_SELECT)
             .eq("user_id", currentUser.id)
             .maybeSingle(),
         ]);
@@ -4028,7 +4032,7 @@ export function ClientPage() {
           freeCount: nextCount,
           status: sub?.status,
           manualProUntil: sub?.manual_pro_until,
-          stripeCustomerId: sub?.stripe_customer_id,
+          hasStripeCustomer: hasStripeCustomerFromClientRow(sub),
         });
         if (
           !canCreateCloudViewing({

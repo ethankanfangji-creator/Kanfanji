@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState, type FormEvent, type RefObject } from "react";
+import Link from "next/link";
+import { useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
 import { Eye, EyeOff, X } from "lucide-react";
 import { Dialog } from "@/components/ui/Dialog";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
@@ -20,6 +21,7 @@ export type LoginGateCopy = {
   hidePassword: string;
   emailInvalid: string;
   passwordTooShort: string;
+  forgotPassword?: string;
 };
 
 function looksLikeEmail(value: string): boolean {
@@ -54,7 +56,7 @@ export function LoginAuthFields({
   email: string;
   password: string;
   mode: "signin" | "signup";
-  error: string;
+  error: ReactNode;
   busy: boolean;
   emailInputRef?: RefObject<HTMLInputElement | null>;
   showClose?: boolean;
@@ -119,6 +121,7 @@ export function LoginAuthFields({
             autoCapitalize="none"
             autoCorrect="off"
             spellCheck={false}
+            placeholder="you@email.com"
             value={email}
             onChange={(event) => onEmailChange(event.target.value)}
             onBlur={() => setEmailTouched(true)}
@@ -151,6 +154,7 @@ export function LoginAuthFields({
               minLength={6}
               maxLength={128}
               autoComplete={mode === "signin" ? "current-password" : "new-password"}
+              placeholder={copy.password}
               value={password}
               onChange={(event) => onPasswordChange(event.target.value)}
               onBlur={() => setPasswordTouched(true)}
@@ -192,10 +196,21 @@ export function LoginAuthFields({
         </button>
       </form>
 
-      {error ? (
+      {typeof error === "string" && error ? (
         <p role="alert" className="mt-3 text-[12px] leading-[1.4] text-[#991B1B]">
           {error}
         </p>
+      ) : error ? (
+        error
+      ) : null}
+
+      {mode === "signin" && copy.forgotPassword ? (
+        <Link
+          href="/auth/forgot"
+          className="mt-2 inline-flex min-h-11 items-center text-[12px] font-medium text-[#6B7280] underline-offset-2 hover:underline"
+        >
+          {copy.forgotPassword}
+        </Link>
       ) : null}
 
       <button
@@ -217,6 +232,7 @@ export function LoginGateDialog({
   mode,
   error,
   busy,
+  pendingSignup,
   onEmailChange,
   onPasswordChange,
   onModeChange,
@@ -228,8 +244,9 @@ export function LoginGateDialog({
   email: string;
   password: string;
   mode: "signin" | "signup";
-  error: string;
+  error: ReactNode;
   busy: boolean;
+  pendingSignup?: ReactNode;
   onEmailChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
   onModeChange: (mode: "signin" | "signup") => void;
@@ -243,12 +260,24 @@ export function LoginGateDialog({
       open={open}
       onClose={onClose}
       title={copy.title}
-      description={copy.body}
+      description={pendingSignup ? undefined : copy.body}
       backdropClassName="z-50 backdrop-blur-[2px] overflow-auto"
       className="relative"
       initialFocusRef={emailInputRef}
     >
-      {open ? (
+      {open && pendingSignup ? (
+        <>
+          <button
+            type="button"
+            aria-label={copy.close}
+            onClick={onClose}
+            className="absolute right-4 top-4 flex min-h-11 min-w-11 items-center justify-center rounded-full bg-[#F5F3F0]"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+          <div className="mt-2">{pendingSignup}</div>
+        </>
+      ) : open ? (
         <LoginAuthFields
           copy={copy}
           email={email}

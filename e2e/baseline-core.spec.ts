@@ -110,11 +110,7 @@ test("login exposes loading and safe error states without a real account", async
   }
 
   releaseResponse();
-  await expect(
-    page.getByRole("status").filter({
-      hasText: /Baseline simulated auth failure|Load failed/,
-    }),
-  ).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveText(/暫時無法完成，請稍後再試/);
   await expect(page.getByRole("button", { name: "登入", exact: true })).toBeEnabled();
 });
 

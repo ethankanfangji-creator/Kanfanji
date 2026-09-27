@@ -559,6 +559,31 @@ export type Messages = {
     ctaUpgrade: string;
     ctaRetry: string;
   };
+  authFlow: {
+    signupNeutral: string;
+    goToSignIn: string;
+    forgotPassword: string;
+    resendSignup: string;
+    resendSignupStatus: string;
+    resendVerification: string;
+    resendCooldown: string;
+    invalidCredentials: string;
+    emailNotConfirmed: string;
+    rateLimited: string;
+    genericError: string;
+    forgotTitle: string;
+    forgotBody: string;
+    forgotSubmit: string;
+    forgotOk: string;
+    resetTitle: string;
+    resetBody: string;
+    newPassword: string;
+    confirmPassword: string;
+    passwordMismatch: string;
+    resetSubmit: string;
+    resetInvalid: string;
+    requestNewLink: string;
+  };
   loginPage: {
     signInTitle: string;
     signUpTitle: string;
@@ -568,7 +593,6 @@ export type Messages = {
     switchToSignUp: string;
     switchToSignIn: string;
     backHome: string;
-    signupOk: string;
   };
   viewings: {
     title: string;

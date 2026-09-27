@@ -12,6 +12,40 @@ import { reportAuthFailure, type AuthFailureKind } from "@/lib/auth/auth-flow";
 import { readRecoveryParams } from "@/lib/auth/recovery-params";
 import { createClient } from "@/utils/supabase/client";
 
+const RESET_RECOVERY_KEY = "kanfangji.resetRecovery";
+const RESET_MOUNT_KEY = "kanfangji.resetMount";
+
+function resetRecoveryMark(): "ready" | "left" | null {
+  try {
+    const value = window.sessionStorage.getItem(RESET_RECOVERY_KEY);
+    return value === "ready" || value === "left" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function setResetRecoveryMark(value: "ready" | "left") {
+  try {
+    window.sessionStorage.setItem(RESET_RECOVERY_KEY, value);
+  } catch {
+    // Private mode can reject storage; the in-page event still gates this visit.
+  }
+}
+
+/** Code from the document load, after initialize() has removed it from the address bar. */
+function codeFromInitialNavigation(): string | null {
+  const href = performance.getEntriesByType("navigation")[0]?.name;
+  if (!href) return null;
+  try {
+    const url = new URL(href);
+    if (url.pathname !== "/auth/reset") return null;
+    const params = readRecoveryParams(href);
+    return params.type === "code" ? params.code : null;
+  } catch {
+    return null;
+  }
+}
+
 function PasswordField({
   id,
   label,
@@ -84,24 +118,42 @@ export default function ResetPasswordPage() {
 
   useEffect(() => {
     let cancelled = false;
-    // Same-browser PKCE is exchanged inside the client during initialize, which
-    // emits PASSWORD_RECOVERY and consumes the verifier. A later exchange then
-    // fails. That event is the only proof this navigation created a recovery
-    // session — an existing sign-in must not be allowed to set a password.
+    // createBrowserClient exchanges a same-browser PKCE code during initialize
+    // and emits PASSWORD_RECOVERY on a later turn, after the verifier is gone.
+    // A follow-up exchange then fails. That event, or a session saved only
+    // once this code has left the URL, proves this navigation created a
+    // recovery session. An existing sign-in must not set a password.
     let recoveryEstablished = false;
     const supabase = createClient();
+    const mountId = `${Date.now()}-${Math.random()}`;
+    try {
+      window.sessionStorage.setItem(RESET_MOUNT_KEY, mountId);
+    } catch {
+      // Same as setResetRecoveryMark: this visit can still use PASSWORD_RECOVERY.
+    }
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event) => {
       if (event === "PASSWORD_RECOVERY") recoveryEstablished = true;
     });
 
+    async function consumedRecoverySession(code: string) {
+      if (!recoveryEstablished) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      if (recoveryEstablished) return true;
+      if (new URL(window.location.href).searchParams.get("code") === code) return false;
+      const { data } = await supabase.auth.getSession();
+      return data.session != null;
+    }
+
     async function establish() {
       const params = readRecoveryParams(window.location.href);
       try {
         if (params.type === "code") {
           const { error } = await supabase.auth.exchangeCodeForSession(params.code);
-          if (error && !recoveryEstablished) throw error;
+          if (error && !(await consumedRecoverySession(params.code))) throw error;
+          setResetRecoveryMark("ready");
         } else if (params.type === "otp") {
           const { error } = await supabase.auth.verifyOtp({
             type: "recovery",
@@ -114,6 +166,22 @@ export default function ResetPasswordPage() {
             refresh_token: params.refreshToken,
           });
           if (error) throw error;
+        } else if (resetRecoveryMark() === "ready") {
+          const { data } = await supabase.auth.getSession();
+          if (!data.session) {
+            if (!cancelled) setInvalid(true);
+            return;
+          }
+        } else if (
+          resetRecoveryMark() !== "left" &&
+          window.location.pathname === "/auth/reset"
+        ) {
+          const initialCode = codeFromInitialNavigation();
+          if (!initialCode || !(await consumedRecoverySession(initialCode))) {
+            if (!cancelled) setInvalid(true);
+            return;
+          }
+          setResetRecoveryMark("ready");
         } else {
           if (!cancelled) setInvalid(true);
           return;
@@ -129,6 +197,14 @@ export default function ResetPasswordPage() {
     return () => {
       cancelled = true;
       subscription.unsubscribe();
+      setTimeout(() => {
+        try {
+          if (window.sessionStorage.getItem(RESET_MOUNT_KEY) !== mountId) return;
+        } catch {
+          return;
+        }
+        if (window.location.pathname !== "/auth/reset") setResetRecoveryMark("left");
+      }, 0);
     };
   }, []);
 

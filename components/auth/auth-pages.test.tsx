@@ -10,13 +10,16 @@ import ForgotPasswordPage from "@/app/auth/forgot/page";
 import ResetPasswordPage from "@/app/auth/reset/page";
 import { LoginGateDialog, type LoginGateCopy } from "./LoginGateDialog";
 
-const { resetPasswordForEmail, verifyOtp, onAuthStateChange } = vi.hoisted(() => ({
-  resetPasswordForEmail: vi.fn(),
-  verifyOtp: vi.fn(),
-  onAuthStateChange: vi.fn(() => ({
-    data: { subscription: { unsubscribe: vi.fn() } },
-  })),
-}));
+const { resetPasswordForEmail, verifyOtp, onAuthStateChange, exchangeCodeForSession, getSession } =
+  vi.hoisted(() => ({
+    resetPasswordForEmail: vi.fn(),
+    verifyOtp: vi.fn(),
+    onAuthStateChange: vi.fn((_callback?: (event: string) => void) => ({
+      data: { subscription: { unsubscribe: vi.fn() } },
+    })),
+    exchangeCodeForSession: vi.fn(),
+    getSession: vi.fn(),
+  }));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
@@ -28,7 +31,8 @@ vi.mock("@/utils/supabase/client", () => ({
       resetPasswordForEmail,
       verifyOtp,
       onAuthStateChange,
-      exchangeCodeForSession: vi.fn(),
+      exchangeCodeForSession,
+      getSession,
       setSession: vi.fn(),
       updateUser: vi.fn(),
       signUp: vi.fn(),
@@ -69,7 +73,13 @@ beforeEach(() => {
   window.sessionStorage.clear();
   resetPasswordForEmail.mockReset();
   verifyOtp.mockReset();
-  onAuthStateChange.mockClear();
+  onAuthStateChange.mockReset();
+  onAuthStateChange.mockImplementation(() => ({
+    data: { subscription: { unsubscribe: vi.fn() } },
+  }));
+  exchangeCodeForSession.mockReset();
+  getSession.mockReset();
+  getSession.mockResolvedValue({ data: { session: null } });
   setLanguage("zh-TW");
 });
 
@@ -207,5 +217,96 @@ describe("password reset link", () => {
     expect(await screen.findByLabelText("新密碼")).toBeVisible();
     expect(verifyOtp).toHaveBeenCalledWith({ type: "recovery", token_hash: "x" });
     expect(screen.queryByRole("combobox")).toBeNull();
+  });
+
+  it("shows the form when initialize already exchanged the code", async () => {
+    window.history.replaceState({}, "", "/auth/reset?code=abc");
+    onAuthStateChange.mockImplementation((callback) => {
+      if (callback) setTimeout(() => callback("PASSWORD_RECOVERY"), 0);
+      return { data: { subscription: { unsubscribe: vi.fn() } } };
+    });
+    exchangeCodeForSession.mockResolvedValue({
+      error: { message: "PKCE code verifier not found in storage" },
+    });
+
+    render(
+      <I18nProvider>
+        <ResetPasswordPage />
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByLabelText("新密碼")).toBeVisible();
+    expect(getSession).not.toHaveBeenCalled();
+  });
+
+  it("accepts a recovery session already stored after the code left the URL", async () => {
+    window.history.replaceState({}, "", "/auth/reset?code=abc");
+    exchangeCodeForSession.mockImplementation(async () => {
+      window.history.replaceState({}, "", "/auth/reset");
+      return { error: { message: "code already used" } };
+    });
+    getSession.mockResolvedValue({ data: { session: { access_token: "recovery" } } });
+
+    render(
+      <I18nProvider>
+        <ResetPasswordPage />
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByLabelText("新密碼")).toBeVisible();
+    expect(getSession).toHaveBeenCalled();
+  });
+
+  it("does not open the form for a signed-in visit with no recovery code", async () => {
+    window.history.replaceState({}, "", "/auth/reset");
+    getSession.mockResolvedValue({ data: { session: { access_token: "signed-in" } } });
+
+    render(
+      <I18nProvider>
+        <ResetPasswordPage />
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText(/這個重設連結無效或已過期/)).toBeVisible();
+    expect(screen.queryByLabelText("新密碼")).toBeNull();
+    expect(getSession).not.toHaveBeenCalled();
+  });
+
+  it("does not let an existing sign-in set a password when the code is still unused", async () => {
+    window.history.replaceState({}, "", "/auth/reset?code=abc");
+    exchangeCodeForSession.mockResolvedValue({ error: { message: "invalid grant" } });
+    getSession.mockResolvedValue({ data: { session: { access_token: "signed-in" } } });
+
+    render(
+      <I18nProvider>
+        <ResetPasswordPage />
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText(/這個重設連結無效或已過期/)).toBeVisible();
+    expect(screen.queryByLabelText("新密碼")).toBeNull();
+    expect(getSession).not.toHaveBeenCalled();
+  });
+
+  it("keeps a session from the original reset link when the effect subscribes late", async () => {
+    const navigation = vi.spyOn(performance, "getEntriesByType").mockImplementation((type) => {
+      if (type !== "navigation") return [];
+      return [{ name: "http://localhost:3000/auth/reset?code=abc" } as PerformanceNavigationTiming];
+    });
+    window.history.replaceState({}, "", "/auth/reset");
+    getSession.mockResolvedValue({ data: { session: { access_token: "recovery" } } });
+
+    render(
+      <I18nProvider>
+        <ResetPasswordPage />
+      </I18nProvider>,
+    );
+
+    try {
+      expect(await screen.findByLabelText("新密碼")).toBeVisible();
+      expect(exchangeCodeForSession).not.toHaveBeenCalled();
+    } finally {
+      navigation.mockRestore();
+    }
   });
 });

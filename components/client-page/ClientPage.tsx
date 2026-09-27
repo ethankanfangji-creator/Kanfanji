@@ -34,7 +34,9 @@ import { DecisionSummaryCard } from "@/components/share-card/DecisionSummaryCard
 import { SharePrivacyCheck } from "@/components/share-card/SharePrivacyCheck";
 import { CardImageExportButton } from "@/components/share-card/CardImageExportButton";
 import { Dialog } from "@/components/ui/Dialog";
+import { AuthNotice } from "@/components/auth/AuthNotice";
 import { LoginGateDialog } from "@/components/auth/LoginGateDialog";
+import { SignupPendingPanel } from "@/components/auth/SignupPendingPanel";
 import { useI18n } from "@/components/I18nProvider";
 import {
   buildCardFromViewing,
@@ -154,6 +156,8 @@ import {
   type SessionUiStatus,
 } from "@/lib/sync";
 import { claimGuestViewingData } from "@/lib/auth/claim-guest-data";
+import { reportAuthFailure, signupUiOutcome, type AuthFailureKind } from "@/lib/auth/auth-flow";
+import { authRedirectUrl } from "@/lib/auth/auth-urls";
 import {
   canEnterStep,
   canGenerateShareCard,
@@ -412,6 +416,8 @@ export function ClientPage() {
   const [loginPassword, setLoginPassword] = useState("");
   const [loginMode, setLoginMode] = useState<"signin" | "signup">("signin");
   const [loginError, setLoginError] = useState("");
+  const [loginNotice, setLoginNotice] = useState<AuthFailureKind | null>(null);
+  const [signupPendingEmail, setSignupPendingEmail] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(() => !isSupabaseConfigured());
   const [legacyDraftClaim, setLegacyDraftClaim] = useState<LegacyDraftClaimStatus>({
@@ -536,7 +542,6 @@ export function ClientPage() {
     const supabase = getSupabase();
     if (!supabase) {
       setPersistenceAccountScope(null);
-      setAuthReady(true);
       return;
     }
 
@@ -3970,36 +3975,46 @@ export function ClientPage() {
   async function handleLoginForCard(event: React.FormEvent) {
     event.preventDefault();
     setLoginError("");
+    setLoginNotice(null);
     setSyncingCard(true);
     const supabase = getSupabase();
     if (!supabase) {
-      setLoginError("尚未設定 Supabase");
+      setLoginError(messages.loginGate.needCloud);
       setSyncingCard(false);
       return;
     }
 
     try {
       if (loginMode === "signup") {
+        const trimmedEmail = loginEmail.trim();
         const { data, error } = await supabase.auth.signUp({
-          email: loginEmail.trim(),
+          email: trimmedEmail,
           password: loginPassword,
+          options: {
+            emailRedirectTo: authRedirectUrl("/auth/callback"),
+          },
         });
-        if (error) throw error;
-        if (!data.session) {
-          const { error: signInError } = await supabase.auth.signInWithPassword({
-            email: loginEmail.trim(),
-            password: loginPassword,
-          });
-          if (signInError) {
-            throw new Error("註冊成功，請先到信箱驗證後再登入上傳");
-          }
+        const outcome = signupUiOutcome(error, Boolean(data?.session));
+        if (outcome === "pending") {
+          setSignupPendingEmail(trimmedEmail);
+          setSyncingCard(false);
+          return;
+        }
+        if (outcome !== "signed_in") {
+          setLoginNotice(error ? reportAuthFailure(error) : "generic");
+          setSyncingCard(false);
+          return;
         }
       } else {
         const { error } = await supabase.auth.signInWithPassword({
           email: loginEmail.trim(),
           password: loginPassword,
         });
-        if (error) throw error;
+        if (error) {
+          setLoginNotice(reportAuthFailure(error));
+          setSyncingCard(false);
+          return;
+        }
       }
       const {
         data: { user: currentUser },
@@ -4054,8 +4069,9 @@ export function ClientPage() {
       if (intent === "copy" || intent === "share" || intent === "exportImage") {
         requestShareAction(intent);
       }
-    } catch (error) {
-      setLoginError(error instanceof Error ? error.message : "登入失敗");
+    } catch {
+      console.error("auth_error");
+      setLoginNotice("generic");
       setSyncingCard(false);
     }
   }
@@ -4063,11 +4079,15 @@ export function ClientPage() {
   const closeLoginGate = useCallback(() => {
     setShowLoginGate(false);
     setLoginGateIntent(null);
+    setSignupPendingEmail(null);
+    setLoginNotice(null);
+    setLoginError("");
   }, []);
 
   const handleLoginModeChange = useCallback((mode: "signin" | "signup") => {
     setLoginMode(mode);
     setLoginError("");
+    setLoginNotice(null);
   }, []);
 
   function readVideoDuration(file: Blob): Promise<number | undefined> {
@@ -5870,9 +5890,10 @@ export function ClientPage() {
           open={showLoginGate}
           copy={{
             ...messages.loginGate,
-            title: messages.loginGate.title,
-            body:
-              loginGateIntent === "exportImage"
+            title: signupPendingEmail ? messages.loginPage.signUpTitle : messages.loginGate.title,
+            body: signupPendingEmail
+              ? ""
+              : loginGateIntent === "exportImage"
                 ? messages.loginGate.bodyExport
                 : loginGateIntent === "copy" || loginGateIntent === "share"
                   ? messages.loginGate.bodyLink
@@ -5880,11 +5901,26 @@ export function ClientPage() {
                     ? messages.loginGate.bodySecondRoom
                     : messages.loginGate.body,
             close: messages.card.close,
+            forgotPassword: messages.authFlow.forgotPassword,
           }}
           email={loginEmail}
           password={loginPassword}
           mode={loginMode}
-          error={loginError}
+          error={loginNotice ? <AuthNotice kind={loginNotice} email={loginEmail} /> : loginError}
+          pendingSignup={
+            signupPendingEmail ? (
+              <SignupPendingPanel
+                email={signupPendingEmail}
+                onGoToSignIn={() => {
+                  setSignupPendingEmail(null);
+                  setLoginMode("signin");
+                  setLoginNotice(null);
+                  setLoginError("");
+                  setLoginPassword("");
+                }}
+              />
+            ) : null
+          }
           busy={syncingCard}
           onEmailChange={setLoginEmail}
           onPasswordChange={setLoginPassword}

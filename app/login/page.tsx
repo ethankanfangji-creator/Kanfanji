@@ -1,13 +1,17 @@
 "use client";
 
-import Link from "next/link";
 import { FormEvent, useRef, useState } from "react";
-import { useI18n } from "@/components/I18nProvider";
+import { AuthNotice } from "@/components/auth/AuthNotice";
+import { AuthPageShell } from "@/components/auth/AuthPageShell";
+import { SignupPendingPanel } from "@/components/auth/SignupPendingPanel";
 import {
   LoginAuthFields,
   type LoginGateCopy,
 } from "@/components/auth/LoginGateDialog";
+import { useI18n } from "@/components/I18nProvider";
 import { claimGuestViewingData } from "@/lib/auth/claim-guest-data";
+import { reportAuthFailure, signupUiOutcome, type AuthFailureKind } from "@/lib/auth/auth-flow";
+import { authRedirectUrl } from "@/lib/auth/auth-urls";
 import { safeInternalNextPath } from "@/lib/http/safe-next";
 import { createClient } from "@/utils/supabase/client";
 
@@ -17,15 +21,12 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState<"signin" | "signup">("signin");
-  const [message, setMessage] = useState("");
+  const [notice, setNotice] = useState<AuthFailureKind | null>(null);
+  const [signupPending, setSignupPending] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const copy: LoginGateCopy = {
-    title:
-      mode === "signin"
-        ? messages.loginPage.signInTitle
-        : messages.loginPage.signUpTitle,
-    body: messages.loginPage.body,
+    title: mode === "signin" ? messages.loginPage.signInTitle : messages.loginPage.signUpTitle,
     email: messages.loginGate.email,
     password: messages.loginGate.password,
     processing: messages.loginGate.processing,
@@ -38,88 +39,106 @@ export default function LoginPage() {
     hidePassword: messages.loginGate.hidePassword,
     emailInvalid: messages.loginGate.emailInvalid,
     passwordTooShort: messages.loginGate.passwordTooShort,
+    forgotPassword: messages.authFlow.forgotPassword,
   };
+
+  function goToSignIn() {
+    setSignupPending(false);
+    setMode("signin");
+    setNotice(null);
+    setPassword("");
+  }
+
+  async function finishSignIn() {
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      console.error("auth_error");
+      setNotice("generic");
+      return;
+    }
+    await claimGuestViewingData(user.id);
+    const next = new URLSearchParams(window.location.search).get("next");
+    window.location.href = safeInternalNextPath(next);
+  }
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
     setLoading(true);
-    setMessage("");
+    setNotice(null);
 
     const supabase = createClient();
+    const trimmedEmail = email.trim();
     try {
       if (mode === "signup") {
-        const { error } = await supabase.auth.signUp({
-          email: email.trim(),
+        const { data, error } = await supabase.auth.signUp({
+          email: trimmedEmail,
           password,
           options: {
-            emailRedirectTo: `${window.location.origin}/auth/callback`,
+            emailRedirectTo: authRedirectUrl("/auth/callback"),
           },
         });
-        if (error) throw error;
-        setMessage(messages.loginPage.signupOk);
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({
-          email: email.trim(),
-          password,
-        });
-        if (error) throw error;
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        if (!user) throw new Error(messages.loginPage.submitSignIn);
-        await claimGuestViewingData(user.id);
-        const next = new URLSearchParams(window.location.search).get("next");
-        window.location.href = safeInternalNextPath(next);
+        const outcome = signupUiOutcome(error, Boolean(data?.session));
+        if (outcome === "signed_in") {
+          await finishSignIn();
+          return;
+        }
+        if (outcome === "pending") {
+          setSignupPending(true);
+          return;
+        }
+        if (error) reportAuthFailure(error);
+        setNotice(outcome);
         return;
       }
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : messages.loginPage.submitSignIn);
+
+      const { error } = await supabase.auth.signInWithPassword({
+        email: trimmedEmail,
+        password,
+      });
+      if (error) {
+        setNotice(reportAuthFailure(error));
+        return;
+      }
+      await finishSignIn();
+    } catch {
+      console.error("auth_error");
+      setNotice("generic");
     } finally {
       setLoading(false);
     }
   }
 
+  const title = signupPending
+    ? messages.loginPage.signUpTitle
+    : mode === "signin"
+      ? messages.loginPage.signInTitle
+      : messages.loginPage.signUpTitle;
+
   return (
-    <div className="flex min-h-screen w-full justify-center bg-[#FAF6F1] text-[#1A1A1A]">
-      <div className="relative my-auto w-full max-w-[420px] px-4 py-10">
-        <p className="text-[11px] font-bold tracking-wide text-[#9CA3AF]">KANFANGJI</p>
-        <h1 className="mt-2 text-[22px] font-bold leading-snug">{copy.title}</h1>
-        <p className="mt-2 text-[13px] leading-[1.5] text-[#6B7280]">{copy.body}</p>
-
-        <div className="relative mt-6 rounded-[20px] border border-black/8 bg-white p-5 shadow-[0_8px_30px_rgba(0,0,0,0.06)]">
-          <LoginAuthFields
-            copy={copy}
-            email={email}
-            password={password}
-            mode={mode}
-            error={message}
-            busy={loading}
-            emailInputRef={emailInputRef}
-            onEmailChange={setEmail}
-            onPasswordChange={setPassword}
-            onModeChange={(next) => {
-              setMode(next);
-              setMessage("");
-            }}
-            onSubmit={(event) => void onSubmit(event)}
-          />
-        </div>
-
-        <div className="mt-8">
-          <Link
-            href="/"
-            className="inline-flex min-h-11 items-center text-[12px] font-medium text-[#6B7280] underline-offset-2 hover:underline"
-          >
-            {messages.loginPage.backHome}
-          </Link>
-          <Link
-            href="/privacy"
-            className="ml-4 inline-flex min-h-11 items-center text-[12px] font-medium text-[#6B7280] underline-offset-2 hover:underline"
-          >
-            {messages.nav.privacy}
-          </Link>
-        </div>
-      </div>
-    </div>
+    <AuthPageShell title={title}>
+      {signupPending ? (
+        <SignupPendingPanel email={email} onGoToSignIn={goToSignIn} />
+      ) : (
+        <LoginAuthFields
+          copy={copy}
+          email={email}
+          password={password}
+          mode={mode}
+          error={notice ? <AuthNotice kind={notice} email={email} /> : null}
+          busy={loading}
+          emailInputRef={emailInputRef}
+          onEmailChange={setEmail}
+          onPasswordChange={setPassword}
+          onModeChange={(next) => {
+            setMode(next);
+            setNotice(null);
+          }}
+          onSubmit={(event) => void onSubmit(event)}
+        />
+      )}
+    </AuthPageShell>
   );
 }

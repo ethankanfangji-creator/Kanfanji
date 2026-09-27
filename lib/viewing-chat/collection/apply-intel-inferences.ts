@@ -4,7 +4,13 @@
  */
 
 import type { PropertyIntel } from "@/lib/property-intel/types";
-import type { ExtractedPropertyFact, PropertyFieldId } from "./types";
+import { mergePropertyFacts } from "./merge-property-facts";
+import type {
+  ExtractedPropertyFact,
+  PropertyCollectionRecord,
+  PropertyFactEvidence,
+  PropertyFieldId,
+} from "./types";
 
 function inferred(
   fieldId: PropertyFieldId,
@@ -96,4 +102,33 @@ export function applyPropertyIntelInferences(
   }
 
   return facts;
+}
+
+/**
+ * Merge intel into the *latest* collection record.
+ *
+ * Address enrichment is async. The user can answer questions while it is in
+ * flight. Callers must pass the thread as it exists at apply time — not the
+ * empty seed captured when the request started — or confirmed answers and
+ * evidence are overwritten.
+ */
+export function applyIntelSnapshotToLatestRecord(input: {
+  latestRecord: PropertyCollectionRecord;
+  latestEvidence?: PropertyFactEvidence[];
+  intel: PropertyIntel | null | undefined;
+}): {
+  facts: ExtractedPropertyFact[];
+  record: PropertyCollectionRecord;
+  evidence: PropertyFactEvidence[];
+} | null {
+  const facts = applyPropertyIntelInferences(input.intel);
+  if (!facts.length) return null;
+  const merged = mergePropertyFacts(input.latestRecord, facts, {
+    evidence: input.latestEvidence ?? [],
+  });
+  return {
+    facts,
+    record: merged.record,
+    evidence: merged.evidence,
+  };
 }

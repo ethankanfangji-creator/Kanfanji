@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { fillFocusSlot } from "./fill-focus-slot";
-import { applyPropertyIntelInferences } from "./apply-intel-inferences";
+import {
+  applyIntelSnapshotToLatestRecord,
+  applyPropertyIntelInferences,
+} from "./apply-intel-inferences";
+import { createEmptyPropertyRecord } from "./merge-property-facts";
 import { extractPropertyFacts } from "./extract-property-facts";
 import { visionSlotsToInferredFacts } from "./vision-slots";
 import { mergeRuleAndLlmFacts } from "./llm-extract";
@@ -94,6 +98,77 @@ describe("Contextual C — intel + vision slots", () => {
     expect(facts.find((f) => f.fieldId === "year_built")?.value).toBe(1978);
     expect(facts.find((f) => f.fieldId === "year_built")?.status).toBe("inferred");
     expect(facts.find((f) => f.fieldId === "layout")?.value).toMatch(/2房/);
+  });
+
+  it("merges intel into answers recorded while enrichment was in flight", () => {
+    const seed = createEmptyPropertyRecord({
+      address: "2143 Clarke St",
+      fields: {
+        address: {
+          fieldId: "address",
+          value: "2143 Clarke St",
+          status: "confirmed",
+          confidence: 0.95,
+          sourceMessageId: null,
+          rawText: "2143 Clarke St",
+          updatedAt: "2026-09-27T00:00:00.000Z",
+        },
+      },
+    });
+    const latest = createEmptyPropertyRecord({
+      address: "2143 Clarke St",
+      fields: {
+        ...seed.fields,
+        area: {
+          fieldId: "area",
+          value: "88坪",
+          status: "confirmed",
+          confidence: 1,
+          sourceMessageId: "m-user",
+          rawText: "88坪",
+          updatedAt: "2026-09-27T00:00:05.000Z",
+        },
+      },
+    });
+    const userEvidence = [
+      {
+        id: "ev-area",
+        fieldId: "area",
+        kind: "statement" as const,
+        value: "88坪",
+        status: "confirmed" as const,
+        confidence: 1,
+        sourceMessageId: "m-user",
+        rawText: "88坪",
+        createdAt: "2026-09-27T00:00:05.000Z",
+      },
+    ];
+    const intel = emptyIntel("2143 Clarke St", "2143 Clarke St");
+    intel.basic.area = 999;
+    intel.basic.year = 1978;
+
+    const stale = applyIntelSnapshotToLatestRecord({
+      latestRecord: seed,
+      latestEvidence: [],
+      intel,
+    });
+    expect(stale?.record.fields.area?.value).toBe(999);
+    expect(stale?.evidence.some((row) => row.id === "ev-area")).toBe(false);
+
+    const applied = applyIntelSnapshotToLatestRecord({
+      latestRecord: latest,
+      latestEvidence: userEvidence,
+      intel,
+    });
+    expect(applied?.record.fields.area).toMatchObject({
+      value: "88坪",
+      status: "confirmed",
+    });
+    expect(applied?.record.fields.year_built).toMatchObject({
+      value: 1978,
+      status: "inferred",
+    });
+    expect(applied?.evidence.some((row) => row.id === "ev-area")).toBe(true);
   });
 
   it("maps vision electrical slot to inferred", () => {

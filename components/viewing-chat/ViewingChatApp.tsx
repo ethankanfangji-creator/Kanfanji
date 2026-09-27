@@ -41,6 +41,7 @@ import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 import {
   createLocalThread,
   deleteLocalThread,
+  getLocalThread,
   listLocalThreads,
   patchLocalThread,
   saveLocalMessages,
@@ -84,8 +85,8 @@ import {
   projectAgenda,
 } from "@/lib/viewing-chat/agenda";
 import { createAgendaLabelResolver } from "@/lib/viewing-chat/agenda-labels";
-import { applyCollectionSkip, createEmptyPropertyRecord, mergePropertyFacts } from "@/lib/viewing-chat/collection";
-import { applyPropertyIntelInferences } from "@/lib/viewing-chat/collection/apply-intel-inferences";
+import { applyCollectionSkip, createEmptyPropertyRecord } from "@/lib/viewing-chat/collection";
+import { applyIntelSnapshotToLatestRecord } from "@/lib/viewing-chat/collection/apply-intel-inferences";
 import type {
   PropertyCollectionRecord,
   PropertyFactEvidence,
@@ -519,21 +520,25 @@ export function ViewingChatApp() {
       const data = (await response.json()) as {
         intel?: PropertyIntel | null;
       };
-      const facts = applyPropertyIntelInferences(data.intel);
-      if (!facts.length) {
+      const latest = getLocalThread(threadId);
+      const applied = applyIntelSnapshotToLatestRecord({
+        latestRecord: latest?.propertyRecord ?? baseRecord,
+        latestEvidence: latest?.propertyEvidence ?? [],
+        intel: data.intel,
+      });
+      if (!applied) {
         setStatus("");
         return;
       }
-      const merged = mergePropertyFacts(baseRecord, facts);
-      const changes: RecordChange[] = facts.map((f) => ({
+      const changes: RecordChange[] = applied.facts.map((f) => ({
         fieldId: f.fieldId,
         kind: "added" as const,
         nextValue: f.value,
         rawText: f.rawText,
       }));
       patchLocalThread(threadId, {
-        propertyRecord: merged.record,
-        propertyEvidence: merged.evidence,
+        propertyRecord: applied.record,
+        propertyEvidence: applied.evidence,
         metadata: data.intel ?? null,
         lastTurnChanges: changes,
       });

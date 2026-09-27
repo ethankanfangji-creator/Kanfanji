@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { useI18n } from "@/components/I18nProvider";
+import { authTextLink } from "./auth-styles";
 
 export function AuthPageShell({
   title,
@@ -24,17 +25,11 @@ export function AuthPageShell({
         <div className="relative mt-6 rounded-[20px] border border-black/8 bg-white p-5 shadow-[0_8px_30px_rgba(0,0,0,0.06)]">
           {children}
         </div>
-        <div className="mt-8">
-          <Link
-            href="/"
-            className="inline-flex min-h-11 items-center text-[12px] font-medium text-[#6B7280] underline-offset-2 hover:underline"
-          >
+        <div className="mt-8 flex gap-4">
+          <Link href="/" className={authTextLink}>
             {messages.loginPage.backHome}
           </Link>
-          <Link
-            href="/privacy"
-            className="ml-4 inline-flex min-h-11 items-center text-[12px] font-medium text-[#6B7280] underline-offset-2 hover:underline"
-          >
+          <Link href="/privacy" className={authTextLink}>
             {messages.nav.privacy}
           </Link>
         </div>

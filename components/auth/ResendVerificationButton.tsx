@@ -1,50 +1,50 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { resendSignupEmail } from "@/lib/auth/browser-auth";
-import type { ResendSignupResult } from "@/lib/auth/auth-flow";
+import { useState } from "react";
 import { useI18n } from "@/components/I18nProvider";
-
-const COOLDOWN_SECONDS = 60;
+import {
+  useEmailCooldown,
+  type CooldownPurpose,
+} from "@/lib/auth/email-cooldown";
+import type { ResendSignupResult } from "@/lib/auth/auth-flow";
+import { authTextLink } from "./auth-styles";
 
 export function ResendVerificationButton({
   email,
   label,
+  purpose = "signup",
   className,
-  onResend = resendSignupEmail,
+  onResend,
 }: {
   email: string;
-  label: "signup" | "confirm";
+  label: "signup" | "confirm" | "reset";
+  purpose?: CooldownPurpose;
   className?: string;
-  onResend?: (email: string) => Promise<ResendSignupResult>;
+  onResend: (email: string) => Promise<ResendSignupResult>;
 }) {
   const { messages, t } = useI18n();
-  const [until, setUntil] = useState<number | null>(null);
-  const [now, setNow] = useState(() => Date.now());
+  const { remaining, cooling, start } = useEmailCooldown(purpose, email);
   const [busy, setBusy] = useState(false);
-  const [feedback, setFeedback] = useState<"ok" | "rate_limited" | "failed" | null>(null);
+  const [feedback, setFeedback] = useState<"ok" | "failed" | null>(null);
+  const [limitNotice, setLimitNotice] = useState(false);
 
-  useEffect(() => {
-    if (until == null) return;
-    const id = window.setInterval(() => {
-      const next = Date.now();
-      if (next >= until) {
-        setUntil(null);
-        return;
-      }
-      setNow(next);
-    }, 250);
-    return () => window.clearInterval(id);
-  }, [until]);
+  if (!cooling && limitNotice) setLimitNotice(false);
 
-  const remaining = until == null ? 0 : Math.max(0, Math.ceil((until - now) / 1000));
-  const cooling = remaining > 0;
-  const buttonLabel =
-    label === "signup" ? messages.authFlow.resendSignup : messages.authFlow.resendVerification;
+  const idleLabel =
+    label === "confirm"
+      ? messages.authFlow.resendVerification
+      : label === "reset"
+        ? messages.authFlow.resendReset
+        : messages.authFlow.resendSignup;
 
   async function resend() {
-    if (cooling || busy) return;
+    if (busy) return;
+    if (cooling) {
+      setLimitNotice(true);
+      return;
+    }
     setBusy(true);
+    setLimitNotice(false);
     setFeedback(null);
     try {
       const result = await onResend(email.trim());
@@ -52,10 +52,10 @@ export function ResendVerificationButton({
         setFeedback("failed");
         return;
       }
-      setFeedback(result === "rate_limited" ? "rate_limited" : "ok");
-      const started = Date.now();
-      setNow(started);
-      setUntil(started + COOLDOWN_SECONDS * 1000);
+      setFeedback("ok");
+      start();
+    } catch {
+      setFeedback("failed");
     } finally {
       setBusy(false);
     }
@@ -66,23 +66,24 @@ export function ResendVerificationButton({
       <button
         type="button"
         onClick={() => void resend()}
-        disabled={busy || cooling}
-        className="inline-flex min-h-11 items-center text-[12px] font-bold text-[#1A1A1A] underline-offset-2 hover:underline disabled:text-[#9CA3AF] disabled:no-underline"
+        disabled={busy}
+        aria-disabled={cooling || undefined}
+        className={authTextLink}
       >
-        {cooling ? t(messages.authFlow.resendCooldown, { seconds: remaining }) : buttonLabel}
+        {cooling ? t(messages.authFlow.resendCooldown, { seconds: remaining }) : idleLabel}
       </button>
       {feedback === "ok" ? (
-        <p role="status" className="mt-1 text-[12px] leading-[1.4] text-[#6B7280]">
+        <p role="status" className="text-[12px] leading-[1.4] text-[#6B7280]">
           {messages.authFlow.resendSignupStatus}
         </p>
       ) : null}
-      {feedback === "rate_limited" ? (
-        <p role="alert" className="mt-1 text-[12px] leading-[1.4] text-[#991B1B]">
+      {limitNotice ? (
+        <p role="alert" className="text-[12px] leading-[1.4] text-[#991B1B]">
           {messages.authFlow.rateLimited}
         </p>
       ) : null}
       {feedback === "failed" ? (
-        <p role="alert" className="mt-1 text-[12px] leading-[1.4] text-[#991B1B]">
+        <p role="alert" className="text-[12px] leading-[1.4] text-[#991B1B]">
           {messages.authFlow.genericError}
         </p>
       ) : null}

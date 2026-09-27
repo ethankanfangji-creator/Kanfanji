@@ -3,9 +3,11 @@
 import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { AuthPageShell } from "@/components/auth/AuthPageShell";
-import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { ResendVerificationButton } from "@/components/auth/ResendVerificationButton";
+import { authPrimaryButton, authTextLink } from "@/components/auth/auth-styles";
 import { useI18n } from "@/components/I18nProvider";
 import { requestPasswordReset } from "@/lib/auth/browser-auth";
+import { emailCooldownRemaining, startEmailCooldown } from "@/lib/auth/email-cooldown";
 
 function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
@@ -17,26 +19,28 @@ export default function ForgotPasswordPage() {
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
   const [emailTouched, setEmailTouched] = useState(false);
-  const [feedback, setFeedback] = useState<"rate_limited" | "failed" | null>(null);
+  const [failed, setFailed] = useState(false);
 
   const showEmailError = emailTouched && !isValidEmail(email);
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
     setEmailTouched(true);
-    setFeedback(null);
+    setFailed(false);
     if (!isValidEmail(email)) return;
+    const trimmed = email.trim();
+    if ((await emailCooldownRemaining("recovery", trimmed)) > 0) {
+      setSent(true);
+      return;
+    }
     setBusy(true);
     try {
-      const result = await requestPasswordReset(email.trim());
-      if (result === "rate_limited") {
-        setFeedback("rate_limited");
-        return;
-      }
+      const result = await requestPasswordReset(trimmed);
       if (result === "failed") {
-        setFeedback("failed");
+        setFailed(true);
         return;
       }
+      await startEmailCooldown("recovery", trimmed);
       setSent(true);
     } finally {
       setBusy(false);
@@ -44,22 +48,27 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <AuthPageShell title={messages.authFlow.forgotTitle} body={messages.authFlow.forgotBody}>
-      <LanguageSwitcher />
+    <AuthPageShell title={messages.authFlow.forgotTitle} body={sent ? undefined : messages.authFlow.forgotBody}>
       {sent ? (
-        <div className="mt-4">
+        <div className="space-y-3">
           <p role="status" className="text-[13px] leading-[1.5] text-[#1A1A1A]">
             {messages.authFlow.forgotOk}
           </p>
-          <Link
-            href="/login"
-            className="mt-4 flex h-12 w-full items-center justify-center rounded-full bg-black text-[14px] font-bold text-white"
-          >
+          <ResendVerificationButton
+            email={email}
+            label="reset"
+            purpose="recovery"
+            onResend={requestPasswordReset}
+          />
+          <button type="button" className={authTextLink} onClick={() => setSent(false)}>
+            {messages.authFlow.useAnotherEmail}
+          </button>
+          <Link href="/login" className={authPrimaryButton}>
             {messages.authFlow.goToSignIn}
           </Link>
         </div>
       ) : (
-        <form onSubmit={(event) => void onSubmit(event)} className="mt-4 space-y-3" noValidate>
+        <form onSubmit={onSubmit} className="mt-4 space-y-3" noValidate>
           <div className="block text-[12px] font-bold">
             <label htmlFor="email">{messages.loginGate.email}</label>
             <input
@@ -85,21 +94,12 @@ export default function ForgotPasswordPage() {
               </p>
             ) : null}
           </div>
-          {feedback === "rate_limited" ? (
-            <p role="alert" className="text-[12px] leading-[1.4] text-[#991B1B]">
-              {messages.authFlow.rateLimited}
-            </p>
-          ) : null}
-          {feedback === "failed" ? (
+          {failed ? (
             <p role="alert" className="text-[12px] leading-[1.4] text-[#991B1B]">
               {messages.authFlow.genericError}
             </p>
           ) : null}
-          <button
-            type="submit"
-            disabled={busy}
-            className="h-12 w-full rounded-full bg-black text-[14px] font-bold text-white disabled:opacity-60"
-          >
+          <button type="submit" disabled={busy} className={authPrimaryButton}>
             {busy ? messages.loginGate.processing : messages.authFlow.forgotSubmit}
           </button>
         </form>

@@ -27,7 +27,7 @@ export function readAuthErrorCode(error: unknown): string | undefined {
   return typeof code === "string" && code.length > 0 ? code : undefined;
 }
 
-function readAuthErrorStatus(error: unknown): number | undefined {
+export function readAuthErrorStatus(error: unknown): number | undefined {
   if (!error || typeof error !== "object" || !("status" in error)) return undefined;
   const status = (error as { status?: unknown }).status;
   return typeof status === "number" ? status : undefined;
@@ -71,19 +71,22 @@ function masksSignupExistence(error: unknown): boolean {
 export function signupUiOutcome(error: unknown, hasSession: boolean): SignupUiOutcome {
   if (!error && hasSession) return "signed_in";
   if (!error || masksSignupExistence(error)) return "pending";
+  // A send-quota error for signup can mean the address already has an account.
+  // Show the same pending screen instead of a different message.
+  if (readAuthErrorCode(error) === "over_email_send_rate_limit") return "pending";
   const failure = classifyAuthError(error);
   if (failure.kind === "rate_limited") return "rate_limited";
   return "generic";
 }
 
-export type PasswordResetRequestResult = "ok" | "rate_limited" | "failed";
+export type PasswordResetRequestResult = "ok" | "failed";
 
-/** Same visible result unless the request was rate-limited or never left the browser. */
-export function passwordResetRequestResult(error: unknown): PasswordResetRequestResult {
-  if (!error) return "ok";
-  const failure = classifyAuthError(error);
-  if (failure.kind === "rate_limited") return "rate_limited";
-  return "ok";
+/**
+ * Any API response, including 429, uses the same confirmation screen.
+ * Only a thrown request (nothing left the browser) is a failure.
+ */
+export function passwordResetRequestResult(error: unknown): "ok" {
+  return error == null || error !== undefined ? "ok" : "ok";
 }
 
 export type ResendSignupResult = "ok" | "rate_limited" | "failed";

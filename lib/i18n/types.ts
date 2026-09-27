@@ -567,14 +567,17 @@ export type Messages = {
     resendSignupStatus: string;
     resendVerification: string;
     resendCooldown: string;
+    resendReset: string;
     invalidCredentials: string;
     emailNotConfirmed: string;
     rateLimited: string;
+    signInRateLimited: string;
     genericError: string;
     forgotTitle: string;
     forgotBody: string;
     forgotSubmit: string;
     forgotOk: string;
+    useAnotherEmail: string;
     resetTitle: string;
     resetBody: string;
     newPassword: string;
@@ -587,7 +590,6 @@ export type Messages = {
   loginPage: {
     signInTitle: string;
     signUpTitle: string;
-    body: string;
     submitSignIn: string;
     submitSignUp: string;
     switchToSignUp: string;

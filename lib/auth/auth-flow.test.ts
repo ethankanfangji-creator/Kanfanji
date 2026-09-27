@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import en from "@/lib/i18n/messages/en";
+import th from "@/lib/i18n/messages/th";
+import zhHans from "@/lib/i18n/messages/zh-Hans";
 import zhHant from "@/lib/i18n/messages/zh-Hant";
 import {
   classifyAuthError,
@@ -50,32 +52,49 @@ describe("signupUiOutcome", () => {
     expect(signupUiOutcome(null, true)).toBe("signed_in");
   });
 
-  it("does not treat rate limits as a successful signup", () => {
+  it("hides an email-send limit and shows a sign-in limit", () => {
     expect(signupUiOutcome({ code: "over_email_send_rate_limit", status: 429 }, false)).toBe(
+      "pending",
+    );
+    expect(signupUiOutcome({ code: "over_request_rate_limit", status: 429 }, false)).toBe(
+      "rate_limited",
+    );
+    expect(signupUiOutcome({ status: 429 }, false)).toBe("rate_limited");
+  });
+});
+
+describe("neutral email actions", () => {
+  it("treats every password-reset response as the same confirmation", () => {
+    expect(passwordResetRequestResult(null)).toBe("ok");
+    expect(passwordResetRequestResult({ status: 429, code: "over_email_send_rate_limit" })).toBe(
+      "ok",
+    );
+    expect(passwordResetRequestResult({ status: 400, code: "validation_failed" })).toBe("ok");
+    expect(resendSignupResult({ code: "user_not_found" })).toBe("ok");
+    expect(resendSignupResult({ code: "over_email_send_rate_limit", status: 429 })).toBe(
       "rate_limited",
     );
   });
 });
 
-describe("neutral email actions", () => {
-  it("uses one result for password reset and resend except rate limits", () => {
-    expect(passwordResetRequestResult(null)).toBe("ok");
-    expect(passwordResetRequestResult({ code: "user_not_found" })).toBe("ok");
-    expect(passwordResetRequestResult({ status: 429 })).toBe("rate_limited");
-    expect(resendSignupResult({ code: "user_not_found" })).toBe("ok");
-    expect(resendSignupResult({ code: "over_email_send_rate_limit" })).toBe("rate_limited");
-  });
-});
-
 describe("authFlow copy", () => {
-  it("has distinct Traditional Chinese and English strings", () => {
-    expect(zhHant.authFlow.signupNeutral).toContain("如果這個 email 還沒註冊");
-    expect(en.authFlow.signupNeutral).toContain("If this email is not registered yet");
+  it("does not hint whether an email is registered", () => {
+    const banned = [
+      "如果這個 " + "email",
+      "如果这个 " + "email",
+      "If this " + "email",
+      "ถ้าอีเมลนี้ยัง" + "ไม่ได้สมัคร",
+    ];
+    for (const catalog of [zhHant, zhHans, en, th]) {
+      for (const phrase of banned) {
+        expect(catalog.authFlow.signupNeutral).not.toContain(phrase);
+      }
+    }
+    expect(zhHant.authFlow.signupNeutral.startsWith("請到信箱查看驗證信")).toBe(true);
+    expect(zhHant.authFlow.resendSignupStatus).toBe("已重新寄出，請到信箱查看（含垃圾郵件）。");
+    expect(en.authFlow.resendSignupStatus).toBe("Sent again. Check your inbox (and spam folder).");
     expect(zhHant.authFlow.invalidCredentials).toBe("email 或密碼不正確");
-    expect(en.authFlow.invalidCredentials).toBe("Incorrect email or password");
-    expect(zhHant.authFlow.forgotOk).toBe("如果這個 email 有帳號，重設連結已寄出");
-    expect(en.authFlow.forgotOk).toContain("If an account exists for this email");
-    expect(zhHant.authFlow.emailNotConfirmed).toBe("請先到信箱點驗證連結");
-    expect(en.authFlow.rateLimited).toContain("Too many attempts");
+    expect(en.authFlow.forgotOk).toBe("Reset link sent. Check your inbox (and spam folder).");
+    expect(zhHant.authFlow.signInRateLimited).toBe("登入太頻繁，請等幾分鐘再試");
   });
 });

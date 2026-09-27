@@ -157,6 +157,7 @@ import {
 } from "@/lib/sync";
 import { claimGuestViewingData } from "@/lib/auth/claim-guest-data";
 import { reportAuthFailure, signupUiOutcome, type AuthFailureKind } from "@/lib/auth/auth-flow";
+import { authRedirectUrl } from "@/lib/auth/auth-urls";
 import {
   canEnterStep,
   canGenerateShareCard,
@@ -541,7 +542,6 @@ export function ClientPage() {
     const supabase = getSupabase();
     if (!supabase) {
       setPersistenceAccountScope(null);
-      setAuthReady(true);
       return;
     }
 
@@ -3991,7 +3991,7 @@ export function ClientPage() {
           email: trimmedEmail,
           password: loginPassword,
           options: {
-            emailRedirectTo: `${window.location.origin}/auth/callback`,
+            emailRedirectTo: authRedirectUrl("/auth/callback"),
           },
         });
         const outcome = signupUiOutcome(error, Boolean(data?.session));

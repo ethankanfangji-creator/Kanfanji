@@ -1,15 +1,23 @@
 import { createClient } from "@/utils/supabase/client";
+import { authRedirectUrl } from "@/lib/auth/auth-urls";
 import {
   passwordResetRequestResult,
+  readAuthErrorCode,
+  readAuthErrorStatus,
   resendSignupResult,
   type PasswordResetRequestResult,
   type ResendSignupResult,
 } from "@/lib/auth/auth-flow";
 
-function logMaskedAuthFailure() {
-  // The screen stays neutral on purpose. Do not print the code: a code such
-  // as user_not_found would show whether the email is registered.
-  console.error("auth_error");
+/** Debug codes outside production. Never print the email, password, or message. */
+export function logSuppressedAuthError(error: unknown) {
+  if (process.env.NEXT_PUBLIC_VERCEL_ENV === "production") {
+    console.error("auth_error");
+    return;
+  }
+  const code = readAuthErrorCode(error) ?? "auth_error";
+  const status = readAuthErrorStatus(error);
+  console.warn(status == null ? code : `${code} ${status}`);
 }
 
 export async function resendSignupEmail(email: string): Promise<ResendSignupResult> {
@@ -19,12 +27,11 @@ export async function resendSignupEmail(email: string): Promise<ResendSignupResu
       type: "signup",
       email,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: authRedirectUrl("/auth/callback"),
       },
     });
-    const result = resendSignupResult(error);
-    if (error && result === "ok") logMaskedAuthFailure();
-    return result;
+    if (error) logSuppressedAuthError(error);
+    return resendSignupResult(error);
   } catch {
     console.error("auth_error");
     return "failed";
@@ -35,11 +42,10 @@ export async function requestPasswordReset(email: string): Promise<PasswordReset
   try {
     const supabase = createClient();
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth/reset`,
+      redirectTo: authRedirectUrl("/auth/reset"),
     });
-    const result = passwordResetRequestResult(error);
-    if (error && result === "ok") logMaskedAuthFailure();
-    return result;
+    if (error) logSuppressedAuthError(error);
+    return passwordResetRequestResult(error);
   } catch {
     console.error("auth_error");
     return "failed";

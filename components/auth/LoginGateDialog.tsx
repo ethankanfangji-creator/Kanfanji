@@ -4,11 +4,11 @@ import Link from "next/link";
 import { useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
 import { Eye, EyeOff, X } from "lucide-react";
 import { Dialog } from "@/components/ui/Dialog";
-import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { authPrimaryButton, authTextLink } from "./auth-styles";
 
 export type LoginGateCopy = {
   title: string;
-  body: string;
+  body?: string;
   email: string;
   password: string;
   processing: string;
@@ -102,9 +102,7 @@ export function LoginAuthFields({
         </button>
       ) : null}
 
-      <div className={showClose ? "mt-2" : ""}>
-        <LanguageSwitcher />
-      </div>
+      {showClose ? <div className="mt-2 h-8" aria-hidden="true" /> : null}
 
       <form onSubmit={handleSubmit} className="mt-4 space-y-3" noValidate>
         <div className="block text-[12px] font-bold">
@@ -183,11 +181,7 @@ export function LoginAuthFields({
           ) : null}
         </div>
 
-        <button
-          type="submit"
-          disabled={busy}
-          className="h-12 w-full rounded-full bg-black text-[14px] font-bold text-white disabled:opacity-60"
-        >
+        <button type="submit" disabled={busy} className={authPrimaryButton}>
           {busy
             ? copy.processing
             : mode === "signin"
@@ -204,22 +198,20 @@ export function LoginAuthFields({
         error
       ) : null}
 
-      {mode === "signin" && copy.forgotPassword ? (
-        <Link
-          href="/auth/forgot"
-          className="mt-2 inline-flex min-h-11 items-center text-[12px] font-medium text-[#6B7280] underline-offset-2 hover:underline"
+      <div className="mt-3 flex flex-col items-start gap-1">
+        {mode === "signin" && copy.forgotPassword ? (
+          <Link href="/auth/forgot" className={authTextLink}>
+            {copy.forgotPassword}
+          </Link>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => onModeChange(mode === "signin" ? "signup" : "signin")}
+          className={authTextLink}
         >
-          {copy.forgotPassword}
-        </Link>
-      ) : null}
-
-      <button
-        type="button"
-        onClick={() => onModeChange(mode === "signin" ? "signup" : "signin")}
-        className="mt-4 min-h-11 text-[12px] font-medium text-[#6B7280]"
-      >
-        {mode === "signin" ? copy.switchToSignUp : copy.switchToSignIn}
-      </button>
+          {mode === "signin" ? copy.switchToSignUp : copy.switchToSignIn}
+        </button>
+      </div>
     </>
   );
 }
@@ -275,7 +267,8 @@ export function LoginGateDialog({
           >
             <X className="h-4 w-4" aria-hidden="true" />
           </button>
-          <div className="mt-2">{pendingSignup}</div>
+          <div className="mt-2 h-8" aria-hidden="true" />
+          <div>{pendingSignup}</div>
         </>
       ) : open ? (
         <LoginAuthFields

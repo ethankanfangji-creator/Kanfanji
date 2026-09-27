@@ -11,6 +11,7 @@ import {
 import { useI18n } from "@/components/I18nProvider";
 import { claimGuestViewingData } from "@/lib/auth/claim-guest-data";
 import { reportAuthFailure, signupUiOutcome, type AuthFailureKind } from "@/lib/auth/auth-flow";
+import { authRedirectUrl } from "@/lib/auth/auth-urls";
 import { safeInternalNextPath } from "@/lib/http/safe-next";
 import { createClient } from "@/utils/supabase/client";
 
@@ -26,7 +27,6 @@ export default function LoginPage() {
 
   const copy: LoginGateCopy = {
     title: mode === "signin" ? messages.loginPage.signInTitle : messages.loginPage.signUpTitle,
-    body: messages.loginPage.body,
     email: messages.loginGate.email,
     password: messages.loginGate.password,
     processing: messages.loginGate.processing,
@@ -77,7 +77,7 @@ export default function LoginPage() {
           email: trimmedEmail,
           password,
           options: {
-            emailRedirectTo: `${window.location.origin}/auth/callback`,
+            emailRedirectTo: authRedirectUrl("/auth/callback"),
           },
         });
         const outcome = signupUiOutcome(error, Boolean(data?.session));
@@ -118,7 +118,7 @@ export default function LoginPage() {
       : messages.loginPage.signUpTitle;
 
   return (
-    <AuthPageShell title={title} body={signupPending ? undefined : copy.body}>
+    <AuthPageShell title={title}>
       {signupPending ? (
         <SignupPendingPanel email={email} onGoToSignIn={goToSignIn} />
       ) : (

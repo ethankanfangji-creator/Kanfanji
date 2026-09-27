@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { AuthPageShell } from "@/components/auth/AuthPageShell";
-import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { authPrimaryButton } from "@/components/auth/auth-styles";
 import { useI18n } from "@/components/I18nProvider";
 import { claimGuestViewingData } from "@/lib/auth/claim-guest-data";
 import { reportAuthFailure, type AuthFailureKind } from "@/lib/auth/auth-flow";
@@ -146,7 +146,8 @@ export default function ResetPasswordPage() {
       const supabase = createClient();
       const { data, error } = await supabase.auth.updateUser({ password });
       if (error) {
-        setNotice(reportAuthFailure(error));
+        const kind = reportAuthFailure(error);
+        setNotice(kind === "rate_limited" ? "generic" : kind);
         return;
       }
       if (!data.user) {
@@ -164,28 +165,19 @@ export default function ResetPasswordPage() {
     }
   }
 
-  const noticeText =
-    notice === "rate_limited"
-      ? messages.authFlow.rateLimited
-      : notice
-        ? messages.authFlow.genericError
-        : null;
+  const noticeText = notice ? messages.authFlow.genericError : null;
 
   return (
     <AuthPageShell
       title={messages.authFlow.resetTitle}
       body={invalid ? undefined : messages.authFlow.resetBody}
     >
-      <LanguageSwitcher />
       {invalid ? (
         <div className="mt-4">
           <p role="alert" className="text-[13px] leading-[1.5] text-[#991B1B]">
             {messages.authFlow.resetInvalid}
           </p>
-          <Link
-            href="/auth/forgot"
-            className="mt-4 flex h-12 w-full items-center justify-center rounded-full bg-black text-[14px] font-bold text-white"
-          >
+          <Link href="/auth/forgot" className={`mt-4 ${authPrimaryButton}`}>
             {messages.authFlow.requestNewLink}
           </Link>
         </div>
@@ -230,11 +222,7 @@ export default function ResetPasswordPage() {
               {noticeText}
             </p>
           ) : null}
-          <button
-            type="submit"
-            disabled={busy}
-            className="h-12 w-full rounded-full bg-black text-[14px] font-bold text-white disabled:opacity-60"
-          >
+          <button type="submit" disabled={busy} className={authPrimaryButton}>
             {busy ? messages.loginGate.processing : messages.authFlow.resetSubmit}
           </button>
         </form>

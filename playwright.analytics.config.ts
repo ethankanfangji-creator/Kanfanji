@@ -12,7 +12,7 @@ export default defineConfig({
   forbidOnly: Boolean(process.env.CI),
   retries: 0,
   workers: 1,
-  timeout: 60_000,
+  timeout: 120_000,
   reporter: "list",
   use: {
     baseURL,

@@ -14,10 +14,9 @@ const zhHans: Messages = {
     privacy: "隐私权说明",
   },
   analytics: {
-    bannerBody:
-      "我们只记录匿名的操作次数（例如按了哪个按钮），不记录地址、笔记或对话内容。",
-    allow: "允许",
-    deny: "不要",
+    consentBody: "帮助我们提升用户体验，同意收集不具名用户使用情况。详情请见{privacyLink}",
+    allow: "同意",
+    deny: "拒绝",
     privacyLink: "隐私权说明",
     toggleLabel: "使用分析",
   },

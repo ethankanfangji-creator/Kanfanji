@@ -12,7 +12,7 @@ export type Messages = {
     privacy: string;
   };
   analytics: {
-    bannerBody: string;
+    consentBody: string;
     allow: string;
     deny: string;
     privacyLink: string;

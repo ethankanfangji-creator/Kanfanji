@@ -2,14 +2,23 @@
 
 import { useEffect } from "react";
 import { ConsentBanner } from "@/components/analytics/ConsentBanner";
-import { identify, resetAnalytics, setAnalyticsConsent } from "@/lib/analytics/client";
-import { readAnalyticsConsent } from "@/lib/analytics/consent";
+import {
+  clearPosthogStorage,
+  identify,
+  resetAnalytics,
+  setAnalyticsConsent,
+} from "@/lib/analytics/client";
+import { hasGlobalPrivacyControl, readAnalyticsConsent } from "@/lib/analytics/consent";
 import { getSupabase } from "@/lib/supabase";
 
 export function AnalyticsProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const stored = readAnalyticsConsent();
-    if (stored) void setAnalyticsConsent(stored);
+    if (stored === "granted" && !hasGlobalPrivacyControl()) {
+      void setAnalyticsConsent("granted");
+    } else {
+      clearPosthogStorage();
+    }
 
     const supabase = getSupabase();
     if (!supabase) return;

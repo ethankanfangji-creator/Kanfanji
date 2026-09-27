@@ -113,6 +113,9 @@ describe("analytics client", () => {
     const options = init.mock.calls[0][1];
     expect(options).toEqual(expect.objectContaining(DISABLED_FLAGS));
     expect(options).not.toHaveProperty("sanitize_properties");
+    expect(options).not.toHaveProperty("cookieless_mode");
+    expect(options.save_referrer).toBe(false);
+    expect(options.save_campaign_params).toBe(false);
     expect(options.opt_out_useragent_filter).toBe(false);
     expect(options.debug).toBe(false);
     expect(window.__kfPosthog).toBeUndefined();
@@ -155,6 +158,92 @@ describe("analytics client", () => {
     await vi.waitFor(() => expect(init).toHaveBeenCalled());
     expect(init.mock.calls[0][1].debug).toBe(false);
     expect(window.__kfPosthog).toBeUndefined();
+  });
+
+  it("strips first-touch URLs from $set_once after identify", async () => {
+    process.env.NEXT_PUBLIC_POSTHOG_KEY = "phc_test";
+    localStorage.setItem("kanfangji.analytics.consent.v1", "granted");
+    const analytics = await import("./client");
+    analytics.identify("user-1");
+    await vi.waitFor(() => expect(init).toHaveBeenCalled());
+    const beforeSend = init.mock.calls[0][1].before_send as (
+      event: {
+        event: string;
+        properties: Record<string, unknown>;
+        $set_once?: Record<string, unknown>;
+      } | null,
+    ) => {
+      properties: Record<string, unknown>;
+      $set_once?: Record<string, unknown>;
+    } | null;
+    const viewing = "https://kanfanji.vercel.app/viewings/secret";
+    const sent = beforeSend({
+      event: "$identify",
+      properties: {
+        $current_url: viewing,
+        distinct_id: "user-1",
+        $set_once: {
+          $initial_current_url: viewing,
+          $initial_referrer: "https://example.com/from",
+          $initial_pathname: "/viewings/secret",
+          $browser: "Chrome",
+        },
+      },
+        $set_once: {
+        $initial_current_url: viewing,
+        $initial_referring_domain: "example.com",
+        $browser: "Chrome",
+      },
+    });
+    expect(sent).not.toBeNull();
+    expect(sent?.properties.$current_url).toBeUndefined();
+    expect(sent?.properties.distinct_id).toBe("user-1");
+    const nested = sent?.properties.$set_once as Record<string, unknown>;
+    expect(nested.$initial_current_url).toBeUndefined();
+    expect(nested.$initial_referrer).toBeUndefined();
+    expect(nested.$initial_pathname).toBeUndefined();
+    expect(nested.$browser).toBe("Chrome");
+    expect(sent?.$set_once?.$initial_current_url).toBeUndefined();
+    expect(sent?.$set_once?.$initial_referring_domain).toBeUndefined();
+    expect(sent?.$set_once?.$browser).toBe("Chrome");
+
+    const scrubbed = beforeSend({
+      event: "address_search_started",
+      properties: {
+        $host: "127.0.0.1:3200",
+        region: "CA",
+        note: "https://preview.example/s/abc123",
+        $set: { $initial_current_url: viewing, plain: "ok" },
+        $set_once: { $initial_pathname: "/viewings/secret", region: "US" },
+      },
+      $set: { leaked: "https://example.com/invite/x", $browser: "Chrome" },
+      $set_once: { reset: "/auth/reset?code=1", region: "TW", utm_source: null },
+    });
+    expect(scrubbed).not.toBeNull();
+    expect(scrubbed?.properties.$host).toBe("127.0.0.1:3200");
+    expect(scrubbed?.properties.region).toBe("CA");
+    expect(scrubbed?.properties.note).toBeUndefined();
+    expect((scrubbed?.properties.$set as Record<string, unknown>).$initial_current_url).toBeUndefined();
+    expect((scrubbed?.properties.$set as Record<string, unknown>).plain).toBe("ok");
+    expect((scrubbed?.properties.$set_once as Record<string, unknown>).$initial_pathname).toBeUndefined();
+    expect(scrubbed?.$set?.leaked).toBeUndefined();
+    expect(scrubbed?.$set?.$browser).toBe("Chrome");
+    expect(scrubbed?.$set_once?.reset).toBeUndefined();
+    expect(scrubbed?.$set_once?.region).toBe("TW");
+    expect(scrubbed?.$set_once?.utm_source).toBeUndefined();
+  });
+
+  it("does not load PostHog when consent is denied and clears leftover keys", async () => {
+    process.env.NEXT_PUBLIC_POSTHOG_KEY = "phc_test";
+    localStorage.setItem("kanfangji.analytics.consent.v1", "denied");
+    localStorage.setItem("ph_phc_x_posthog", "1");
+    localStorage.setItem("__ph_opt_in_out_phc_x", "1");
+    const analytics = await import("./client");
+    await analytics.setAnalyticsConsent("denied");
+    expect(init).not.toHaveBeenCalled();
+    expect(localStorage.getItem("ph_phc_x_posthog")).toBeNull();
+    expect(localStorage.getItem("__ph_opt_in_out_phc_x")).toBeNull();
+    expect(localStorage.getItem("kanfangji.analytics.consent.v1")).toBe("denied");
   });
 
   it("opts in at most once and skips the $opt_in event", async () => {

@@ -14,10 +14,9 @@ const zhHant: Messages = {
     privacy: "隱私權說明",
   },
   analytics: {
-    bannerBody:
-      "我們只記錄匿名的操作次數（例如按了哪個按鈕），不記錄地址、筆記或對話內容。",
-    allow: "允許",
-    deny: "不要",
+    consentBody: "幫助我們提升用戶體驗，同意收集匿名用戶使用情況。詳請見{privacyLink}",
+    allow: "同意",
+    deny: "拒絕",
     privacyLink: "隱私權說明",
     toggleLabel: "使用分析",
   },

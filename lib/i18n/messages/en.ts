@@ -14,11 +14,11 @@ const en: Messages = {
     privacy: "Privacy",
   },
   analytics: {
-    bannerBody:
-      "We only count anonymous actions (for example, which button you pressed). We do not record addresses, notes, or conversation text.",
-    allow: "Allow",
-    deny: "No thanks",
-    privacyLink: "Privacy",
+    consentBody:
+      "Help us improve your experience by allowing us to collect anonymous usage data. See our {privacyLink} for details.",
+    allow: "Agree",
+    deny: "Decline",
+    privacyLink: "Privacy notice",
     toggleLabel: "Product analytics",
   },
   status: {

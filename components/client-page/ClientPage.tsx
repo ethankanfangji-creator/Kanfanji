@@ -5912,7 +5912,11 @@ export function ClientPage() {
               <SignupPendingPanel
                 email={signupPendingEmail}
                 onGoToSignIn={() => {
-                  router.push("/login");
+                  setSignupPendingEmail(null);
+                  setLoginMode("signin");
+                  setLoginNotice(null);
+                  setLoginError("");
+                  setLoginPassword("");
                 }}
               />
             ) : null

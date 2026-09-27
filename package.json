@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:e2e:analytics": "playwright test -c playwright.analytics.config.ts",
     "test:e2e:install": "playwright install chromium",
     "test:supabase:smoke": "node scripts/supabase-integration-smoke.mjs",
     "test:node": "node --test lib/billing-status.test.ts lib/supabase-write.test.ts lib/viewing-entitlement.test.ts lib/billing-guards.test.ts lib/billing-sync-select.test.ts lib/rate-limit.test.ts"

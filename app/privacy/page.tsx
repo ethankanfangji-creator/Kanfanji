@@ -30,6 +30,12 @@ export default function PrivacyPage() {
           ? "This page is the openness notice for the product. Under Taiwan’s Personal Data Protection Act Article 8 we state the purposes, categories, and how to ask for access or deletion. Under Canada’s PIPEDA we state the purpose, ask before analytics are sent, and keep this explanation available. Address search, viewing notes, and AI conversations are stored for the service itself (on your device or, when you sign in, in Supabase). That is separate from product analytics."
           : "本頁說明蒐集目的與類別。依台灣個人資料保護法第 8 條，我們告知目的、資料類別，以及如何請求閱覽或刪除。依加拿大 PIPEDA，我們說明目的、在送出分析前取得同意，並公開這份說明。地址搜尋、看房筆記與 AI 對話是服務本身所需（留在你的裝置，或在你登入後存於 Supabase），與產品分析分開。"}
       </p>
+      <h2 className="mt-6 text-lg font-bold">{english ? "Counts and shares" : "次數與分享"}</h2>
+      <p className="mt-2">
+        {english
+          ? "AI usage is counted with an HMAC of an account id or browser cookie, plus an IP hash. We do not store the raw IP. Comparison records store a hash of the selected ids, the count, and the source — not addresses. When you create a share link, the comparison snapshot, including addresses, is stored in Supabase in Canada for 30 days. Cancelling the link or deleting the account deletes that snapshot."
+          : "AI 使用次數以帳號 ID 或瀏覽器 cookie、IP 的單向雜湊（HMAC）計數，不存明文 IP。比較使用紀錄只存所選物件識別碼的雜湊、筆數與來源，不存地址。使用者主動建立分享連結時，比較表快照（含地址）存放於加拿大的 Supabase，30 天後到期；取消分享或刪除帳號即刪除快照內容。"}
+      </p>
       <h2 className="mt-6 text-lg font-bold">{english ? "Processors" : "處理者"}</h2>
       <ul className="mt-2 list-disc pl-5">
         <li>Supabase — ca-central-1 ({english ? "account, cloud viewings" : "帳號與雲端看房"})</li>
@@ -37,19 +43,15 @@ export default function PrivacyPage() {
         <li>OpenAI ({english ? "AI turns you consent to" : "你同意後的 AI 處理"})</li>
         <li>Stripe ({english ? "payments" : "付款"})</li>
         <li>Google Maps Platform ({english ? "address suggestions" : "地址建議"})</li>
-        <li>
-          PostHog — {POSTHOG_HOST} (
-          {english ? "action analytics, only after you allow" : "僅在你允許後的操作分析"}
-          )
-        </li>
+        <li>PostHog（{english ? "United States" : "美國"}，{POSTHOG_HOST}）</li>
       </ul>
       <h2 className="mt-6 text-lg font-bold">
         {english ? "Cross-border transfer" : "跨境傳輸"}
       </h2>
       <p className="mt-2">
         {english
-          ? `Supabase stores data in Canada (ca-central-1). Vercel, OpenAI, Stripe, Google, and PostHog may process data in the United States or, for PostHog, the region of ${POSTHOG_HOST}. We send analytics only after you allow them, and we do not put address or conversation content in those events.`
-          : `Supabase 的資料在加拿大（ca-central-1）。Vercel、OpenAI、Stripe、Google，以及 PostHog（依 ${POSTHOG_HOST}）可能在美國或該主機所在區域處理資料。分析事件只在你允許後送出，而且不含地址或對話內容。`}
+          ? `Supabase stores data in Canada (ca-central-1). PostHog processes product analytics in the United States (${POSTHOG_HOST}). We send analytics only after you allow them, and those events do not include addresses or conversation content.`
+          : `Supabase 的資料在加拿大（ca-central-1）。PostHog 在美國（${POSTHOG_HOST}）處理產品分析。分析事件只在你允許後送出，而且不含地址或對話內容。`}
       </p>
       <h2 className="mt-6 text-lg font-bold">
         {english ? "Retention, withdrawal, deletion" : "保存、撤回與刪除"}

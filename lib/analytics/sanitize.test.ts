@@ -35,7 +35,10 @@ describe("sanitizeAnalyticsProps", () => {
       }),
     ).toEqual({ source: "photon", region: "TW" });
     expect(
-      sanitizeAnalyticsProps("compare_opened", { count: 4, source: "chat_history" }),
+      sanitizeAnalyticsProps("compare_opened", { count: 6, source: "chat_history", token: "tok_S3CRET" }),
+    ).toEqual({ source: "chat_history" });
+    expect(
+      sanitizeAnalyticsProps("compare_gate_shown", { reason: "nope", source: "chat_history" }),
     ).toEqual({ source: "chat_history" });
   });
 

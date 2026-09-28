@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { fingerprint } from "@/lib/ai-boundary/quota";
+import { aiQuotaKeysForUser } from "@/lib/ai-boundary/quota";
 import { badRequest, readAdmin, readJson, reasonFrom } from "@/lib/admin/http";
 import { createAdminClient } from "@/utils/supabase/admin";
 
@@ -15,9 +15,10 @@ export async function POST(
   const reason = reasonFrom(await readJson(request));
   if (!reason) return badRequest("reason");
 
-  let key: string;
+  let keys: string[];
   try {
-    key = `user:${fingerprint(id)}`;
+    const quota = aiQuotaKeysForUser(id);
+    keys = [quota.free, quota.proWeek];
   } catch {
     return NextResponse.json({ error: "QUOTA_SECRET_MISSING" }, { status: 500 });
   }
@@ -26,7 +27,7 @@ export async function POST(
   const { error } = await admin.rpc("admin_reset_ai_quota", {
     p_actor_id: gate.user.id,
     p_target_user_id: id,
-    p_keys: [key],
+    p_keys: keys,
     p_reason: reason,
   });
   if (error) return NextResponse.json({ error: "QUOTA_RESET_FAILED" }, { status: 500 });

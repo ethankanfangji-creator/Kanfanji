@@ -36,6 +36,7 @@ export default function ViewingsPage() {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [compareBusy, setCompareBusy] = useState(false);
+  const [compareMax, setCompareMax] = useState(COMPARE_MAX);
 
   useEffect(() => {
     const supabase = createClient();
@@ -55,6 +56,11 @@ export default function ViewingsPage() {
       };
       if (!response.ok) setError(body.error || "讀取案件失敗");
       setViewings(body.viewings ?? []);
+      const entitlement = await fetch("/api/compare/entitlement");
+      if (entitlement.ok) {
+        const gate = (await entitlement.json()) as { maxItems?: number; tier?: "free" | "pro" };
+        if (gate.maxItems) setCompareMax(gate.maxItems);
+      }
       setLoading(false);
     })();
   }, [router]);
@@ -62,19 +68,36 @@ export default function ViewingsPage() {
   function toggleSelect(id: string) {
     setSelected((prev) => {
       if (prev.includes(id)) return prev.filter((x) => x !== id);
-      if (prev.length >= COMPARE_MAX) return prev;
+      if (prev.length >= compareMax) return prev;
       return [...prev, id];
     });
   }
 
   async function startCompare() {
-    if (selected.length < COMPARE_MIN || selected.length > COMPARE_MAX) {
-      setError(messages.compare.selectRange);
+    if (selected.length < COMPARE_MIN || selected.length > compareMax) {
+      setError(messages.compare.selectRange.replace("{max}", String(compareMax)));
       return;
     }
     setError("");
     setCompareBusy(true);
     try {
+      const started = await fetch("/api/compare/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source: "viewings_list", itemIds: selected }),
+      });
+      const startedBody = (await started.json()) as { code?: string; compareId?: string };
+      if (!started.ok) {
+        setError(
+          started.status === 402
+            ? messages.compare.gateUpgradeBody
+            : messages.compare.startFailed,
+        );
+        if (started.status === 402) {
+          track({ name: "compare_gate_shown", props: { reason: "upgrade_required", source: "viewings_list" } });
+        }
+        return;
+      }
       const picked = selected
         .map((id) => viewings.find((v) => v.id === id))
         .filter((v): v is Viewing => Boolean(v));
@@ -89,11 +112,12 @@ export default function ViewingsPage() {
           property: v.property ?? {},
         })),
       );
+      if (startedBody.compareId) draft.serverCompareId = startedBody.compareId;
       await putComparison(draft);
-      if (picked.length === 2 || picked.length === 3) {
+      if (picked.length >= 2 && picked.length <= 5) {
         track({
           name: "compare_opened",
-          props: { count: picked.length, source: "viewings_list" },
+          props: { count: picked.length as 2 | 3 | 4 | 5, source: "viewings_list" },
         });
       }
       router.push(`/compare/${draft.id}`);
@@ -144,7 +168,7 @@ export default function ViewingsPage() {
             <button
               type="button"
               disabled={
-                compareBusy || selected.length < COMPARE_MIN || selected.length > COMPARE_MAX
+                compareBusy || selected.length < COMPARE_MIN || selected.length > compareMax
               }
               onClick={() => void startCompare()}
               className="h-9 px-3 rounded-full bg-black text-white text-[11px] font-bold disabled:opacity-40"

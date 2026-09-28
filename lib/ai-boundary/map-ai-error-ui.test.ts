@@ -4,6 +4,8 @@ import { mapAiErrorToUi, type AiErrorUiCopy } from "./map-ai-error-ui";
 const copy: AiErrorUiCopy = {
   quotaGuest: "GUEST_QUOTA",
   quotaUser: "USER_QUOTA",
+  quotaPro: "PRO {resetAt}",
+  quotaNetwork: "NETWORK",
   authRequired: "AUTH",
   consentRequired: "CONSENT",
   unavailable: "UNAVAIL",
@@ -26,6 +28,19 @@ describe("mapAiErrorToUi", () => {
       message: "GUEST_QUOTA",
       actions: ["sign_in", "upgrade"],
     });
+  });
+
+  it("maps tiered quota results", () => {
+    expect(mapAiErrorToUi({ code: "ai_quota_exceeded", status: 429, tier: "guest", limit: "tier" }, copy).actions).toEqual(["sign_in"]);
+    expect(mapAiErrorToUi({ code: "ai_quota_exceeded", status: 429, tier: "free", limit: "tier" }, copy).actions).toEqual(["upgrade"]);
+    const pro = mapAiErrorToUi(
+      { code: "ai_quota_exceeded", status: 429, tier: "pro", limit: "tier", resetsAt: "2026-10-05T07:00:00.000Z" },
+      copy,
+      { locale: "zh-TW" },
+    );
+    expect(pro.actions).toEqual([]);
+    expect(pro.message).toContain("10/5");
+    expect(mapAiErrorToUi({ code: "ai_quota_exceeded", status: 429, limit: "network" }, copy).actions).toEqual(["retry"]);
   });
 
   it("maps quota exceeded for signed-in users to upgrade + retry", () => {

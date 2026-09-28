@@ -27,11 +27,12 @@ export type AnalyticsEvent =
   | {
       name: "ai_quota_exceeded";
       props: {
-        identity: "guest" | "user";
+        tier: "guest" | "free" | "pro";
         endpoint: "turn" | "report" | "intel" | "ingest";
+        limit: "tier" | "network";
       };
     }
-  | { name: "paywall_shown"; props: { trigger: "ai_quota" | "free_limit" } }
+  | { name: "paywall_shown"; props: { trigger: "ai_quota" | "free_limit" | "compare" } }
   | {
       name: "checkout_started";
       props: { trigger: "ai_quota" | "paywall" | "account" };
@@ -39,7 +40,16 @@ export type AnalyticsEvent =
   | { name: "subscription_activated"; props: { plan: "pro" } }
   | {
       name: "compare_opened";
-      props: { count: 2 | 3; source: "chat_history" | "viewings_list" };
-    };
+      props: { count: 2 | 3 | 4 | 5; source: "chat_history" | "viewings_list" };
+    }
+  | {
+      name: "compare_gate_shown";
+      props: {
+        reason: "login_required" | "upgrade_required" | "too_many_items";
+        source: "chat_history" | "viewings_list";
+      };
+    }
+  | { name: "share_created"; props: { kind: "compare" } }
+  | { name: "share_viewed"; props: { kind: "compare" } };
 
 export type AnalyticsEventName = AnalyticsEvent["name"];

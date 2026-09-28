@@ -49,6 +49,7 @@ function thread(id: string, address: string): ViewingChatThread {
 function renderRail(extra?: {
   compareMode?: boolean;
   selectedIds?: string[];
+  maxItems?: number;
   onSelectThread?: (id: string) => void;
   onToggleSelect?: (id: string) => void;
 }) {
@@ -72,6 +73,7 @@ function renderRail(extra?: {
         onToggleCompareMode={vi.fn()}
         onToggleSelect={onToggleSelect}
         onOpenCompare={vi.fn()}
+        maxItems={extra?.maxItems}
       />
     </I18nProvider>,
   );
@@ -96,6 +98,7 @@ describe("IconRail compare mode", () => {
     const { onToggleSelect } = renderRail({
       compareMode: true,
       selectedIds: ["a", "b", "c"],
+      maxItems: 3,
     });
 
     const fourth = screen.getByRole("checkbox", { name: /道路d/ });

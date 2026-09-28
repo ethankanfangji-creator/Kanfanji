@@ -190,6 +190,7 @@ describe("MobileHistoryDrawer", () => {
         onToggleCompareMode={vi.fn()}
         onToggleSelect={onToggleSelect}
         onOpenCompare={vi.fn()}
+        maxItems={3}
         labels={labels}
       />,
     );

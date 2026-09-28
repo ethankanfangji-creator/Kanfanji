@@ -194,7 +194,8 @@ begin
         'admin_list_users',
         'admin_get_ai_usage',
         'admin_reset_ai_quota',
-        'admin_set_manual_pro'
+        'admin_set_manual_pro',
+        'consume_ai_quota_v2'
       )
       and (
         has_function_privilege('anon', p.oid, 'execute')

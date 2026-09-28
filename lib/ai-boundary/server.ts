@@ -6,11 +6,14 @@ import {
   guestCookieOptions,
   verifyGuestIdentityCookie,
 } from "./guest-identity";
-import { consumeAiQuota } from "./quota";
+import { getAccountTier } from "@/lib/entitlement/tier";
+import { createAdminClient } from "@/utils/supabase/admin";
+import { consumeAiQuota, type AiQuotaTier } from "./quota";
 import { AiInputError, type AiConsentAssertion } from "./validation";
 
 export type AiBoundaryContext = {
   identityKind: "guest" | "user";
+  tier: AiQuotaTier;
   /** Signed-in user id, or null for a guest cookie. */
   userId: string | null;
   applyCookie<T>(response: NextResponse<T>): NextResponse<T>;
@@ -54,22 +57,41 @@ export async function authorizeAiRequest(
     throw new AiInputError("ai_identity_mismatch", 401);
   }
 
+  let tier: AiQuotaTier = "guest";
+  if (userId) {
+    try {
+      tier = await getAccountTier(createAdminClient(), userId);
+    } catch {
+      tier = "free";
+    }
+  }
+
   if (options?.consumeQuota !== false) {
     const quota = await consumeAiQuota(
       request,
-      userId
-        ? { kind: "user", userId, deviceId: guest.deviceId }
-        : { kind: "guest", guest },
+      userId ? { kind: "user", userId, tier: tier === "pro" ? "pro" : "free" } : { kind: "guest", guest },
     );
     if (!quota.allowed) {
-      const error = new AiInputError(quota.code, quota.code === "ai_quota_exceeded" ? 429 : 503);
-      Object.assign(error, { retryAfter: quota.retryAfter });
+      const status = quota.code === "ai_quota_exceeded" ? 429 : 503;
+      const error = new AiInputError(quota.code, status);
+      if (quota.code === "ai_quota_exceeded") {
+        Object.assign(error, {
+          tier: quota.tier,
+          limit: quota.limit,
+          resetsAt: quota.resetsAt,
+          retryAfter: quota.retryAfter,
+        });
+      } else {
+        Object.assign(error, { retryAfter: quota.retryAfter });
+      }
       throw error;
     }
+    if (quota.allowed) tier = quota.tier;
   }
 
   return {
     identityKind: actualKind,
+    tier,
     userId,
     applyCookie(response) {
       if (issued) {
@@ -82,13 +104,25 @@ export async function authorizeAiRequest(
 
 export function aiErrorResponse(error: unknown): NextResponse {
   if (error instanceof AiInputError) {
-    const retryAfter = Number((error as AiInputError & { retryAfter?: number }).retryAfter);
+    const extra = error as AiInputError & {
+      retryAfter?: number | null;
+      tier?: string;
+      limit?: string;
+      resetsAt?: string | null;
+    };
+    const retryAfter = extra.retryAfter;
     return NextResponse.json(
-      { error: "AI request could not be completed.", code: error.code },
+      {
+        error: "AI request could not be completed.",
+        code: error.code,
+        ...(error.status === 429
+          ? { tier: extra.tier ?? null, limit: extra.limit ?? null, resetsAt: extra.resetsAt ?? null }
+          : {}),
+      },
       {
         status: error.status,
         headers:
-          Number.isFinite(retryAfter) && retryAfter > 0
+          typeof retryAfter === "number" && Number.isFinite(retryAfter) && retryAfter > 0
             ? { "Retry-After": String(Math.ceil(retryAfter)) }
             : undefined,
       },

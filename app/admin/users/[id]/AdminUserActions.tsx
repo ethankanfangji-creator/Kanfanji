@@ -87,7 +87,7 @@ export function AdminUserActions({
       </div>
       <div className="space-y-2">
         <p className="text-sm text-[#6B7280]">
-          只重置這個帳號的每日次數。裝置與 IP 的次數後台查不到，使用者仍可能被擋。
+          同時重置免費終身次數與本週 Pro 次數。同一 IP 的每日上限後台看不到，使用者仍可能被擋。
         </p>
         <button
           type="button"

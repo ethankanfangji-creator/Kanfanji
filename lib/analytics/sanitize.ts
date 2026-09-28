@@ -11,11 +11,14 @@ const ALLOWED: Record<AnalyticsEventName, ReadonlySet<string>> = {
   address_rejected: new Set(["source", "region"]),
   viewing_created: new Set(["storage", "market"]),
   ai_message_sent: new Set(["kind", "is_reply"]),
-  ai_quota_exceeded: new Set(["identity", "endpoint"]),
+  ai_quota_exceeded: new Set(["tier", "endpoint", "limit"]),
   paywall_shown: new Set(["trigger"]),
   checkout_started: new Set(["trigger"]),
   subscription_activated: new Set(["plan"]),
   compare_opened: new Set(["count", "source"]),
+  compare_gate_shown: new Set(["reason", "source"]),
+  share_created: new Set(["kind"]),
+  share_viewed: new Set(["kind"]),
 };
 
 const ENUMS: Record<string, ReadonlySet<string>> = {
@@ -24,9 +27,11 @@ const ENUMS: Record<string, ReadonlySet<string>> = {
   source: SOURCES,
   storage: new Set(["local", "cloud"]),
   kind: new Set(["text", "audio", "photo", "file"]),
-  identity: new Set(["guest", "user"]),
+  tier: new Set(["guest", "free", "pro"]),
+  limit: new Set(["tier", "network"]),
+  reason: new Set(["login_required", "upgrade_required", "too_many_items"]),
   endpoint: new Set(["turn", "report", "intel", "ingest"]),
-  trigger: new Set(["ai_quota", "free_limit", "paywall", "account"]),
+  trigger: new Set(["ai_quota", "free_limit", "compare", "paywall", "account"]),
   plan: new Set(["pro"]),
 };
 
@@ -45,13 +50,18 @@ function keepValue(event: AnalyticsEventName, key: string, value: unknown): unkn
       : undefined;
   }
   if (key === "count") {
-    return value === 2 || value === 3 ? value : undefined;
+    return value === 2 || value === 3 || value === 4 || value === 5 ? value : undefined;
   }
   if (key === "is_reply") return typeof value === "boolean" ? value : undefined;
   if (key === "trigger") {
     const next = keepEnum(key, value);
     if (!next) return undefined;
-    if (event === "paywall_shown" && next !== "ai_quota" && next !== "free_limit") {
+    if (
+      event === "paywall_shown" &&
+      next !== "ai_quota" &&
+      next !== "free_limit" &&
+      next !== "compare"
+    ) {
       return undefined;
     }
     if (
@@ -64,8 +74,14 @@ function keepValue(event: AnalyticsEventName, key: string, value: unknown): unkn
     }
     return next;
   }
-  if (key === "source" && event === "compare_opened") {
+  if (key === "source" && (event === "compare_opened" || event === "compare_gate_shown")) {
     return value === "chat_history" || value === "viewings_list" ? value : undefined;
+  }
+  if (key === "kind" && (event === "share_created" || event === "share_viewed")) {
+    return value === "compare" ? value : undefined;
+  }
+  if (typeof value === "string" && /^[A-Za-z0-9_-]{20,}$/.test(value) && !ENUMS[key]?.has(value)) {
+    return undefined;
   }
   return keepEnum(key, value);
 }

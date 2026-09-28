@@ -16,7 +16,7 @@ Last updated: 2026-09-19. Living inventory for agents and humans.
 | Geocoding | Google Places (New) for CA suggest; TW Geocode uses `language=zh-TW` (zh-CN when locale is zh-Hans) and `region=tw` | **Server only.** `GOOGLE_MAPS_API_KEY` never `NEXT_PUBLIC_` |
 | Property intel | Property facts pipeline → projected intel; BC/Google/OSM/Bing evidence (+ optional ATTOM); DB cache | `/api/property-facts`, `/api/property-intel` — no crawling; LLM does not invent facts |
 | Payments | Stripe Checkout + webhook | Server secrets only |
-| Analytics | PostHog (`posthog-js` / `posthog-node`) | Action counts only. No-op when `NEXT_PUBLIC_POSTHOG_KEY` is unset. Data goes to the host in `NEXT_PUBLIC_POSTHOG_HOST` (US `https://us.i.posthog.com` or EU `https://eu.i.posthog.com`) while Supabase stays in ca-central-1. The privacy page explains that cross-border transfer. |
+| Analytics | PostHog (`posthog-js` / `posthog-node`) | Action counts only. No-op when `NEXT_PUBLIC_POSTHOG_KEY` is unset. Product analytics are processed by PostHog in the United States (`https://us.i.posthog.com`). Supabase stays in ca-central-1. |
 | i18n | `zh-Hant` / `zh-Hans` / `en` / `th` | `lib/i18n/*` — no hardcoded product copy in new UI |
 | Tests | Vitest + Playwright | `npm test` / `npm run test:e2e` |
 

@@ -75,7 +75,7 @@ describe("POST /api/vision AI boundary", () => {
 
   it("returns Retry-After when the atomic quota denies", async () => {
     rpc.mockResolvedValue({
-      data: [{ allowed: false, retry_after_seconds: 91 }],
+      data: [{ allowed: false, blocked_index: 2, retry_after_seconds: 91 }],
       error: null,
     });
     const response = await POST(request(body()));

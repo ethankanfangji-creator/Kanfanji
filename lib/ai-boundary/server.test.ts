@@ -22,6 +22,9 @@ describe("AI public errors", () => {
     expect(await response.json()).toEqual({
       error: "AI request could not be completed.",
       code: "ai_quota_exceeded",
+      tier: null,
+      limit: null,
+      resetsAt: null,
     });
   });
 

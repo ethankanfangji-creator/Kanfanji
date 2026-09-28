@@ -19,14 +19,12 @@ import {
   COMPARE_SHARE_ENABLED,
   getComparison,
   putComparison,
-  putComparisonShare,
   sortComparisonColumns,
-  toComparisonShareSnapshot,
   touchComparison,
   type CompareSortKey,
   type ComparisonDraft,
 } from "@/lib/comparison";
-import { newShareToken } from "@/lib/media-paths";
+import { snapshotFromDraft } from "@/lib/comparison/share-snapshot";
 
 export default function ComparePage({
   params,
@@ -70,25 +68,29 @@ export default function ComparePage({
   }
 
   async function onShare() {
-    if (!draft) return;
+    if (!draft?.serverCompareId) {
+      setError(messages.compare.startFailed);
+      return;
+    }
+    if (!window.confirm(messages.compare.shareAcknowledge)) return;
     setBusy(true);
     try {
-      const token = draft.shareToken || newShareToken();
-      const snapshot = toComparisonShareSnapshot({
-        ...draft,
-        columns: sortedColumns,
+      const response = await fetch("/api/compare/shares", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          compareId: draft.serverCompareId,
+          snapshot: snapshotFromDraft({ ...draft, columns: sortedColumns }, { includeNotes: false }),
+          acknowledgeAddresses: true,
+        }),
       });
-      await putComparisonShare({
-        token,
-        comparisonId: draft.id,
-        snapshot,
-        createdAt: new Date().toISOString(),
-      });
-      const next = { ...draft, shareToken: token };
-      await persist(next);
-      const url = `${window.location.origin}/c/${token}`;
-      setShareUrl(url);
-      await navigator.clipboard?.writeText(url);
+      const body = (await response.json()) as { url?: string; code?: string };
+      if (!response.ok || !body.url) {
+        setError(response.status === 429 ? messages.compare.shareRateLimited : messages.compare.startFailed);
+        return;
+      }
+      setShareUrl(body.url);
+      await navigator.clipboard?.writeText(body.url);
     } catch (err) {
       setError(err instanceof Error ? err.message : messages.compare.error);
     } finally {

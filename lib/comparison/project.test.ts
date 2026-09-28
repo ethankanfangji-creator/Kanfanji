@@ -122,16 +122,18 @@ describe("sortComparisonColumns", () => {
 });
 
 describe("buildComparisonDraft", () => {
-  it("requires 2–3 viewings", () => {
-    expect(() => buildComparisonDraft([])).toThrow(/COMPARE_COUNT_2_3/);
+  it("requires 2–5 viewings", () => {
+    expect(() => buildComparisonDraft([])).toThrow(/COMPARE_COUNT_2_5/);
     expect(() =>
       buildComparisonDraft([
         { id: "1", address: "A", updated_at: "t", property: {} },
         { id: "2", address: "B", updated_at: "t", property: {} },
         { id: "3", address: "C", updated_at: "t", property: {} },
         { id: "4", address: "D", updated_at: "t", property: {} },
+        { id: "5", address: "E", updated_at: "t", property: {} },
+        { id: "6", address: "F", updated_at: "t", property: {} },
       ]),
-    ).toThrow(/COMPARE_COUNT_2_3/);
+    ).toThrow(/COMPARE_COUNT_2_5/);
     const draft = buildComparisonDraft([
       { id: "1", address: "A", updated_at: "t", property: {} },
       { id: "2", address: "B", updated_at: "t", property: {} },

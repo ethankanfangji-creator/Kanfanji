@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { AuthNotice } from "@/components/auth/AuthNotice";
 import { AuthPageShell } from "@/components/auth/AuthPageShell";
 import { SignupPendingPanel } from "@/components/auth/SignupPendingPanel";
@@ -17,10 +18,16 @@ import { createClient } from "@/utils/supabase/client";
 
 export default function LoginPage() {
   const { messages } = useI18n();
+  const searchParams = useSearchParams();
   const emailInputRef = useRef<HTMLInputElement>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [mode, setMode] = useState<"signin" | "signup">(
+    searchParams.get("mode") === "signup" ? "signup" : "signin",
+  );
+  useEffect(() => {
+    if (searchParams.get("mode") === "signup") setMode("signup");
+  }, [searchParams]);
   const [notice, setNotice] = useState<AuthFailureKind | null>(null);
   const [signupPending, setSignupPending] = useState(false);
   const [loading, setLoading] = useState(false);

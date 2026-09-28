@@ -383,7 +383,9 @@ export async function processUserTurn(
     captures: [...before.captures, ...storedCaptures],
   };
 
-  const focusFieldIds = input.conversation.focusFieldIds ?? [];
+  const focusFieldIds = input.replyContext?.targetFieldIds.length
+    ? input.replyContext.targetFieldIds
+    : (input.conversation.focusFieldIds ?? []);
   const priorPending = input.conversation.pendingConfirm ?? null;
   const priorTurnCount = input.conversation.userTurnCount ?? 0;
   /** 招4 — this turn's 1-based index after completion */
@@ -455,14 +457,18 @@ export async function processUserTurn(
   const skipLlm =
     (confirmResolved.facts.length > 0 && !confirmResolved.remainder) ||
     (isVagueUtterance(freeformText) && freeformText.trim().length < 12);
+  const replyNote = input.replyContext
+    ? `\n使用者正在回覆這則訊息：「${input.replyContext.quotedText.slice(0, 200)}」；相關欄位：${input.replyContext.targetFieldIds.join(", ") || "未知"}。請判斷是補充或更正；更正時該欄位 status 設為 corrected。`
+    : "";
   const llmExtract = skipLlm
     ? { fields: [] as ExtractedPropertyFact[] }
     : await extractPropertyFactsWithLlm({
         apiKey: input.apiKey,
-        text: freeformText || sourceText,
+        text: `${freeformText || sourceText}${replyNote}`,
         messageId: message.id,
         locale: message.locale ?? input.conversation.locale,
         signal: input.signal,
+        replyNote,
       });
   if ("warning" in llmExtract && llmExtract.warning) {
     warnings.push(llmExtract.warning);
@@ -480,6 +486,17 @@ export async function processUserTurn(
       [vagueFact],
       extractedFields.filter((f) => f.fieldId !== vagueFact.fieldId),
     );
+  }
+  if (input.replyContext?.targetFieldIds.length) {
+    const targets = new Set(input.replyContext.targetFieldIds);
+    extractedFields = extractedFields.map((fact) => {
+      if (!targets.has(fact.fieldId)) return fact;
+      const prev = recordWithCaptures.fields[fact.fieldId];
+      if (prev?.value != null && String(prev.value) !== String(fact.value ?? "")) {
+        return { ...fact, status: "corrected" as const };
+      }
+      return fact;
+    });
   }
 
   const extracted = {

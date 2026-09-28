@@ -34,27 +34,29 @@ export function buildOpeningBubble(
           `We're at ${address}. I'm your viewing note-taker — not an agent or appraiser.`,
           "Say anything you notice in any order (text, voice, or photos). I'll file what I can in the background.",
           `If useful: ${focusQ} — or skip and talk about something else.`,
-          "Photos and the address may add unverified hints (marked as inferred). You finish when you feel done — not when every field is full.",
+          "Photos and the address may add unverified hints (marked as inferred). When you want to stop, press Finish.",
+          "If you have a listing link, listing text, or screenshots, paste or send them. It is fine if you do not.",
         ].join("\n\n")
       : loc.startsWith("th")
         ? [
             `เราอยู่ที่ ${address} ฉันช่วยจดบันทึกการดูบ้าน — ไม่ใช่นายหน้าหรือผู้ประเมิน`,
             "พูดสิ่งที่เห็นได้ตามลำดับใดก็ได้ (ข้อความ เสียง หรือรูป) ฉันจะจัดเก็บเบื้องหลัง",
             `ถ้าสะดวก: ${focusQ} — หรือข้ามแล้วคุยอย่างอื่นได้`,
-            "รูปและที่อยู่อาจเติมข้อมูลแบบคาดการณ์ (ติดป้าย inferred) จบเมื่อคุณพร้อม ไม่ต้องกรอกครบทุกช่อง",
+            "รูปและที่อยู่อาจเติมข้อมูลแบบคาดการณ์ (ติดป้าย inferred) เมื่อจะจบให้กด「完成」",
+            "ถ้ามีลิงก์ ข้อความ หรือภาพประกาศ ส่งมาได้ ไม่มีก็ไม่เป็นไร",
           ].join("\n\n")
         : loc.includes("Hans")
           ? [
               `已确认地址：${address}。我是看房纪录助理，不是中介或估价师。`,
               "你想到什么就说什么（文字、语音或照片），我会在背后整理进摘要，不会逼你按表填写。",
               `若方便可先提一句：${focusQ}——跳过、换话题都没问题。`,
-              "照片与地址情报可能自动补上「推测」栏位，需你确认后才算已确认。觉得可以结束时再说「整理一下／完成」即可。",
+              "照片与地址情报可能自动补上「推测」栏位，需你确认后才算已确认。想结束时按「完成」。如果手上有房源连结、房源文字或截图，直接贴上或传照片即可；没有也没关系。",
             ].join("\n\n")
           : [
               `已確認地址：${address}。我是看房紀錄助理，不是房仲或估價師。`,
               "你想到什麼就說什麼（文字、語音或照片），我會在背後整理進摘要，不會逼你按表填寫。",
               `若方便可先提一句：${focusQ}——跳過、換話題都沒問題。`,
-              "照片與地址情報可能自動補上「推測」欄位，需你確認後才算已確認。覺得可以結束時再說「整理一下／完成」即可。",
+              "照片與地址情報可能自動補上「推測」欄位，需你確認後才算已確認。想結束時按「完成」。如果手上有房源連結、房源文字或截圖，直接貼上或傳照片給我就好；沒有也沒關係。",
             ].join("\n\n");
 
   return {

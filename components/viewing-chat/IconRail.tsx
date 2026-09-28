@@ -21,7 +21,7 @@ import { AnalyticsToggle } from "@/components/analytics/AnalyticsToggle";
 import { useI18n } from "@/components/I18nProvider";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
-import { resetSyncEngineSingleton } from "@/lib/sync";
+import { signOutAndClearLocal } from "@/lib/auth/sign-out-client";
 import { setPersistenceAccountScope } from "@/lib/idb/draft-store";
 import type { ViewingChatThread } from "@/lib/viewing-chat/types";
 import { shortenAddressLabel } from "@/lib/shorten-address";
@@ -448,10 +448,8 @@ export function IconRail({
                     <button
                       type="button"
                       onClick={() => {
-                        const supabase = getSupabase();
-                        void supabase?.auth.signOut().then(() => {
-                          resetSyncEngineSingleton();
-                          setPersistenceAccountScope(null);
+                        void signOutAndClearLocal().then((ok) => {
+                          if (!ok) return;
                           setProfileOpen(false);
                           router.replace("/login");
                         });

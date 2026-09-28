@@ -129,9 +129,8 @@ describe("natural dialogue acceptance", () => {
       conversation: state,
       message: { id: "s2", text: "先這樣，整理一下" },
     });
-    expect(done.conversationStatus).toBe("reviewing");
-    expect(done.updatedRecord.fields.price).toBeUndefined();
-    expect(done.assistantMessage).toMatch(/摘要|整理|完成不代表|留空/);
+    expect(done.conversationStatus).not.toBe("reviewing");
+    expect(done.intent).not.toBe("finish");
   });
 
   it("8) AI / JSON failure keeps raw input and filed facts", async () => {

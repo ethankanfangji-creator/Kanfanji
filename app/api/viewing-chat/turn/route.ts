@@ -12,10 +12,18 @@ import {
 } from "@/lib/ai-boundary/server-entry";
 import { AI_LIMITS } from "@/lib/ai-boundary/config";
 import { integrateChatTurn } from "@/lib/viewing-chat/integrate";
+import { extractFirstUrl, isListingPaste, pdfSourceRole } from "@/lib/viewing-chat/detect-source";
+import { FIELD_CATALOG } from "@/lib/viewing-chat/collection/field-catalog";
+import { agendaIdToFieldId } from "@/lib/viewing-chat/collection/field-map";
+import { resolveAgendaId } from "@/lib/viewing-chat/agenda-catalog";
+import type { PropertyFieldId } from "@/lib/viewing-chat/collection/types";
 import type { ChatMessage } from "@/lib/viewing-chat/types";
 import { createClient } from "@/utils/supabase/server";
+import { createAdminClient } from "@/utils/supabase/admin";
+import { appendChatMessages } from "@/lib/viewing-chat/append-messages";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 function parseMessages(raw: FormDataEntryValue | null): ChatMessage[] {
   if (typeof raw !== "string" || !raw.trim()) return [];
@@ -25,6 +33,31 @@ function parseMessages(raw: FormDataEntryValue | null): ChatMessage[] {
   } catch {
     return [];
   }
+}
+
+async function persistAppendedMessages(viewingId: string, userId: string, incoming: ChatMessage[]) {
+  const admin = createAdminClient();
+  const current = await admin
+    .from("viewings")
+    .select("messages")
+    .eq("id", viewingId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (current.error || !current.data) return false;
+  const existing = Array.isArray(current.data.messages)
+    ? (current.data.messages as ChatMessage[])
+    : [];
+  const merged = appendChatMessages(existing, incoming);
+  const { error } = await admin
+    .from("viewings")
+    .update({
+      messages: merged,
+      updated_at: new Date().toISOString(),
+      client_updated_at: new Date().toISOString(),
+    })
+    .eq("id", viewingId)
+    .eq("user_id", userId);
+  return !error;
 }
 
 export async function POST(request: Request) {
@@ -106,6 +139,7 @@ export async function POST(request: Request) {
         // Vision is best-effort; chat turn still proceeds with hasPhoto flag
       }
     }
+    const replyToMessageId = String(form.get("replyToMessageId") ?? "").trim().slice(0, 120);
     const replyRaw = form.get("replyTo");
     let replyTo: ChatMessage["replyTo"];
     if (typeof replyRaw === "string" && replyRaw.trim()) {
@@ -127,6 +161,84 @@ export async function POST(request: Request) {
         // ignore malformed reply payload
       }
     }
+    const targetId = replyToMessageId || replyTo?.messageId || "";
+    const allowedFields = new Set(FIELD_CATALOG.map((entry) => entry.fieldId));
+    let clientFieldIds: PropertyFieldId[] = [];
+    const fieldRaw = form.get("replyToFieldIds");
+    if (typeof fieldRaw === "string" && fieldRaw.trim()) {
+      try {
+        const parsed = JSON.parse(fieldRaw) as unknown;
+        if (Array.isArray(parsed)) {
+          clientFieldIds = parsed
+            .filter((id): id is PropertyFieldId => typeof id === "string" && allowedFields.has(id as PropertyFieldId))
+            .slice(0, 8);
+        }
+      } catch {
+        clientFieldIds = [];
+      }
+    }
+    const target = targetId ? messages.find((message) => message.id === targetId) : undefined;
+    const serverFieldIds = target
+      ? (target.role === "ai"
+          ? (target.matched ?? [])
+              .map((row) => agendaIdToFieldId(resolveAgendaId(row.id) ?? row.id))
+              .filter((id): id is PropertyFieldId => allowedFields.has(id))
+          : [])
+      : [];
+    const replyContext = target
+      ? {
+          targetMessageId: target.id,
+          targetRole: target.role,
+          quotedText: (target.text || target.transcript || replyTo?.preview || "").slice(0, 200),
+          targetFieldIds: clientFieldIds.filter(
+            (id) => serverFieldIds.length === 0 || serverFieldIds.includes(id),
+          ),
+        }
+      : undefined;
+    if (target) {
+      replyTo = {
+        messageId: target.id,
+        role: target.role,
+        preview: replyContext?.quotedText.slice(0, 200) || replyTo?.preview || "",
+      };
+    }
+    const replyWarnings = targetId && !target ? ["reply_target_unknown"] : [];
+
+    const listingUrl = extractFirstUrl(`${text}\n${transcript}`);
+    const pastedListing = !listingUrl && isListingPaste(text);
+    const pdf = form.get("file");
+    let sourceBundle: {
+      sources?: unknown;
+      propertyData?: unknown;
+      conflicts?: unknown;
+      sourceStatus?: "ok" | "partial" | "soft_fail";
+    } = {};
+    if (listingUrl || pastedListing || (pdf instanceof File && pdf.size > 0 && pdf.type === "application/pdf")) {
+      try {
+        const { runPropertySourcePipeline } = await import("@/lib/property-source/pipeline");
+        const pdfFile = pdf instanceof File && pdf.size > 0 ? pdf : null;
+        const pipeline = await runPropertySourcePipeline({
+          address,
+          locale,
+          sourceType: listingUrl ? "listing_url" : pastedListing ? "user_text" : "pdf",
+          url: listingUrl ?? undefined,
+          text: pastedListing ? text : undefined,
+          fileBase64: pdfFile ? Buffer.from(await pdfFile.arrayBuffer()).toString("base64") : undefined,
+          mimeType: pdfFile?.type,
+          fileName: pdfFile?.name,
+          sourceRole: pdfFile ? pdfSourceRole(`${pdfFile.name}\n${text}`) : "listing",
+        });
+        const errors = pipeline.source?.extractionErrors ?? [];
+        sourceBundle = {
+          sources: pipeline.sources,
+          propertyData: pipeline.propertyData,
+          conflicts: pipeline.conflicts,
+          sourceStatus: errors.length ? "soft_fail" : "ok",
+        };
+      } catch {
+        sourceBundle = { sourceStatus: "soft_fail" };
+      }
+    }
 
     const result = await integrateChatTurn({
       apiKey,
@@ -139,6 +251,7 @@ export async function POST(request: Request) {
       photoAnalysis,
       visionSlots,
       replyTo,
+      replyContext,
       agendaActiveId:
         typeof form.get("agendaActiveId") === "string"
           ? String(form.get("agendaActiveId")).trim() || null
@@ -247,18 +360,7 @@ export async function POST(request: Request) {
           data: { user },
         } = await supabase.auth.getUser();
         if (!user) return;
-        const { error } = await supabase
-          .from("viewings")
-          .update({
-            messages: messagesWithUser,
-            updated_at: new Date().toISOString(),
-            client_updated_at: new Date().toISOString(),
-          })
-          .eq("id", viewingId)
-          .eq("user_id", user.id);
-        if (error) {
-          console.error("viewing_chat_turn_persist_user", error.message);
-        }
+        await persistAppendedMessages(viewingId, user.id, messagesWithUser);
       },
     });
 
@@ -269,19 +371,8 @@ export async function POST(request: Request) {
         data: { user },
       } = await supabase.auth.getUser();
       if (user) {
-        const { error } = await supabase
-          .from("viewings")
-          .update({
-            messages: result.messages,
-            updated_at: new Date().toISOString(),
-            client_updated_at: new Date().toISOString(),
-          })
-          .eq("id", viewingId)
-          .eq("user_id", user.id);
-        if (error) {
-          // Non-fatal for guest-first UX; client still has messages.
-          console.error("viewing_chat_turn_persist", error.message);
-        }
+        const persisted = await persistAppendedMessages(viewingId, user.id, result.messages);
+        if (!persisted) console.error("viewing_chat_turn_persist");
       }
     }
 
@@ -297,12 +388,13 @@ export async function POST(request: Request) {
         collectionSkippedFields: result.collectionSkippedFields,
         changes: result.changes,
         conversationStatus: result.conversationStatus,
-        turnWarnings: result.turnWarnings,
+        turnWarnings: [...result.turnWarnings, ...replyWarnings],
         suggestedQuestions: result.suggestedQuestions,
         extractionStatus: result.extractionStatus,
         rawAiResponse: result.rawAiResponse,
         collectionFocusFieldIds: result.collectionFocusFieldIds,
         pendingConfirm: result.pendingConfirm,
+        ...sourceBundle,
       }),
     );
   } catch (error) {

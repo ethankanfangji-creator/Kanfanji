@@ -46,20 +46,24 @@ import {
   saveLocalMessages,
   setLocalThreadPinned,
 } from "@/lib/viewing-chat/local-store";
-import { addMediaFile } from "@/lib/viewing-chat/media-library";
+import { addMediaFile, removeMediaByThread } from "@/lib/viewing-chat/media-library";
+import { GuestLimitDialog } from "@/components/viewing-chat/GuestLimitDialog";
+import { ShareReportDialog } from "@/components/viewing-chat/ShareReportDialog";
+import { syncWithRetry } from "@/lib/viewing-chat/cloud-sync";
+import { sweepExpiredGuestThreads } from "@/lib/viewing-chat/sweep-guest-threads";
 import {
   createAiMessage,
   createUserMessage,
   messageSearchHaystack,
+  type ChatMediaRef,
   type ChatMessage,
   type ChatReplyRef,
   type ViewingChatThread,
 } from "@/lib/viewing-chat/types";
-import { CollectionQuickActions } from "@/components/viewing-chat/CollectionQuickActions";
-import {
-  ReportQuickActions,
-  type CollectionActionId,
-} from "@/components/viewing-chat/ReportQuickActions";
+import { agendaIdToFieldId } from "@/lib/viewing-chat/collection/field-map";
+import { resolveAgendaId } from "@/lib/viewing-chat/agenda-catalog";
+import { SyncStatusPill } from "@/components/viewing-chat/SyncStatusPill";
+import { QuickActionChip } from "@/components/viewing-chat/QuickActionChip";
 import { ConflictingDataAlert } from "@/components/viewing-chat/ConflictingDataAlert";
 import type {
   PropertySource,
@@ -139,6 +143,10 @@ export function ViewingChatApp() {
   const [softFailCtas, setSoftFailCtas] = useState(false);
   /** Advanced listing intake (hidden on A main path). */
   const [listingIntakeOpen, setListingIntakeOpen] = useState(false);
+  const [guestLimitOpen, setGuestLimitOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [shareError, setShareError] = useState<string | null>(null);
   const [status, setStatus] = useState("");
   const screenshotInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -213,6 +221,25 @@ export function ViewingChatApp() {
     chatMatchIds.length > 0
       ? chatMatchIds[Math.min(chatMatchIndex, chatMatchIds.length - 1)] ?? null
       : null;
+
+  useEffect(() => {
+    let timer = 0;
+    const run = () => {
+      void sweepExpiredGuestThreads().then((removed) => {
+        if (removed > 0) refreshLocal();
+      });
+    };
+    run();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") run();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    timer = window.setInterval(run, 30 * 60 * 1000);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.clearInterval(timer);
+    };
+  }, []);
 
   useEffect(() => {
     setChatMatchIndex(0);
@@ -388,11 +415,21 @@ export function ViewingChatApp() {
   }
 
   /** Bind a confirmed normalized address to a new local viewing thread. */
-  async function bindConfirmedAddress(label: string) {
+  async function bindConfirmedAddress(
+    label: string,
+    place?: { placeId: string | null; placeSource: string | null },
+  ) {
     const trimmed = label.trim();
     if (!trimmed) {
       setStatus(c.needAddress);
       return;
+    }
+    if (!userId) {
+      const existingGuest = listLocalThreads().some((thread) => !thread.ownerUserId);
+      if (existingGuest) {
+        setGuestLimitOpen(true);
+        return;
+      }
     }
     const market = inferAgendaMarket(trimmed);
     const opening = buildOpeningBubble(trimmed, locale as Locale);
@@ -442,7 +479,25 @@ export function ViewingChatApp() {
     setListingIntakeOpen(false);
     setSoftFailCtas(false);
 
-    void enrichAddressIntel(thread.id, trimmed, seedRecord);
+    void enrichAddressIntel(thread.id, trimmed, seedRecord, place);
+    if (userId) {
+      void fetch("/api/viewing-chat/threads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          threadId: thread.id,
+          address: trimmed,
+          clientUpdatedAt: new Date().toISOString(),
+          messages: [opening.message],
+          chatState: {
+            v: 1,
+            normalizedAddress: trimmed,
+            stage: "viewing_preparation",
+            conversationStatus: "collecting",
+          },
+        }),
+      });
+    }
   }
 
   function noteQuotaUi(
@@ -473,7 +528,10 @@ export function ViewingChatApp() {
     if (source && region) {
       track({ name: "address_confirmed", props: { source, region } });
     }
-    void bindConfirmedAddress(candidate.displayAddress);
+    void bindConfirmedAddress(candidate.displayAddress, {
+      placeId: candidate.propertyId,
+      placeSource: candidate.source,
+    });
   }
 
   function rejectPendingAddress() {
@@ -504,6 +562,7 @@ export function ViewingChatApp() {
     threadId: string,
     address: string,
     baseRecord: PropertyCollectionRecord,
+    place?: { placeId: string | null; placeSource: string | null },
   ) {
     try {
       setStatus(c.externalEnriching);
@@ -513,10 +572,10 @@ export function ViewingChatApp() {
         body: JSON.stringify({
           address,
           viewingId: threadId.startsWith("local_") ? null : threadId,
-          consentVersion: AI_CONSENT_VERSION,
-          consentSessionId: consentSessionId(),
-          identityKind: userId ? "user" : "guest",
           includeFactCard: false,
+          ...(place?.placeId && place.placeSource
+            ? { placeId: place.placeId, placeSource: place.placeSource }
+            : {}),
         }),
       });
       if (!response.ok) {
@@ -600,18 +659,26 @@ export function ViewingChatApp() {
     refreshLocal();
   }
 
-  function enterReviewMode() {
-    if (!active) return;
-    const msg = createAiMessage({
-      type: "follow_up",
-      text: c.reviewHint,
-    });
+  function openReviewCard() {
+    if (!active || busy || active.messages.length === 0) return;
+    if (active.conversationStatus === "reviewing") {
+      setSummaryOpen(true);
+      return;
+    }
+    const last = active.messages[active.messages.length - 1];
+    const alreadyHint = last?.role === "ai" && last.text === c.reviewHint;
+    const msg = alreadyHint
+      ? null
+      : createAiMessage({
+          type: "follow_up",
+          text: c.reviewHint,
+        });
     patchLocalThread(active.id, {
       conversationStatus: "reviewing",
       propertyRecord: active.propertyRecord
         ? { ...active.propertyRecord, mode: "confirming" }
         : active.propertyRecord,
-      messages: [...active.messages, msg],
+      messages: msg ? [...active.messages, msg] : active.messages,
     });
     refreshLocal();
     setSummaryOpen(true);
@@ -636,20 +703,24 @@ export function ViewingChatApp() {
         hasConflict: false,
       };
     }
+    const nextRecord = {
+      ...base,
+      fields,
+      mode: "confirming" as const,
+      updatedAt: now,
+    };
     patchLocalThread(active.id, {
-      propertyRecord: {
-        ...base,
-        fields,
-        mode: "confirming",
-        updatedAt: now,
-      },
+      propertyRecord: nextRecord,
       conversationStatus: "reviewing",
     });
     refreshLocal();
-    void generateReport();
+    void generateReport({
+      record: nextRecord,
+      skippedFields: active.collectionSkippedFields ?? [],
+    });
   }
 
-  function handleCollectionAction(id: CollectionActionId) {
+  function handleCollectionAction(id: "skip" | "summarize" | "finish" | "supplement" | "correct") {
     if (!active) return;
     if (id === "skip") {
       skipActiveAgendaItem();
@@ -665,7 +736,7 @@ export function ViewingChatApp() {
       return;
     }
     if (id === "finish") {
-      enterReviewMode();
+      openReviewCard();
       return;
     }
     if (id === "supplement") {
@@ -741,8 +812,20 @@ export function ViewingChatApp() {
               : opts.file.name
             : c.sourceAdded),
         fileName: opts.file?.name,
-        url: opts.file && opts.sourceType === "image" ? URL.createObjectURL(opts.file) : undefined,
       });
+      if (opts.file) {
+        const saved = await addMediaFile(opts.file, active.id, active.address);
+        userMsg.media = [{
+          id: saved.id,
+          kind: saved.kind,
+          name: saved.name,
+          mime: saved.mime,
+          size: saved.size,
+          path: null,
+        }];
+      }
+      saveLocalMessages(active.id, [...active.messages, userMsg]);
+      refreshLocal();
 
       const response = await fetch("/api/property-source/ingest", {
         method: "POST",
@@ -926,6 +1009,27 @@ export function ViewingChatApp() {
         : `【已上傳檔案：${payload.file.name}】`
       : "";
     const textForAi = [payload.text, fileNote].filter(Boolean).join("\n");
+    const media: ChatMediaRef[] = [];
+    const remember = async (blob: Blob, name: string) => {
+      const file = blob instanceof File ? blob : new File([blob], name, { type: blob.type || "application/octet-stream" });
+      const saved = await addMediaFile(file, active.id, active.address);
+      media.push({
+        id: saved.id,
+        kind: saved.kind,
+        name: saved.name,
+        mime: saved.mime,
+        size: saved.size,
+        path: null,
+      });
+    };
+    if (payload.image) await remember(payload.image, payload.image.name);
+    if (payload.file) await remember(payload.file, payload.file.name);
+    if (payload.audio) {
+      await remember(
+        payload.audio,
+        payload.audio instanceof File ? payload.audio.name : "note.webm",
+      );
+    }
     const optimisticUser = createUserMessage({
       type: payload.image
         ? "photo"
@@ -937,6 +1041,7 @@ export function ViewingChatApp() {
       text: textForAi.trim() || undefined,
       fileName: payload.file?.name,
       replyTo: replyTo ?? undefined,
+      media: media.length ? media : undefined,
     });
     setPendingUserMessageId(optimisticUser.id);
     saveLocalMessages(active.id, [...priorMessages, optimisticUser]);
@@ -984,6 +1089,20 @@ export function ViewingChatApp() {
       );
       if (replyTo) {
         form.append("replyTo", JSON.stringify(replyTo));
+        form.append("replyToMessageId", replyTo.messageId);
+        const target = priorMessages.find((message) => message.id === replyTo.messageId);
+        const fieldIds =
+          target?.role === "ai"
+            ? (target.matched ?? []).map((row) =>
+                agendaIdToFieldId(resolveAgendaId(row.id) ?? row.id),
+              )
+            : Object.values(active.propertyRecord?.fields ?? {})
+                .filter((field) => field?.sourceMessageId === replyTo.messageId)
+                .map((field) => field?.fieldId);
+        form.append("replyToFieldIds", JSON.stringify(fieldIds.slice(0, 8)));
+      }
+      if (payload.file && payload.file.type === "application/pdf") {
+        form.append("file", payload.file, payload.file.name);
       }
       if (payload.audio) {
         form.append(
@@ -999,6 +1118,7 @@ export function ViewingChatApp() {
         body: form,
       });
       const data = (await response.json()) as {
+        userMessage?: ChatMessage;
         messages?: ChatMessage[];
         agendaActiveId?: string | null;
         agendaSkippedIds?: string[];
@@ -1040,57 +1160,16 @@ export function ViewingChatApp() {
         name: "ai_message_sent",
         props: { kind, is_reply: Boolean(replyTo) },
       });
-      let nextMessages = data.messages;
-
-      if (payload.image) {
-        const previewUrl = URL.createObjectURL(payload.image);
-        nextMessages = nextMessages.map((message, index) => {
-          if (index === nextMessages.length - 2 && message.role === "user") {
-            return {
-              ...message,
-              type: "photo",
-              url: previewUrl,
-              replyTo: replyTo ?? message.replyTo,
-            };
-          }
-          return message;
-        });
-        void addMediaFile(payload.image, active.id, active.address).catch(() => {
-          /* best-effort library save */
-        });
-      }
-
-      if (payload.file) {
-        const previewUrl = URL.createObjectURL(payload.file);
-        nextMessages = nextMessages.map((message, index) => {
-          if (index === nextMessages.length - 2 && message.role === "user") {
-            return {
-              ...message,
-              type: "file",
-              fileName: payload.file!.name,
-              url: previewUrl,
-              text: payload.text || message.text,
-              replyTo: replyTo ?? message.replyTo,
-            };
-          }
-          return message;
-        });
-        void addMediaFile(payload.file, active.id, active.address).catch(() => {
-          /* best-effort library save */
-        });
-      }
-
-      if (payload.audio) {
-        const audioFile =
-          payload.audio instanceof File
-            ? payload.audio
-            : new File([payload.audio], "note.webm", {
-                type: payload.audio.type || "audio/webm",
-              });
-        void addMediaFile(audioFile, active.id, active.address).catch(() => {
-          /* best-effort library save */
-        });
-      }
+      const nextMessages = data.messages.map((message) => {
+        if (!data.userMessage || message.id !== data.userMessage.id) return message;
+        return {
+          ...message,
+          media: media.length ? media : message.media,
+          replyTo: replyTo ?? message.replyTo,
+          type: optimisticUser.type,
+          fileName: optimisticUser.fileName ?? message.fileName,
+        };
+      });
 
       saveLocalMessages(active.id, nextMessages);
       setPendingUserMessageId(null);
@@ -1161,7 +1240,10 @@ export function ViewingChatApp() {
     }
   }
 
-  async function generateReport() {
+  async function generateReport(override?: {
+    record?: PropertyCollectionRecord;
+    skippedFields?: string[];
+  }) {
     if (!active) return;
     const progress = countAgendaProgress(agenda);
     if (progress.highPending > 0) {
@@ -1170,72 +1252,10 @@ export function ViewingChatApp() {
       );
       if (!ok) return;
     }
+    const record = override?.record ?? active.propertyRecord;
     setBusy(true);
     setStatus(c.generatingReport);
     try {
-      // Advanced only: listing sources were explicitly collected.
-      if ((active.sources?.length ?? 0) > 0) {
-        const form = new FormData();
-        form.append("sourceType", "chat_message");
-        form.append("text", "Generate initial report from collected sources.");
-        form.append("address", active.address);
-        form.append("locale", locale);
-        form.append("consentVersion", AI_CONSENT_VERSION);
-        form.append("consentSessionId", consentSessionId());
-        form.append("identityKind", userId ? "user" : "guest");
-        form.append("existingSources", JSON.stringify(active.sources ?? []));
-        if (active.propertyData) {
-          form.append("existingData", JSON.stringify(active.propertyData));
-        }
-        const response = await fetch("/api/property-source/ingest", {
-          method: "POST",
-          body: form,
-        });
-        const data = (await response.json()) as {
-          report?: InitialPropertyReport | null;
-          propertyData?: PropertyData;
-          sources?: PropertySource[];
-          steps?: PipelineStepLog[];
-          conflicts?: FieldConflict[];
-          error?: string;
-          code?: string;
-        };
-        if (!response.ok) {
-          const ui = mapAiErrorToUi(
-            {
-            code: data.code,
-            status: response.status,
-            error: data.error,
-            tier: (data as { tier?: "guest" | "free" | "pro" }).tier,
-            limit: (data as { limit?: "tier" | "network" }).limit,
-            resetsAt: (data as { resetsAt?: string | null }).resetsAt,
-          },
-            aiErrorUiCopyFromBoundary(t.aiBoundary),
-            { isAuthenticated: Boolean(userId), locale },
-          );
-          throw Object.assign(new Error(ui.message), { aiUi: ui });
-        }
-        const reportMsg = createAiMessage({
-          type: "initial_report",
-          text: c.initialReportReady,
-          initialReport: data.report ?? undefined,
-        });
-        patchLocalThread(active.id, {
-          messages: [...active.messages, reportMsg],
-          initialReport: data.report ?? null,
-          propertyData: data.propertyData ?? active.propertyData,
-          sources: data.sources ?? active.sources,
-          pipelineSteps: data.steps ?? active.pipelineSteps,
-          stage: "report_ready",
-          conversationStatus: "completed",
-        });
-        setConflicts(data.conflicts ?? []);
-        refreshLocal();
-        setStatus("");
-        return;
-      }
-
-      // A default: viewing report from on-site chat turns.
       const response = await fetch("/api/viewing-chat/report", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1244,6 +1264,9 @@ export function ViewingChatApp() {
           locale,
           viewingId: active.id.startsWith("local_") ? "" : active.id,
           messages: active.messages,
+          propertyRecord: record ?? null,
+          skippedFields: override?.skippedFields ?? active.collectionSkippedFields ?? [],
+          propertyData: active.propertyData ?? null,
           consentVersion: AI_CONSENT_VERSION,
           consentSessionId: consentSessionId(),
           identityKind: userId ? "user" : "guest",
@@ -1327,11 +1350,21 @@ export function ViewingChatApp() {
   }
 
   function requestShare() {
+    if (!active) return;
     if (!configured || !userId) {
-      setStatus(c.loginToShare);
+      router.push(`/login?next=${encodeURIComponent(`/?thread=${active.id}&share=1`)}`);
       return;
     }
-    setStatus(c.loginToShare);
+    if (active.cloud?.state === "blocked_limit") {
+      setStatus(c.shareBlockedLimit);
+      return;
+    }
+    if (active.cloud?.state && active.cloud.state !== "synced") {
+      setStatus(c.shareSyncing);
+      return;
+    }
+    setShareError(null);
+    setShareOpen(true);
   }
 
   function selectThread(id: string) {
@@ -1427,6 +1460,7 @@ export function ViewingChatApp() {
   function deleteThread(id: string) {
     if (!window.confirm(c.deleteHistoryConfirm)) return;
     deleteLocalThread(id);
+    void removeMediaByThread(id);
     refreshLocal();
     if (activeId === id) {
       setActiveId(null);
@@ -1447,6 +1481,62 @@ export function ViewingChatApp() {
       ref={shellRef}
       className="fixed inset-0 flex h-[100svh] max-h-[100svh] w-full flex-col overflow-hidden bg-[#FAF6F1] text-[#1A1A1A]"
     >
+      {guestLimitOpen ? (
+        <GuestLimitDialog
+          title={c.guestLimitTitle}
+          body={c.guestLimitBody}
+          signInLabel={c.guestLimitSignIn}
+          cancelLabel={c.guestLimitCancel}
+          signInHref="/login?next=/"
+          onCancel={() => setGuestLimitOpen(false)}
+        />
+      ) : null}
+      <ShareReportDialog
+        open={shareOpen}
+        url={shareUrl}
+        needsRegenerate={false}
+        error={shareError}
+        labels={{
+          title: c.shareNoticeTitle,
+          body: c.shareNoticeBody,
+          point1: c.shareNoticePoint1,
+          point2: c.shareNoticePoint2,
+          point3: c.shareNoticePoint3,
+          acknowledge: c.shareAcknowledge,
+          create: c.shareCreate,
+          revoke: c.shareRevoke,
+          regenerate: c.shareRegenerate,
+          copy: c.shareManage,
+          copyFailed: c.reviewCopyFailed,
+          unavailable: c.shareUnavailable,
+          needsRegenerate: c.shareNeedsRegenerate,
+        }}
+        onClose={() => setShareOpen(false)}
+        onCreate={() => {
+          if (!active) return;
+          void fetch("/api/share/links", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ viewingId: active.id }),
+          }).then(async (response) => {
+            const data = (await response.json()) as { urlPath?: string; error?: string };
+            if (response.status === 503) setShareError(c.shareUnavailable);
+            else if (!response.ok) setShareError(data.error || c.shareUnavailable);
+            else setShareUrl(data.urlPath ? `${window.location.origin}${data.urlPath}` : null);
+          });
+        }}
+        onCopy={async () => {
+          if (!shareUrl) return false;
+          try {
+            await navigator.clipboard.writeText(shareUrl);
+            return true;
+          } catch {
+            return false;
+          }
+        }}
+        onRevoke={() => setShareUrl(null)}
+        onRegenerate={() => setShareUrl(null)}
+      />
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
       <IconRail
         sidebarOpen={historyOpen}
@@ -1532,26 +1622,7 @@ export function ViewingChatApp() {
               >
                 <Search className="h-4 w-4" />
               </button>
-              <button
-                type="button"
-                disabled={busy || active.messages.length === 0}
-                onClick={() => {
-                  if (active.conversationStatus === "reviewing") {
-                    void generateReport();
-                  } else {
-                    enterReviewMode();
-                  }
-                }}
-                className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#2563EB] px-3 py-1.5 text-[12px] font-bold text-white disabled:opacity-40"
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                {busy
-                  ? c.generatingReport
-                  : active.conversationStatus === "reviewing"
-                    ? c.reviewConfirm
-                    : c.actionFinish}
-              </button>
-              <div className="relative md:hidden">
+              <div className="relative">
                 <button
                   type="button"
                   onClick={() => setFocusMoreOpen((v) => !v)}
@@ -1582,7 +1653,20 @@ export function ViewingChatApp() {
                       <button
                         type="button"
                         role="menuitem"
-                        className="flex w-full px-3.5 py-2.5 text-left text-[13px] font-bold text-[#1A1A1A] active:bg-black/5"
+                        disabled={busy || active.messages.length === 0}
+                        className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-[13px] font-bold text-[#2563EB] active:bg-black/5 disabled:opacity-40"
+                        onClick={() => {
+                          setFocusMoreOpen(false);
+                          openReviewCard();
+                        }}
+                      >
+                        <Sparkles className="h-3.5 w-3.5" />
+                        {c.actionFinish}
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="flex w-full px-3.5 py-2.5 text-left text-[13px] font-bold text-[#1A1A1A] active:bg-black/5 md:hidden"
                         onClick={() => handleMobileNav("new")}
                       >
                         {c.newThread}
@@ -1590,7 +1674,7 @@ export function ViewingChatApp() {
                       <button
                         type="button"
                         role="menuitem"
-                        className="flex w-full px-3.5 py-2.5 text-left text-[13px] font-bold text-[#1A1A1A] active:bg-black/5"
+                        className="flex w-full px-3.5 py-2.5 text-left text-[13px] font-bold text-[#1A1A1A] active:bg-black/5 md:hidden"
                         onClick={() => handleMobileNav("history")}
                       >
                         {c.openHistory}
@@ -1598,7 +1682,7 @@ export function ViewingChatApp() {
                       <button
                         type="button"
                         role="menuitem"
-                        className="flex w-full px-3.5 py-2.5 text-left text-[13px] font-bold text-[#1A1A1A] active:bg-black/5"
+                        className="flex w-full px-3.5 py-2.5 text-left text-[13px] font-bold text-[#1A1A1A] active:bg-black/5 md:hidden"
                         onClick={() => handleMobileNav("media")}
                       >
                         {c.mediaLibrary}
@@ -1633,6 +1717,17 @@ export function ViewingChatApp() {
                 >
                   {shortenAddressLabel(active.normalizedAddress || active.address)}
                 </p>
+                {!userId ? (
+                  <p className="mt-1 text-center text-[11px] text-[#6B7280]">
+                    {c.guestLocalNotice.replace("{days}", "3")}{" "}
+                    <a
+                      className="underline"
+                      href={`/login?next=${encodeURIComponent(`/?thread=${active.id}`)}`}
+                    >
+                      {c.guestLocalSave}
+                    </a>
+                  </p>
+                ) : null}
                 {status ? (
                   <p
                     className="mt-1 text-center text-[12px] font-semibold text-[#92400E]"
@@ -1763,74 +1858,53 @@ export function ViewingChatApp() {
                   });
                 }}
               />
-              {listingIntakeOpen ||
-              isCollectingStage(active.stage ?? "viewing_preparation") ? (
-                <>
-                  <CollectionQuickActions
-                    disabled={busy || sourceBusy}
-                    labels={{
-                      pasteUrl: c.quickPasteUrl,
-                      uploadPhoto: c.quickUploadPhoto,
-                      uploadScreenshot: c.quickUploadScreenshot,
-                      uploadHoaDoc: c.quickUploadHoaDoc,
-                      pasteText: c.quickPasteText,
-                      skip: c.quickSkip,
-                    }}
-                    onPasteUrl={promptPasteUrl}
-                    onUploadPhoto={() => photoInputRef.current?.click()}
-                    onUploadScreenshot={() => screenshotInputRef.current?.click()}
-                    onUploadHoaDoc={() => hoaDocInputRef.current?.click()}
-                    onPasteText={promptPasteText}
-                    onSkip={skipSources}
-                  />
-                  {softFailCtas ? (
-                    <div className="px-3 pb-2">
-                      <p className="mb-1 text-[11px] font-semibold text-[#92400E]">
-                        {c.sourceSoftFailHint}
-                      </p>
-                      <SourceSoftFailActions
-                        disabled={busy || sourceBusy}
-                        labels={{
-                          pasteText: c.quickPasteText,
-                          uploadScreenshot: c.quickUploadScreenshot,
-                        }}
-                        onPasteText={() => {
-                          setSoftFailCtas(false);
-                          promptPasteText();
-                        }}
-                        onUploadScreenshot={() => {
-                          setSoftFailCtas(false);
-                          screenshotInputRef.current?.click();
-                        }}
-                      />
-                    </div>
-                  ) : null}
-                </>
-              ) : (
-                <>
-                  <ReportQuickActions
-                    disabled={busy || sourceBusy}
-                    actions={[
-                      { id: "supplement", label: c.actionSupplement },
-                      { id: "correct", label: c.actionCorrect },
-                      { id: "skip", label: c.actionSkip },
-                      { id: "summarize", label: c.actionSummarize },
-                      { id: "finish", label: c.actionFinish },
-                    ]}
-                    onAction={handleCollectionAction}
-                  />
-                  <div className="flex flex-wrap gap-1.5 px-3 pb-2">
-                    <button
-                      type="button"
-                      disabled={busy || sourceBusy}
-                      onClick={openListingIntake}
-                      className="rounded-full border border-dashed border-black/15 bg-transparent px-3 py-1.5 text-[11px] font-semibold text-[#6B7280] disabled:opacity-40"
-                    >
-                      {c.quickAddListingOptional}
-                    </button>
-                  </div>
-                </>
-              )}
+              <div className="flex flex-wrap items-center gap-1.5 px-3 py-2">
+                <QuickActionChip
+                  disabled={busy || sourceBusy}
+                  onClick={skipActiveAgendaItem}
+                >
+                  {c.actionSkip}
+                </QuickActionChip>
+                <SyncStatusPill
+                  state={!userId ? "local_only" : active.cloud?.state && active.cloud.state !== "local_only" ? active.cloud.state : "synced"}
+                  labels={{
+                    local: c.syncGuest,
+                    synced: c.syncSynced,
+                    syncing: c.syncSyncing,
+                    retry: c.syncRetry,
+                    blocked: c.syncBlocked,
+                  }}
+                  loginHref={`/login?next=${encodeURIComponent(`/?thread=${active.id}`)}`}
+                  onRetry={() => void syncWithRetry({
+                    put: async () => {
+                      const response = await fetch(`/api/viewing-chat/threads/${active.id}`, {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          clientUpdatedAt: active.updatedAt,
+                          messages: active.messages,
+                          chatState: { v: 1, normalizedAddress: active.address },
+                        }),
+                      });
+                      if (response.status === 402) {
+                        patchLocalThread(active.id, { cloud: { state: "blocked_limit" } });
+                      }
+                      return { status: response.status };
+                    },
+                  }).then((state) => {
+                    patchLocalThread(active.id, { cloud: { state } });
+                    refreshLocal();
+                  })}
+                  onUpgrade={() => router.push("/pricing")}
+                />
+                <QuickActionChip
+                  accent
+                  disabled={busy || sourceBusy || active.messages.length === 0}
+                  onClick={openReviewCard}
+                >
+                  {c.actionFinish}
+                </QuickActionChip>
+              </div>
               {composerHint ? (
                 <p className="px-3 pb-1 text-[11px] font-semibold text-[#1D4ED8]">
                   {composerHint}
@@ -1943,6 +2017,7 @@ export function ViewingChatApp() {
                           valuePlaceholder: c.reviewValuePlaceholder,
                           share: c.reviewShare,
                           shared: c.reviewShared,
+                          copyFailed: c.reviewCopyFailed,
                           statusConfirmed: c.statusConfirmed,
                           statusSubjective: c.statusSubjective,
                           statusInferred: c.statusInferred,
@@ -2052,6 +2127,7 @@ export function ViewingChatApp() {
                         valuePlaceholder: c.reviewValuePlaceholder,
                         share: c.reviewShare,
                         shared: c.reviewShared,
+                        copyFailed: c.reviewCopyFailed,
                         statusConfirmed: c.statusConfirmed,
                         statusSubjective: c.statusSubjective,
                         statusInferred: c.statusInferred,

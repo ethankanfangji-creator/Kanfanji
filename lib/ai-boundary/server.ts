@@ -5,6 +5,7 @@ import {
   createGuestIdentityCookie,
   guestCookieOptions,
   verifyGuestIdentityCookie,
+  type GuestIdentity,
 } from "./guest-identity";
 import { getAccountTier } from "@/lib/entitlement/tier";
 import { createAdminClient } from "@/utils/supabase/admin";
@@ -41,15 +42,38 @@ async function authenticatedUserId(): Promise<string | null> {
   }
 }
 
+/** Read or issue the guest cookie without consuming AI quota. */
+export async function resolveGuestIdentity(request: Request): Promise<{
+  userId: string | null;
+  guest: GuestIdentity | null;
+  issued: { value: string; maxAge: number } | null;
+  applyCookie<T extends NextResponse>(response: T): T;
+}> {
+  const userId = await authenticatedUserId();
+  const verified = verifyGuestIdentityCookie(cookieValue(request, AI_GUEST_COOKIE));
+  const issued = verified ? null : createGuestIdentityCookie();
+  const guest = verified ?? issued?.identity ?? null;
+  return {
+    userId,
+    guest,
+    issued,
+    applyCookie(response) {
+      if (issued) {
+        response.cookies.set(AI_GUEST_COOKIE, issued.value, guestCookieOptions(issued.maxAge));
+      }
+      return response;
+    },
+  };
+}
+
 export async function authorizeAiRequest(
   request: Request,
   assertion: AiConsentAssertion,
   options?: { consumeQuota?: boolean },
 ): Promise<AiBoundaryContext> {
-  const userId = await authenticatedUserId();
-  const verified = verifyGuestIdentityCookie(cookieValue(request, AI_GUEST_COOKIE));
-  const issued = verified ? null : createGuestIdentityCookie();
-  const guest = verified ?? issued?.identity ?? null;
+  const resolved = await resolveGuestIdentity(request);
+  const userId = resolved.userId;
+  const guest = resolved.guest;
   if (!guest) throw new AiInputError("ai_identity_unavailable", 503);
 
   const actualKind = userId ? "user" : "guest";
@@ -84,7 +108,7 @@ export async function authorizeAiRequest(
       } else {
         Object.assign(error, { retryAfter: quota.retryAfter });
       }
-      Object.assign(error, { issuedCookie: issued });
+      Object.assign(error, { issuedCookie: resolved.issued });
       throw error;
     }
     if (quota.allowed) tier = quota.tier;
@@ -94,12 +118,7 @@ export async function authorizeAiRequest(
     identityKind: actualKind,
     tier,
     userId,
-    applyCookie(response) {
-      if (issued) {
-        response.cookies.set(AI_GUEST_COOKIE, issued.value, guestCookieOptions(issued.maxAge));
-      }
-      return response;
-    },
+    applyCookie: resolved.applyCookie,
   };
 }
 
@@ -112,7 +131,8 @@ export function aiErrorResponse(error: unknown): NextResponse {
       resetsAt?: string | null;
     };
     const retryAfter = extra.retryAfter;
-    const issued = (error as AiInputError & { issuedCookie?: { value: string; maxAge: number } | null }).issuedCookie;
+    const issued = (error as AiInputError & { issuedCookie?: { value: string; maxAge: number } | null })
+      .issuedCookie;
     const response = NextResponse.json(
       {
         error: "AI request could not be completed.",

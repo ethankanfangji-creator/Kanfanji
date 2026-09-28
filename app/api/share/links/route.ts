@@ -33,12 +33,15 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "缺少 viewingId" }, { status: 400 });
     }
     const admin = createAdminClient();
-    const { link, viewing } = await getOwnerShareLink(admin, user.id, viewingId);
+    const { link, viewing, urlPath, needsRegenerate } = await getOwnerShareLink(admin, user.id, viewingId);
     if (!viewing) {
       return NextResponse.json({ error: "找不到案件" }, { status: 404 });
     }
     const history = await listOwnerShareLinks(admin, user.id, viewingId);
-    return NextResponse.json({ link, history });
+    return NextResponse.json(
+      { link, history, url: urlPath || null, needsRegenerate },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : "讀取分享連結失敗";
     return NextResponse.json({ error: message }, { status: 500 });
@@ -96,7 +99,8 @@ export async function POST(req: Request) {
       return NextResponse.json(validationErrorBody(error), { status: 400 });
     }
     const message = error instanceof Error ? error.message : "建立分享連結失敗";
-    const status = message === "VIEWING_NOT_FOUND" ? 404 : 500;
+    const status =
+      message === "VIEWING_NOT_FOUND" ? 404 : message === "SHARE_UNAVAILABLE" ? 503 : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }

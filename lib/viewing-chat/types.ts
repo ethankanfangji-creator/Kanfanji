@@ -55,6 +55,15 @@ export type ChatReportSnapshot = {
   generatedAt: string;
 };
 
+export type ChatMediaRef = {
+  id: string;
+  kind: "image" | "video" | "audio" | "file";
+  name: string;
+  mime: string;
+  size: number;
+  path?: string | null;
+};
+
 export type ChatMessage = {
   id: string;
   role: ChatMessageRole;
@@ -64,8 +73,9 @@ export type ChatMessage = {
   text?: string;
   /** Whisper transcript for audio turns */
   transcript?: string;
-  /** Photo / media URL (local blob: or remote path) */
+  /** @deprecated blob URLs do not survive reload. New messages use `media`. */
   url?: string;
+  media?: ChatMediaRef[];
   /** Attached file display name (type=file) */
   fileName?: string;
   /** When this turn is a direct reply to an earlier message */
@@ -143,6 +153,12 @@ export type ViewingChatThread = {
   conversationStatus?: import("@/lib/viewing-chat/collection").ConversationStatus;
   /** Soft warnings from last turn (pending vision, incomplete transcript, …) */
   turnWarnings?: string[];
+  ownerUserId?: string | null;
+  cloud?: {
+    state: "local_only" | "syncing" | "synced" | "failed" | "blocked_limit";
+    lastSyncedAt?: string | null;
+    error?: string;
+  };
 };
 
 export const DEFAULT_QUESTION_BANK: Array<Omit<QuestionBankItem, "answer" | "justDiscussed">> = [

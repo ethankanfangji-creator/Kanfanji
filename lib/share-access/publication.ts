@@ -112,6 +112,11 @@ export function isPublishedShareSnapshot(value: unknown): value is PublishedShar
     typeof row.address === "string" &&
     typeof row.publishedAt === "string" &&
     (row.decisionSummary === null || typeof row.decisionSummary === "object")
+  ) || (
+    row.version === 2 &&
+    row.kind === "chat_report" &&
+    typeof row.title === "string" &&
+    typeof row.address === "string"
   );
 }
 

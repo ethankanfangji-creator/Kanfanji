@@ -10,8 +10,7 @@ import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useI18n } from "@/components/I18nProvider";
 import { MobileSheet } from "@/components/viewing-chat/shell/MobileSheet";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
-import { resetSyncEngineSingleton } from "@/lib/sync";
-import { setPersistenceAccountScope } from "@/lib/idb/draft-store";
+import { signOutAndClearLocal } from "@/lib/auth/sign-out-client";
 
 function supportMailto(locale: string, email?: string | null): string {
   const to =
@@ -90,10 +89,8 @@ export function MobileAccountSheet({
               <button
                 type="button"
                 onClick={() => {
-                  const supabase = getSupabase();
-                  void supabase?.auth.signOut().then(() => {
-                    resetSyncEngineSingleton();
-                    setPersistenceAccountScope(null);
+                  void signOutAndClearLocal().then((ok) => {
+                    if (!ok) return;
                     onClose();
                     router.replace("/login");
                   });

@@ -2,6 +2,8 @@
 
 Keys stay on the server (`GOOGLE_MAPS_API_KEY`). Do not expose them as `NEXT_PUBLIC_*`.
 
+Confirming an address (`POST /api/property-intel`) sends the address to map, public-data, and search providers (Google Maps, OSM, Bing search snippets, and ATTOM for US rows). It does not call an LLM and does not consume an AI quota. Results are cached in `private.property_intel_cache`. The privacy page lists those processors.
+
 ## Suggest (`GET /api/address-suggest`)
 
 Canada and untagged open-house queries use **Places API (New)** Autocomplete, biased to Metro Vancouver (`49.28, -122.91`, 45 km) with `includedRegionCodes: ["ca"]`. Lat/lng come from **Place Details** on the same `place_id`. Non-BC rows are dropped. If the key is missing, Photon is the fallback. Nominatim is not the autocomplete for this path.

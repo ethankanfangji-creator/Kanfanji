@@ -2,8 +2,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   generateShareToken,
   hashSharePassword,
+  hashShareToken,
   verifySharePassword,
+  isShareTokenFormat,
 } from "./crypto";
+import { decryptShareToken, encryptShareToken } from "./token-vault";
 import type { ShareLinkRecord } from "./types";
 import { resolveShareLinkGate } from "./public-dto";
 import {
@@ -34,7 +37,8 @@ export type ViewingShareRow = {
 export type ShareLinkRow = {
   id: string;
   viewing_id: string;
-  token: string;
+  token: string | null;
+  token_ciphertext?: string | null;
   capability: "read";
   status: "active" | "revoked";
   expires_at: string | null;
@@ -49,7 +53,7 @@ export type ShareLinkRow = {
 };
 
 const LINK_COLUMNS =
-  "id, viewing_id, token, capability, status, expires_at, password_hash, access_version, created_at, updated_at, revoked_at, last_resolved_at, published_snapshot, media_manifest";
+  "id, viewing_id, token, token_ciphertext, capability, status, expires_at, password_hash, access_version, created_at, updated_at, revoked_at, last_resolved_at, published_snapshot, media_manifest";
 const LINK_GATE_COLUMNS =
   "id, viewing_id, token, capability, status, expires_at, password_hash, access_version, created_at, updated_at, revoked_at, last_resolved_at";
 
@@ -64,6 +68,21 @@ export type ShareGateRow = {
   shareLink: ShareLinkRow;
 };
 
+function publicPathForRow(row: ShareLinkRow): { urlPath: string; needsRegenerate: boolean } {
+  if (row.token_ciphertext) {
+    try {
+      return {
+        urlPath: `/s/${decryptShareToken(row.token_ciphertext, row.id)}`,
+        needsRegenerate: false,
+      };
+    } catch {
+      return { urlPath: "", needsRegenerate: true };
+    }
+  }
+  if (row.token) return { urlPath: `/s/${row.token}`, needsRegenerate: false };
+  return { urlPath: "", needsRegenerate: true };
+}
+
 export function toShareLinkRecord(row: ShareLinkRow): ShareLinkRecord {
   const expired =
     row.expires_at && new Date(row.expires_at).getTime() <= Date.now();
@@ -71,7 +90,7 @@ export function toShareLinkRecord(row: ShareLinkRow): ShareLinkRecord {
   return {
     id: row.id,
     viewingId: row.viewing_id,
-    token: row.token,
+    token: row.token ?? "",
     capability: "read",
     status,
     expiresAt: row.expires_at,
@@ -105,9 +124,9 @@ export async function getOwnerShareLink(
   supabase: SupabaseClient,
   userId: string,
   viewingId: string,
-): Promise<{ link: ShareLinkRecord | null; viewing: ViewingShareRow | null }> {
+): Promise<{ link: ShareLinkRecord | null; viewing: ViewingShareRow | null; urlPath: string; needsRegenerate: boolean }> {
   const viewing = await fetchOwnedViewing(supabase, userId, viewingId);
-  if (!viewing) return { link: null, viewing: null };
+  if (!viewing) return { link: null, viewing: null, urlPath: "", needsRegenerate: false };
   const { data, error } = await supabase
     .from("share_links")
     .select(LINK_COLUMNS)
@@ -116,9 +135,12 @@ export async function getOwnerShareLink(
     .is("revoked_at", null)
     .maybeSingle();
   if (error) throw error;
+  const row = data as ShareLinkRow | null;
+  const path = row ? publicPathForRow(row) : { urlPath: "", needsRegenerate: false };
   return {
-    link: data ? toShareLinkRecord(data as ShareLinkRow) : null,
+    link: row ? toShareLinkRecord(row) : null,
     viewing,
+    ...path,
   };
 }
 
@@ -147,7 +169,7 @@ export async function ensureOwnerShareLink(
     password?: string | null;
     rotateToken?: boolean;
   },
-): Promise<{ link: ShareLinkRecord; urlPath: string }> {
+): Promise<{ link: ShareLinkRecord; urlPath: string; needsRegenerate?: boolean }> {
   const viewing = await fetchOwnedViewing(supabase, userId, viewingId);
   if (!viewing) throw new Error("VIEWING_NOT_FOUND");
 
@@ -165,7 +187,7 @@ export async function ensureOwnerShareLink(
       Object.keys(patch).length > 0
         ? await updateOwnerShareLink(supabase, userId, current.link.id, patch)
         : current.link;
-    return { link, urlPath: `/s/${link.token}` };
+    return { link, urlPath: current.urlPath, needsRegenerate: current.needsRegenerate };
   }
 
   const passwordHash =
@@ -173,12 +195,23 @@ export async function ensureOwnerShareLink(
       ? await hashSharePassword(options.password)
       : null;
   const token = generateShareToken();
+  const linkId = crypto.randomUUID();
+  let tokenCiphertext: string;
+  try {
+    tokenCiphertext = encryptShareToken(token, linkId);
+  } catch {
+    throw new Error("SHARE_UNAVAILABLE");
+  }
   const publication = buildSharePublication(viewing);
   const { data, error } = await supabase
     .from("share_links")
     .insert({
+      id: linkId,
       viewing_id: viewingId,
-      token,
+      token: null,
+      token_hash: hashShareToken(token),
+      token_ciphertext: tokenCiphertext,
+      token_key_id: "v1",
       expires_at:
         options && Object.hasOwn(options, "expiresAt") ? options.expiresAt ?? null : null,
       password_hash: passwordHash,
@@ -268,14 +301,21 @@ export async function rotateOwnerShareLink(
   supabase: SupabaseClient,
   userId: string,
   linkId: string,
-): Promise<{ link: ShareLinkRecord; urlPath: string }> {
+): Promise<{ link: ShareLinkRecord; urlPath: string; needsRegenerate?: boolean }> {
   const row = await fetchOwnedLink(supabase, userId, linkId);
   if (!row || row.status !== "active") throw new Error("LINK_NOT_FOUND");
   const token = generateShareToken();
+  let tokenCiphertext: string;
+  try {
+    tokenCiphertext = encryptShareToken(token, linkId);
+  } catch {
+    throw new Error("SHARE_UNAVAILABLE");
+  }
   const { data, error } = await supabase.rpc("rotate_share_link", {
     p_link_id: linkId,
     p_user_id: userId,
-    p_token: token,
+    p_token_hash: hashShareToken(token),
+    p_token_ciphertext: tokenCiphertext,
   });
   if (error) throw error;
   const next = (Array.isArray(data) ? data[0] : data) as ShareLinkRow | null;
@@ -288,10 +328,10 @@ export async function fetchViewingByShareTokenAdmin(
   token: string,
 ): Promise<PublishedShareRow | null> {
   const trimmed = token.trim();
-  if (!trimmed) return null;
+  if (!isShareTokenFormat(trimmed)) return null;
 
-  const { data, error } = await admin.rpc("resolve_share_publication", {
-    p_token: trimmed,
+  const { data, error } = await admin.rpc("resolve_share_publication_by_hash", {
+    p_token_hash: hashShareToken(trimmed),
   });
   if (error || !data || typeof data !== "object" || Array.isArray(data)) return null;
   const resolved = data as { shareLink?: unknown; ownerId?: unknown };

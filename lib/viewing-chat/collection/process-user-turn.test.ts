@@ -53,10 +53,8 @@ describe("processUserTurn", () => {
       },
       message: { id: "s2", text: "整理一下" },
     });
-    expect(finished.intent).toBe("finish");
-    expect(finished.conversationStatus).toBe("reviewing");
-    expect(finished.suggestedQuestions).toEqual([]);
-    expect(finished.assistantMessage).toMatch(/摘要|整理|報告|留空/);
+    expect(finished.intent).not.toBe("finish");
+    expect(finished.conversationStatus).not.toBe("reviewing");
   });
 
   it("applies corrections and records changes", async () => {

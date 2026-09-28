@@ -88,12 +88,32 @@ of the following in order:
 11. `migrate-share-resolution-forward-fix.sql`
 12. `migrate-stripe-ordering-forward-fix.sql`
 13. `migrate-viewing-update-grants-forward-fix.sql`
-14. `migrate-properties-multicountry.sql` (country_code / admin1 / city / postal_code on properties)
-15. `migrate-property-domain.sql` then `migrate-property-report-created-by.sql` (report snapshots + `created_by` owner scope)
+14. `migrate-viewing-chat-messages.sql` (`viewings.messages` / `viewings.report`)
+15. `migrate-viewing-metadata.sql` (`viewings.metadata`)
+16. `migrate-property-intel-cache.sql` (`private.property_intel_cache`)
+17. `migrate-properties-multicountry.sql` (country_code / admin1 / city / postal_code on properties)
+18. `migrate-property-domain.sql` then `migrate-property-report-created-by.sql` (report snapshots + `created_by` owner scope)
 
 The base schema already incorporates the older auth, property, subscription,
 and initial share-link migrations. `schema.sql` alone intentionally does not
 install the collaboration tables/policies.
+
+## Production catch-up (verified 2026-09-27, project `iqfxcdozsopgnebkzqkv`)
+
+Do not replay the legacy `migrate-viewing-chat-messages.sql`,
+`migrate-viewing-metadata.sql`, or `migrate-property-intel-cache.sql` scripts
+on production. They were applied together as
+`20260926044524 release_viewing_columns_and_intel_cache`.
+
+After that migration, production `viewings` has `messages`, `report`,
+`metadata`, `idempotency_key`, and `client_updated_at`, plus unique
+`(user_id, idempotency_key)`. `private.property_intel_cache` and
+`public.share_links` exist. `get_viewing_by_share_token` is gone.
+`resolve_share_publication(p_token text)`, `rotate_share_link`, and
+`mutate_share_link_security` are service-role only. `share_links.token` is
+still plaintext and there were zero rows at verification time. `chat_state`
+and `token_hash` are not part of that catch-up; later chat and share
+migrations add them.
 
 ## Pre-release and post-release verification
 

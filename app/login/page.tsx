@@ -12,7 +12,6 @@ import {
 import { useI18n } from "@/components/I18nProvider";
 import { claimGuestViewingData } from "@/lib/auth/claim-guest-data";
 import { reportAuthFailure, signupUiOutcome, type AuthFailureKind } from "@/lib/auth/auth-flow";
-import { authRedirectUrl } from "@/lib/auth/auth-urls";
 import { safeInternalNextPath } from "@/lib/http/safe-next";
 import { createClient } from "@/utils/supabase/client";
 
@@ -20,6 +19,7 @@ export default function LoginPage() {
   const { messages } = useI18n();
   const searchParams = useSearchParams();
   const emailInputRef = useRef<HTMLInputElement>(null);
+  const next = searchParams.get("next");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState<"signin" | "signup">(
@@ -84,7 +84,7 @@ export default function LoginPage() {
           email: trimmedEmail,
           password,
           options: {
-            emailRedirectTo: authRedirectUrl("/auth/callback"),
+            emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(safeInternalNextPath(next))}`,
           },
         });
         const outcome = signupUiOutcome(error, Boolean(data?.session));

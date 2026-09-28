@@ -11,7 +11,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { ArrowLeft } from "lucide-react";
 import { useI18n } from "@/components/I18nProvider";
 import { PageContainer } from "@/components/ui/primitives";
@@ -106,27 +106,6 @@ export function ChatComparePage() {
     locale,
     missing: lite.compareMissingOnDevice,
   });
-  const [gate, setGate] = useState<string | null>(null);
-  useEffect(() => {
-    if (ids.length < 2) return;
-    let cancelled = false;
-    void fetch("/api/compare/start", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source: "chat_history", itemIds: ids }),
-    }).then(async (response) => {
-      if (cancelled) return;
-      if (response.status === 401) setGate(messages.compare.gateLoginBody);
-      else if (response.status === 402 || response.status === 400) setGate(messages.compare.gateUpgradeBody);
-      else if (!response.ok) setGate(messages.compare.startFailed);
-      else setGate(null);
-    }).catch(() => {
-      if (!cancelled) setGate(null);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [ids, messages.compare.gateLoginBody, messages.compare.gateUpgradeBody, messages.compare.startFailed]);
   const columns = useSyncExternalStore(
     subscribeToThreads,
     () => threadsClientSnapshot(snapshotKey),
@@ -238,7 +217,6 @@ export function ChatComparePage() {
           {lite.compareBack}
         </button>
         <h1 className="mt-2 text-[20px] font-[800] tracking-tight">{lite.compareTitle}</h1>
-        {gate ? <p className="mt-4 text-[14px] leading-6">{gate}</p> : null}
         <p className="mt-1 text-[12px] text-[#6B7280]">{lite.compareSubtitle}</p>
 
         {ids.length < 2 ? (
@@ -251,7 +229,7 @@ export function ChatComparePage() {
               {lite.compareBackHome}
             </Link>
           </div>
-        ) : gate ? null : columns ? (
+        ) : columns ? (
           <div className="mt-6">
             <ChatCompareBoard
               columns={columns}

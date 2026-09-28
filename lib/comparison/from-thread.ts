@@ -12,7 +12,7 @@ import { formatValue } from "@/lib/viewing-chat/collection/format-value";
 import type { PropertyFieldState } from "@/lib/viewing-chat/collection/types";
 import type { PropertyIntelBasic } from "@/lib/property-intel/types";
 
-export const COMPARE_LITE_MAX = 5;
+export const COMPARE_LITE_MAX = 3;
 
 export type CompareProvenance =
   | "confirmed"

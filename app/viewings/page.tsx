@@ -178,7 +178,9 @@ export default function ViewingsPage() {
           ) : null}
         </div>
         {selectMode ? (
-          <p className="mb-3 text-[12px] text-[#6B7280]">{messages.compare.selectHint}</p>
+          <p className="mb-3 text-[12px] text-[#6B7280]">
+            {messages.compare.selectHint.replace("{max}", String(compareMax))}
+          </p>
         ) : null}
 
         {error && (

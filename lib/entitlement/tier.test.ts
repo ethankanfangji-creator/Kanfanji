@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { getAccountTier, TierLookupError } from "./tier";
 
 function client(result: { data: unknown; error: { message: string } | null }) {
@@ -39,6 +39,5 @@ describe("getAccountTier", () => {
   it("throws when the subscription query fails", async () => {
     const broken = client({ data: null, error: { message: "denied" } });
     await expect(getAccountTier(broken as never, "u")).rejects.toBeInstanceOf(TierLookupError);
-    expect(vi.fn()).not.toHaveBeenCalled();
   });
 });

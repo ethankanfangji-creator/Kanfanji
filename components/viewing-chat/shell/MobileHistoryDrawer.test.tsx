@@ -18,9 +18,10 @@ const labels = {
   delete: "Delete",
   compareToggle: "Compare",
   compareCancel: "Cancel",
-  compareSelectedCount: "Selected {n}/3",
+  compareSelectedCount: "Selected {n}/{max}",
   compareOpen: "Compare ({n})",
-  compareMaxReached: "Up to 3",
+  compareTooManyFree: "Free max 2",
+  compareTooManyPro: "Pro max 5",
 };
 
 const compareProps = {
@@ -199,6 +200,6 @@ describe("MobileHistoryDrawer", () => {
     expect(fourth).toHaveAttribute("aria-disabled", "true");
     await user.click(fourth);
     expect(onToggleSelect).not.toHaveBeenCalled();
-    expect(screen.getByRole("status").textContent).toBe("Up to 3");
+    expect(screen.getByRole("status").textContent).toBe("Pro max 5");
   });
 });

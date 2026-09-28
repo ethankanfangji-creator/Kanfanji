@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { connection } from "next/server";
+import { notFound } from "next/navigation";
 import { resolveCompareShare } from "@/lib/comparison/share-server";
 import { serverTrack } from "@/lib/analytics/server";
 import zhHant from "@/lib/i18n/messages/zh-Hant";
@@ -40,12 +41,5 @@ export default async function CompareSharePage({
       </main>
     );
   }
-  const title = resolved.status === "legacy" ? labels.shareLegacyTitle : labels.shareInvalidTitle;
-  const body = resolved.status === "legacy" ? labels.shareLegacyBody : labels.shareInvalidBody;
-  return (
-    <main className="mx-auto max-w-xl px-4 py-16">
-      <h1 className="text-2xl font-bold">{title}</h1>
-      <p className="mt-3 text-sm leading-6">{body}</p>
-    </main>
-  );
+  notFound();
 }

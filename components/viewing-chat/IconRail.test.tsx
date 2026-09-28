@@ -105,6 +105,6 @@ describe("IconRail compare mode", () => {
     expect(fourth).toHaveAttribute("aria-disabled", "true");
     await user.click(fourth);
     expect(onToggleSelect).not.toHaveBeenCalled();
-    expect(screen.getByRole("status").textContent).toBe("最多比較 3 筆");
+    expect(screen.getByRole("status").textContent).toBe("最多比較 5 筆");
   });
 });

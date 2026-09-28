@@ -56,7 +56,8 @@ export function MobileHistoryDrawer({
     compareCancel: string;
     compareSelectedCount: string;
     compareOpen: string;
-    compareMaxReached: string;
+    compareTooManyFree: string;
+    compareTooManyPro: string;
   };
 }) {
   const recent = threads.slice(0, 40);
@@ -209,12 +210,13 @@ export function MobileHistoryDrawer({
         <>
           {maxHintShown ? (
             <p className="px-4 py-2 text-[12px] font-semibold text-[#92400E]" role="status">
-              {labels.compareMaxReached}
+              {maxItems <= 2 ? labels.compareTooManyFree : labels.compareTooManyPro}
             </p>
           ) : null}
           <CompareSelectionBar
             selectedText={formatMessage(labels.compareSelectedCount, {
               n: selectedIds.length,
+              max: maxItems,
             })}
             openText={formatMessage(labels.compareOpen, { n: selectedIds.length })}
             disabled={selectedIds.length < 2}

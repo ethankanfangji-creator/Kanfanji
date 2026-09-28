@@ -99,6 +99,7 @@ export default function ComparePage({
       setShareUrl(body.url);
       if (body.shareId) setShareId(body.shareId);
       setShareOpen(false);
+      setError("");
       await navigator.clipboard?.writeText(body.url);
     } catch (err) {
       setError(err instanceof Error ? err.message : messages.compare.error);
@@ -229,6 +230,12 @@ export default function ComparePage({
           </div>
         ) : null}
 
+        {error ? (
+          <p role="status" className="mb-4 text-[13px] font-bold">
+            {error}
+          </p>
+        ) : null}
+
         {COMPARE_SHARE_ENABLED && shareUrl ? (
           <div
             role="status"
@@ -248,10 +255,20 @@ export default function ComparePage({
                 type="button"
                 className="mt-2 block font-bold underline"
                 onClick={() => {
-                  void fetch(`/api/compare/shares/${shareId}/revoke`, { method: "POST" }).then(() => {
-                    setShareUrl("");
-                    setError(messages.compare.shareRevoked);
-                  });
+                  void (async () => {
+                    try {
+                      const response = await fetch(`/api/compare/shares/${shareId}/revoke`, { method: "POST" });
+                      if (!response.ok) {
+                        setError(messages.compare.error);
+                        return;
+                      }
+                      setShareUrl("");
+                      setShareId("");
+                      setError(messages.compare.shareRevoked);
+                    } catch {
+                      setError(messages.compare.error);
+                    }
+                  })();
                 }}
               >
                 {messages.compare.shareRevoke}

@@ -112,6 +112,12 @@ export function ChatComparePage() {
     | { kind: "allowed"; compareId: string }
     | { kind: "blocked"; reason: "login" | "upgrade" | "failed" }
   >({ kind: "pending" });
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareAck, setShareAck] = useState(false);
+  const [shareUrl, setShareUrl] = useState("");
+  const [shareId, setShareId] = useState("");
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareMessage, setShareMessage] = useState("");
   useEffect(() => {
     if (ids.length < 2) return;
     let cancelled = false;
@@ -207,6 +213,54 @@ export function ChatComparePage() {
     column.kind === "found" ? [column.column] : [],
   );
 
+  async function createShare() {
+    if (gate.kind !== "allowed" || !gate.compareId || !shareAck || found.length < 2) return;
+    setShareBusy(true);
+    try {
+      const response = await fetch("/api/compare/shares", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          compareId: gate.compareId,
+          snapshot: snapshotFromThreadColumns(found),
+          acknowledgeAddresses: true,
+        }),
+      });
+      const body = (await response.json()) as { url?: string; shareId?: string };
+      if (!response.ok || !body.url) {
+        setShareMessage(
+          response.status === 429 ? messages.compare.shareRateLimited : messages.compare.startFailed,
+        );
+        return;
+      }
+      setShareUrl(body.url);
+      setShareId(body.shareId ?? "");
+      setShareOpen(false);
+      setShareMessage("");
+      await navigator.clipboard?.writeText(body.url);
+    } catch (err) {
+      setShareMessage(err instanceof Error ? err.message : messages.compare.error);
+    } finally {
+      setShareBusy(false);
+    }
+  }
+
+  async function revokeShare() {
+    if (!shareId) return;
+    try {
+      const response = await fetch(`/api/compare/shares/${shareId}/revoke`, { method: "POST" });
+      if (!response.ok) {
+        setShareMessage(messages.compare.error);
+        return;
+      }
+      setShareUrl("");
+      setShareId("");
+      setShareMessage(messages.compare.shareRevoked);
+    } catch {
+      setShareMessage(messages.compare.error);
+    }
+  }
+
   const items: CompareBoardItem[] = COMPARE_SECTION_ROWS.flatMap((section) => {
     const rows = section.rows.filter((key) => compareRowIsVisible(key, found));
     if (rows.length === 0) return [];
@@ -252,21 +306,66 @@ export function ChatComparePage() {
             type="button"
             className="mt-3 text-sm font-bold underline"
             onClick={() => {
-              void fetch("/api/compare/shares", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  compareId: gate.compareId,
-                  snapshot: snapshotFromThreadColumns(found),
-                  acknowledgeAddresses: true,
-                }),
-              });
+              if (gate.kind !== "allowed" || !gate.compareId) {
+                setShareMessage(messages.compare.startFailed);
+                return;
+              }
+              setShareOpen(true);
             }}
           >
             {messages.compare.share}
           </button>
         ) : null}
-        {gate.kind === "pending" && ids.length >= 2 ? <p className="mt-4 text-sm">載入中</p> : null}
+        {shareOpen ? (
+          <div className="mt-3 rounded-xl border border-black/10 bg-white p-4 text-sm" role="dialog">
+            <h2 className="font-bold">{messages.compare.shareNoticeTitle}</h2>
+            <p className="mt-2">{messages.compare.shareNoticeBody}</p>
+            <ul className="mt-2 list-disc pl-5">
+              <li>{messages.compare.shareNoticePoint1}</li>
+              <li>{messages.compare.shareNoticePoint2}</li>
+              <li>{messages.compare.shareNoticePoint3}</li>
+            </ul>
+            <label className="mt-3 flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={shareAck}
+                onChange={(event) => setShareAck(event.target.checked)}
+              />
+              {messages.compare.shareAcknowledge}
+            </label>
+            <button
+              type="button"
+              className="mt-3 font-bold underline disabled:opacity-50"
+              disabled={!shareAck || shareBusy}
+              onClick={() => void createShare()}
+            >
+              {messages.compare.shareCreate}
+            </button>
+          </div>
+        ) : null}
+        {shareUrl ? (
+          <div
+            role="status"
+            aria-live="polite"
+            className="mt-3 rounded-xl border border-black/5 bg-white p-3 text-[11px] break-all"
+          >
+            <span className="sr-only">{messages.compare.shareCopied}</span>
+            <p className="mb-1 font-bold">{messages.compare.shareHint}</p>
+            <p>{messages.compare.shareCopyOnce}</p>
+            <a href={shareUrl} className="text-[#2563EB]">
+              {shareUrl}
+            </a>
+            {shareId ? (
+              <button type="button" className="mt-2 block font-bold underline" onClick={() => void revokeShare()}>
+                {messages.compare.shareRevoke}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        {shareMessage ? <p className="mt-2 text-sm">{shareMessage}</p> : null}
+        {gate.kind === "pending" && ids.length >= 2 ? (
+          <p className="mt-4 text-sm">{messages.compare.loading}</p>
+        ) : null}
         {gate.kind === "blocked" && gate.reason === "login" ? (
           <div className="mt-4 space-y-3">
             <p>{messages.compare.gateLoginBody}</p>

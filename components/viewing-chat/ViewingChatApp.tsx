@@ -145,6 +145,7 @@ export function ViewingChatApp() {
   const hoaDocInputRef = useRef<HTMLInputElement>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [compareMode, setCompareMode] = useState(false);
+  const [compareItemMax, setCompareItemMax] = useState(2);
   const [compareSelectedIds, setCompareSelectedIds] = useState<string[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [mediaOpen, setMediaOpen] = useState(false);
@@ -450,13 +451,19 @@ export function ViewingChatApp() {
   ) {
     if (!ui) return;
     if (ui.kind === "quota") {
+      const tier = ui.actions?.includes("sign_in")
+        ? "guest"
+        : ui.actions?.includes("upgrade")
+          ? "free"
+          : "pro";
+      const limit = ui.actions?.length === 1 && ui.actions[0] === "retry" ? "network" : "tier";
       track({
         name: "ai_quota_exceeded",
-        props: { identity: userId ? "user" : "guest", endpoint },
+        props: { tier, endpoint, limit },
       });
-    }
-    if (ui.actions?.includes("upgrade")) {
-      track({ name: "paywall_shown", props: { trigger: "ai_quota" } });
+      if (tier === "free" && ui.actions?.includes("upgrade")) {
+        track({ name: "paywall_shown", props: { trigger: "ai_quota" } });
+      }
     }
   }
 
@@ -753,9 +760,16 @@ export function ViewingChatApp() {
       };
       if (!response.ok) {
         const ui = mapAiErrorToUi(
-          { code: data.code, status: response.status, error: data.error },
+          {
+            code: data.code,
+            status: response.status,
+            error: data.error,
+            tier: (data as { tier?: "guest" | "free" | "pro" }).tier,
+            limit: (data as { limit?: "tier" | "network" }).limit,
+            resetsAt: (data as { resetsAt?: string | null }).resetsAt,
+          },
           aiErrorUiCopyFromBoundary(t.aiBoundary),
-          { isAuthenticated: Boolean(userId) },
+          { isAuthenticated: Boolean(userId), locale },
         );
         throw Object.assign(new Error(ui.message), { aiUi: ui });
       }
@@ -1002,9 +1016,16 @@ export function ViewingChatApp() {
       };
       if (!response.ok || !data.messages) {
         const ui = mapAiErrorToUi(
-          { code: data.code, status: response.status, error: data.error },
+          {
+            code: data.code,
+            status: response.status,
+            error: data.error,
+            tier: (data as { tier?: "guest" | "free" | "pro" }).tier,
+            limit: (data as { limit?: "tier" | "network" }).limit,
+            resetsAt: (data as { resetsAt?: string | null }).resetsAt,
+          },
           aiErrorUiCopyFromBoundary(t.aiBoundary),
-          { isAuthenticated: Boolean(userId) },
+          { isAuthenticated: Boolean(userId), locale },
         );
         throw Object.assign(new Error(ui.message), { aiUi: ui });
       }
@@ -1181,9 +1202,16 @@ export function ViewingChatApp() {
         };
         if (!response.ok) {
           const ui = mapAiErrorToUi(
-            { code: data.code, status: response.status, error: data.error },
+            {
+            code: data.code,
+            status: response.status,
+            error: data.error,
+            tier: (data as { tier?: "guest" | "free" | "pro" }).tier,
+            limit: (data as { limit?: "tier" | "network" }).limit,
+            resetsAt: (data as { resetsAt?: string | null }).resetsAt,
+          },
             aiErrorUiCopyFromBoundary(t.aiBoundary),
-            { isAuthenticated: Boolean(userId) },
+            { isAuthenticated: Boolean(userId), locale },
           );
           throw Object.assign(new Error(ui.message), { aiUi: ui });
         }
@@ -1229,9 +1257,16 @@ export function ViewingChatApp() {
       };
       if (!response.ok || !data.messages) {
         const ui = mapAiErrorToUi(
-          { code: data.code, status: response.status, error: data.error },
+          {
+            code: data.code,
+            status: response.status,
+            error: data.error,
+            tier: (data as { tier?: "guest" | "free" | "pro" }).tier,
+            limit: (data as { limit?: "tier" | "network" }).limit,
+            resetsAt: (data as { resetsAt?: string | null }).resetsAt,
+          },
           aiErrorUiCopyFromBoundary(t.aiBoundary),
-          { isAuthenticated: Boolean(userId) },
+          { isAuthenticated: Boolean(userId), locale },
         );
         throw Object.assign(new Error(ui.message), { aiUi: ui });
       }
@@ -1264,7 +1299,8 @@ export function ViewingChatApp() {
       return;
     }
     if (action === "sign_in") {
-      window.location.href = "/login";
+      const next = encodeURIComponent(`${window.location.pathname}${window.location.search}`);
+      window.location.href = `/login?mode=signup&next=${next}`;
       return;
     }
     if (action === "upgrade") {
@@ -1318,8 +1354,22 @@ export function ViewingChatApp() {
   }
 
   function toggleCompareMode() {
+    if (!userId) {
+      track({ name: "compare_gate_shown", props: { reason: "login_required", source: "chat_history" } });
+      const next = encodeURIComponent(`${window.location.pathname}${window.location.search}`);
+      window.location.href = `/login?mode=signup&next=${next}`;
+      return;
+    }
     setCompareMode((on) => {
       if (on) setCompareSelectedIds([]);
+      else {
+        void fetch("/api/compare/entitlement")
+          .then((response) => response.json())
+          .then((body: { maxItems?: number }) => {
+            if (body.maxItems) setCompareItemMax(body.maxItems);
+          })
+          .catch(() => undefined);
+      }
       return !on;
     });
   }
@@ -1327,17 +1377,40 @@ export function ViewingChatApp() {
   function toggleCompareSelect(id: string) {
     setCompareSelectedIds((prev) => {
       if (prev.includes(id)) return prev.filter((item) => item !== id);
-      if (prev.length >= COMPARE_LITE_MAX) return prev;
+      if (prev.length >= compareItemMax) {
+        track({ name: "compare_gate_shown", props: { reason: "too_many_items", source: "chat_history" } });
+        setStatus(compareItemMax <= 2 ? t.compare.gateTooManyFree : t.compare.gateTooManyPro);
+        return prev;
+      }
       return [...prev, id];
     });
   }
 
-  function openCompare() {
+  async function openCompare() {
     if (compareSelectedIds.length < 2) return;
-    if (compareSelectedIds.length === 2 || compareSelectedIds.length === 3) {
+    const response = await fetch("/api/compare/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source: "chat_history", itemIds: compareSelectedIds }),
+    });
+    if (response.status === 401) {
+      window.location.href = `/login?mode=signup&next=${encodeURIComponent(window.location.pathname)}`;
+      return;
+    }
+    if (response.status === 402) {
+      track({ name: "compare_gate_shown", props: { reason: "upgrade_required", source: "chat_history" } });
+      track({ name: "paywall_shown", props: { trigger: "compare" } });
+      setStatus(t.compare.gateUpgradeBody);
+      return;
+    }
+    if (!response.ok) {
+      setStatus(t.compare.startFailed);
+      return;
+    }
+    if (compareSelectedIds.length >= 2 && compareSelectedIds.length <= 5) {
       track({
         name: "compare_opened",
-        props: { count: compareSelectedIds.length, source: "chat_history" },
+        props: { count: compareSelectedIds.length as 2 | 3 | 4 | 5, source: "chat_history" },
       });
     }
     router.push(
@@ -1408,7 +1481,8 @@ export function ViewingChatApp() {
         selectedIds={compareSelectedIds}
         onToggleCompareMode={toggleCompareMode}
         onToggleSelect={toggleCompareSelect}
-        onOpenCompare={openCompare}
+        onOpenCompare={() => void openCompare()}
+        maxItems={compareItemMax}
       />
 
       <section className="mx-auto flex min-h-0 min-w-0 max-w-[1200px] flex-1 flex-col">
@@ -2152,7 +2226,8 @@ export function ViewingChatApp() {
         selectedIds={compareSelectedIds}
         onToggleCompareMode={toggleCompareMode}
         onToggleSelect={toggleCompareSelect}
-        onOpenCompare={openCompare}
+        onOpenCompare={() => void openCompare()}
+        maxItems={compareItemMax}
         onStartNew={() => {
           closeMobileOverlays();
           setMobileNavTab("new");

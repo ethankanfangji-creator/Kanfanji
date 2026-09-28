@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { fingerprint } from "@/lib/ai-boundary/quota";
+import { aiQuotaKeysForUser } from "@/lib/ai-boundary/quota";
+import { resolveProEntitlement } from "@/lib/billing-status";
 import { createAdminClient } from "@/utils/supabase/admin";
 
 const PAGE_SIZE = 20;
@@ -32,7 +33,10 @@ export default async function AdminHome({
   const users = (data ?? []) as ListedUser[];
   let usage = new Map<string, number>();
   if (!error && users.length > 0) {
-    const keys = users.map((user) => `user:${fingerprint(user.id)}`);
+    const keys = users.flatMap((user) => {
+      const quota = aiQuotaKeysForUser(user.id);
+      return [quota.free, quota.proWeek];
+    });
     const { data: windows } = await admin.rpc("admin_get_ai_usage", { p_keys: keys });
     usage = new Map(
       ((windows ?? []) as { quota_key: string; request_count: number }[]).map((row) => [
@@ -70,7 +74,7 @@ export default async function AdminHome({
               <th className="py-2 pr-3">訂閱</th>
               <th className="py-2 pr-3">手動 Pro</th>
               <th className="py-2 pr-3">雲端看房</th>
-              <th className="py-2 pr-3">AI 視窗</th>
+              <th className="py-2 pr-3">AI 額度</th>
               <th className="py-2">停用至</th>
             </tr>
           </thead>
@@ -89,7 +93,17 @@ export default async function AdminHome({
                 </td>
                 <td className="py-2 pr-3">{user.manual_pro_until?.slice(0, 10) || "—"}</td>
                 <td className="py-2 pr-3">{user.viewing_count}</td>
-                <td className="py-2 pr-3">{usage.get(`user:${fingerprint(user.id)}`) ?? 0}</td>
+                <td className="py-2 pr-3">
+                  {(() => {
+                    const quota = aiQuotaKeysForUser(user.id);
+                    const pro = resolveProEntitlement({
+                      status: user.subscription_status,
+                      manual_pro_until: user.manual_pro_until,
+                    });
+                    const used = usage.get(pro ? quota.proWeek : quota.free) ?? 0;
+                    return pro ? `本週 ${used}/200` : `終身 ${used}/100`;
+                  })()}
+                </td>
                 <td className="py-2">{user.banned_until?.slice(0, 10) || "—"}</td>
               </tr>
             ))}

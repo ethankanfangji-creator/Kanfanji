@@ -1,113 +1,51 @@
-"use client";
-
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { ArrowLeft, ShieldAlert } from "lucide-react";
-import { ComparisonBoard } from "@/components/comparison/ComparisonBoard";
-import { useI18n } from "@/components/I18nProvider";
-import {
-  getComparisonShare,
-  sortComparisonColumns,
-  type ComparisonShareSnapshot,
-} from "@/lib/comparison";
+import { connection } from "next/server";
+import { resolveCompareShare } from "@/lib/comparison/share-server";
+import { serverTrack } from "@/lib/analytics/server";
+import zhHant from "@/lib/i18n/messages/zh-Hant";
 
-export default function ComparisonSharePage({
+export const metadata = {
+  title: "看房比較（唯讀分享）",
+  robots: { index: false, follow: false },
+};
+
+export default async function CompareSharePage({
   params,
 }: {
   params: Promise<{ token: string }>;
 }) {
-  const { messages } = useI18n();
-  const [token, setToken] = useState("");
-  const [snapshot, setSnapshot] = useState<ComparisonShareSnapshot | null>(null);
-  const [missing, setMissing] = useState(false);
-
-  useEffect(() => {
-    void params.then((p) => setToken(p.token));
-  }, [params]);
-
-  useEffect(() => {
-    if (!token) return;
-    void (async () => {
-      const row = await getComparisonShare(token);
-      if (!row) {
-        setMissing(true);
-        return;
-      }
-      setSnapshot(row.snapshot);
-    })();
-  }, [token]);
-
-  const labels = messages.compare;
-
-  if (missing) {
+  await connection();
+  const { token } = await params;
+  const resolved = await resolveCompareShare(token);
+  const labels = zhHant.compare;
+  if (resolved.status === "active") {
+    void serverTrack(resolved.ownerId, { name: "share_viewed", props: { kind: "compare" } });
+    const snapshot = resolved.snapshot as {
+      columns?: Array<{ title?: string; cells?: { address?: { text?: string | null } } }>;
+    };
     return (
-      <div className="min-h-screen flex justify-center bg-[#FDF6F0] px-4 pt-10">
-        <div className="w-full max-w-[420px] rounded-[28px] bg-white border border-black/5 p-8 text-center">
-          <ShieldAlert className="w-8 h-8 mx-auto text-[#92400E]" />
-          <h1 className="mt-3 text-[18px] font-bold">{labels.shareMissingTitle}</h1>
-          <p className="mt-2 text-[13px] text-[#6B7280] leading-[1.5]">
-            {labels.shareMissingBody}
-          </p>
-          <Link href="/" className="inline-flex mt-4 text-[13px] font-bold underline">
-            {labels.backHome}
-          </Link>
-        </div>
-      </div>
+      <main className="mx-auto max-w-3xl px-4 py-8">
+        <p className="text-xs font-semibold text-[#6B7280]">{labels.sharedViewEyebrow}</p>
+        <h1 className="mt-2 text-2xl font-bold">{labels.sharedViewTitle}</h1>
+        <p className="mt-2 text-sm">{labels.sharedViewNotice.replace("{date}", resolved.createdAt.slice(0, 10))}</p>
+        <p className="text-sm text-[#6B7280]">{labels.sharedViewExpires.replace("{date}", resolved.expiresAt.slice(0, 10))}</p>
+        <ul className="mt-6 space-y-3">
+          {(snapshot.columns ?? []).map((column) => (
+            <li key={column.title} className="rounded-2xl border border-black/10 p-4">
+              <p className="font-bold">{column.cells?.address?.text || "—"}</p>
+            </li>
+          ))}
+        </ul>
+        <Link href="/" className="mt-6 inline-flex font-bold underline">{labels.sharedViewCta}</Link>
+      </main>
     );
   }
-
-  if (!snapshot) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#FDF6F0] text-[13px] text-[#6B7280]">
-        {labels.loading}
-      </div>
-    );
-  }
-
-  const columns = sortComparisonColumns(
-    snapshot.columns,
-    snapshot.sort.key,
-    snapshot.sort.direction,
-  );
-
+  const title = resolved.status === "legacy" ? labels.shareLegacyTitle : labels.shareInvalidTitle;
+  const body = resolved.status === "legacy" ? labels.shareLegacyBody : labels.shareInvalidBody;
   return (
-    <div className="min-h-screen w-full flex justify-center bg-[#FDF6F0] text-[#1A1A1A]">
-      <div className="w-full max-w-[960px] px-4 pt-6 pb-28">
-        <div className="mb-4 flex items-center justify-between">
-          <p className="text-[11px] font-[700] tracking-[0.18em] opacity-60">
-            KANFANGJI · COMPARISON
-          </p>
-          <Link
-            href="/"
-            className="inline-flex items-center gap-1 h-8 px-3 rounded-full bg-white border border-black/10 text-[11px] font-bold"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" /> {labels.backHome}
-          </Link>
-        </div>
-        <h1 className="text-[20px] font-[800] mb-1">{labels.title}</h1>
-        <p className="text-[12px] text-[#6B7280] mb-4">
-          {labels.readOnlyShare} · {labels.lastUpdated}{" "}
-          {new Date(snapshot.updatedAt).toLocaleString()}
-        </p>
-        <ComparisonBoard
-          columns={columns}
-          labels={{
-            empty: labels.empty,
-            price: labels.price,
-            layout: labels.layout,
-            location: labels.location,
-            area: labels.area,
-            managementFee: labels.managementFee,
-            rating: labels.rating,
-            pros: labels.pros,
-            risks: labels.risks,
-            followUps: labels.followUps,
-            notes: labels.notes,
-            includeInShare: labels.includeInShare,
-          }}
-          editing={false}
-        />
-      </div>
-    </div>
+    <main className="mx-auto max-w-xl px-4 py-16">
+      <h1 className="text-2xl font-bold">{title}</h1>
+      <p className="mt-3 text-sm leading-6">{body}</p>
+    </main>
   );
 }

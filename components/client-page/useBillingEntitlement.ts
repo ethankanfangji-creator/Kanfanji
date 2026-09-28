@@ -71,13 +71,13 @@ export function useBillingEntitlement(options: {
           .eq("user_id", user.id),
         supabase
           .from("subscriptions")
-          .select("status, plan, stripe_customer_id, manual_pro_until")
+          .select("status, plan, manual_pro_until")
           .eq("user_id", user.id)
           .maybeSingle(),
       ]);
       if (cancelled) return false;
       setFreeCount(count ?? 0);
-      setHasStripeCustomer(Boolean(sub?.stripe_customer_id));
+      setHasStripeCustomer(false);
       const pro = resolveProEntitlement({
         status: sub?.status,
         manual_pro_until: sub?.manual_pro_until,

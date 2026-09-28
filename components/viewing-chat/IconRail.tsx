@@ -116,6 +116,7 @@ export function IconRail({
   onToggleCompareMode,
   onToggleSelect,
   onOpenCompare,
+  maxItems = COMPARE_LITE_MAX,
 }: {
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
@@ -134,6 +135,7 @@ export function IconRail({
   onToggleCompareMode: () => void;
   onToggleSelect: (id: string) => void;
   onOpenCompare: () => void;
+  maxItems?: number;
 }) {
   const { messages, locale } = useI18n();
   const router = useRouter();
@@ -259,7 +261,7 @@ export function IconRail({
                 const active = thread.id === activeId;
                 const selected = selectedIds.includes(thread.id);
                 const locked =
-                  compareMode && !selected && selectedIds.length >= COMPARE_LITE_MAX;
+                  compareMode && !selected && selectedIds.length >= maxItems;
                 const preview =
                   [...thread.messages]
                     .reverse()

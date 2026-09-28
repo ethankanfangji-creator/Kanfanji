@@ -18,6 +18,8 @@ export type AiErrorUiKind =
 export type AiErrorUiCopy = {
   quotaGuest: string;
   quotaUser: string;
+  quotaPro: string;
+  quotaNetwork: string;
   authRequired: string;
   consentRequired: string;
   unavailable: string;
@@ -38,6 +40,9 @@ export type AiErrorResponseLike = {
   code?: string | null;
   status?: number | null;
   error?: string | null;
+  tier?: "guest" | "free" | "pro" | null;
+  limit?: "tier" | "network" | null;
+  resetsAt?: string | null;
 };
 
 const OPAQUE_SERVER_ERROR = "AI request could not be completed.";
@@ -52,7 +57,7 @@ function normalizeCode(code: string | null | undefined): string {
 export function mapAiErrorToUi(
   input: AiErrorResponseLike,
   copy: AiErrorUiCopy,
-  opts?: { isAuthenticated?: boolean },
+  opts?: { isAuthenticated?: boolean; locale?: string },
 ): AiErrorUiModel {
   const code = normalizeCode(input.code);
   const status =
@@ -62,6 +67,28 @@ export function mapAiErrorToUi(
   const isAuthenticated = Boolean(opts?.isAuthenticated);
 
   if (code === "ai_quota_exceeded" || status === 429) {
+    if (input.limit === "network") {
+      return { kind: "quota", message: copy.quotaNetwork, actions: ["retry"] };
+    }
+    if (input.tier === "guest") {
+      return { kind: "quota", message: copy.quotaGuest, actions: ["sign_in"] };
+    }
+    if (input.tier === "free") {
+      return { kind: "quota", message: copy.quotaUser, actions: ["upgrade"] };
+    }
+    if (input.tier === "pro") {
+      const when = input.resetsAt
+        ? new Intl.DateTimeFormat(opts?.locale || "zh-TW", {
+            timeZone: "Etc/GMT+7",
+            month: "numeric",
+            day: "numeric",
+            weekday: "short",
+            hour: "2-digit",
+            minute: "2-digit",
+          }).format(new Date(input.resetsAt))
+        : "";
+      return { kind: "quota", message: copy.quotaPro.replace("{resetAt}", when), actions: [] };
+    }
     return {
       kind: "quota",
       message: isAuthenticated ? copy.quotaUser : copy.quotaGuest,
@@ -157,6 +184,8 @@ export function aiErrorUiCopyFromBoundary(
   boundary: {
     quotaGuest: string;
     quotaUser: string;
+    quotaPro: string;
+    quotaNetwork: string;
     authRequired: string;
     consentRequired: string;
     unavailable: string;
@@ -169,6 +198,8 @@ export function aiErrorUiCopyFromBoundary(
   return {
     quotaGuest: boundary.quotaGuest,
     quotaUser: boundary.quotaUser,
+    quotaPro: boundary.quotaPro,
+    quotaNetwork: boundary.quotaNetwork,
     authRequired: boundary.authRequired,
     consentRequired: boundary.consentRequired,
     unavailable: boundary.unavailable,

@@ -26,6 +26,7 @@ export function MobileHistoryDrawer({
   onToggleCompareMode,
   onToggleSelect,
   onOpenCompare,
+  maxItems = COMPARE_LITE_MAX,
   labels,
 }: {
   open: boolean;
@@ -42,6 +43,7 @@ export function MobileHistoryDrawer({
   onToggleCompareMode: () => void;
   onToggleSelect: (id: string) => void;
   onOpenCompare: () => void;
+  maxItems?: number;
   labels: {
     title: string;
     empty: string;
@@ -102,7 +104,7 @@ export function MobileHistoryDrawer({
           recent.map((thread) => {
             const active = thread.id === activeId;
             const selected = selectedIds.includes(thread.id);
-            const locked = compareMode && !selected && selectedIds.length >= COMPARE_LITE_MAX;
+            const locked = compareMode && !selected && selectedIds.length >= maxItems;
             const preview =
               [...thread.messages]
                 .reverse()

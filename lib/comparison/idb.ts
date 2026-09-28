@@ -85,6 +85,7 @@ export type ComparisonShareRecord = {
   createdAt: string;
 };
 
+/** @deprecated IndexedDB share snapshots are no longer written. Server share links replaced them. */
 export async function putComparisonShare(record: ComparisonShareRecord): Promise<void> {
   const db = await openDb();
   try {
@@ -96,6 +97,7 @@ export async function putComparisonShare(record: ComparisonShareRecord): Promise
   }
 }
 
+/** @deprecated Read path kept so existing local snapshots are not deleted. */
 export async function getComparisonShare(
   token: string,
 ): Promise<ComparisonShareRecord | null> {

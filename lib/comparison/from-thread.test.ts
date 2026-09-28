@@ -154,9 +154,9 @@ describe("rowDiffers", () => {
 });
 
 describe("parseCompareIds", () => {
-  it("trims, dedupes, drops illegal tokens, and keeps at most 3", () => {
+  it("trims, dedupes, drops illegal tokens, and keeps at most 5", () => {
     expect(parseCompareIds(" a, a , b ")).toEqual(["a", "b"]);
-    expect(parseCompareIds("a,b,c,d")).toEqual(["a", "b", "c"]);
+    expect(parseCompareIds("a,b,c,d,e,f")).toEqual(["a", "b", "c", "d", "e"]);
     expect(parseCompareIds("ok,bad id,also-ok")).toEqual(["ok", "also-ok"]);
     expect(parseCompareIds("only-one")).toEqual(["only-one"]);
     expect(parseCompareIds(`a,${"x".repeat(65)},b`)).toEqual(["a", "b"]);

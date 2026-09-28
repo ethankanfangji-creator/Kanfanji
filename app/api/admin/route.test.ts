@@ -114,7 +114,10 @@ describe("admin routes", () => {
         p_actor_id: "admin-1",
         p_target_user_id: "user-2",
         p_reason: "support reset",
-        p_keys: [expect.stringMatching(/^user:[a-f0-9]{64}$/)],
+        p_keys: [
+          expect.stringMatching(/^free_l:[a-f0-9]{64}$/),
+          expect.stringMatching(/^pro_w:[a-f0-9]{64}:\d{4}-\d{2}-\d{2}$/),
+        ],
       }),
     );
   });

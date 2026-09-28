@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronDown, ChevronLeft, ChevronUp, Clipboard, MoreHorizontal, Search, Sparkles, X } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AddressAutocomplete } from "@/components/viewing-wizard/AddressAutocomplete";
 import { AddressConfirmationCard } from "@/components/viewing-wizard/AddressConfirmationCard";
@@ -50,6 +50,7 @@ import { addMediaFile, removeMediaByThread } from "@/lib/viewing-chat/media-libr
 import { GuestLimitDialog } from "@/components/viewing-chat/GuestLimitDialog";
 import { ShareReportDialog } from "@/components/viewing-chat/ShareReportDialog";
 import { syncWithRetry } from "@/lib/viewing-chat/cloud-sync";
+import { guestDaysLeft } from "@/lib/viewing-chat/guest-retention";
 import { sweepExpiredGuestThreads } from "@/lib/viewing-chat/sweep-guest-threads";
 import {
   createAiMessage,
@@ -124,6 +125,7 @@ export function ViewingChatApp() {
   const { messages: t, locale } = useI18n();
   const c = t.chat;
   const router = useRouter();
+  const searchParams = useSearchParams();
   const configured = isSupabaseConfigured();
   const shellRef = useRef<HTMLDivElement>(null);
 
@@ -146,6 +148,9 @@ export function ViewingChatApp() {
   const [guestLimitOpen, setGuestLimitOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [shareLinkId, setShareLinkId] = useState<string | null>(null);
+  const [shareNeedsRegenerate, setShareNeedsRegenerate] = useState(false);
+  const [shareExpires, setShareExpires] = useState<string | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
   const [status, setStatus] = useState("");
   const screenshotInputRef = useRef<HTMLInputElement>(null);
@@ -242,8 +247,12 @@ export function ViewingChatApp() {
   }, []);
 
   useEffect(() => {
-    setChatMatchIndex(0);
-  }, [chatSearchQuery, activeId]);
+    if (searchParams.get("share") !== "1" || !userId) return;
+    const threadId = searchParams.get("thread");
+    if (threadId) setActiveId(threadId);
+    setShareOpen(true);
+    router.replace(threadId ? `/?thread=${threadId}` : "/");
+  }, [searchParams, userId, router]);
 
   useEffect(() => {
     if (!chatSearchOpen) return;
@@ -481,6 +490,7 @@ export function ViewingChatApp() {
 
     void enrichAddressIntel(thread.id, trimmed, seedRecord, place);
     if (userId) {
+      patchLocalThread(thread.id, { cloud: { state: "syncing" }, ownerUserId: userId });
       void fetch("/api/viewing-chat/threads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -494,8 +504,16 @@ export function ViewingChatApp() {
             normalizedAddress: trimmed,
             stage: "viewing_preparation",
             conversationStatus: "collecting",
+            propertyRecord: seedRecord,
           },
         }),
+      }).then((response) => {
+        const state = response.status === 402 ? "blocked_limit" : response.ok ? "synced" : "failed";
+        patchLocalThread(thread.id, { cloud: { state }, ownerUserId: userId });
+        refreshLocal();
+      }).catch(() => {
+        patchLocalThread(thread.id, { cloud: { state: "failed" }, ownerUserId: userId });
+        refreshLocal();
       });
     }
   }
@@ -892,10 +910,6 @@ export function ViewingChatApp() {
       setSoftFailCtas(softFail);
       refreshLocal();
       setStatus("");
-
-      if (opts.file) {
-        void addMediaFile(opts.file, active.id, active.address).catch(() => {});
-      }
     } catch (error) {
       const aiUi =
         error && typeof error === "object" && "aiUi" in error
@@ -1365,6 +1379,18 @@ export function ViewingChatApp() {
     }
     setShareError(null);
     setShareOpen(true);
+    void fetch(`/api/share/links?viewingId=${encodeURIComponent(active.id)}`).then(async (response) => {
+      if (!response.ok) return;
+      const data = (await response.json()) as {
+        url?: string | null;
+        needsRegenerate?: boolean;
+        link?: { id?: string; expiresAt?: string | null };
+      };
+      setShareLinkId(data.link?.id ?? null);
+      setShareNeedsRegenerate(Boolean(data.needsRegenerate));
+      setShareExpires(data.link?.expiresAt ?? null);
+      setShareUrl(data.url ? `${window.location.origin}${data.url}` : null);
+    });
   }
 
   function selectThread(id: string) {
@@ -1494,11 +1520,11 @@ export function ViewingChatApp() {
       <ShareReportDialog
         open={shareOpen}
         url={shareUrl}
-        needsRegenerate={false}
+        needsRegenerate={shareNeedsRegenerate}
         error={shareError}
         labels={{
           title: c.shareNoticeTitle,
-          body: c.shareNoticeBody,
+          body: shareExpires ? c.shareExisting.replace("{date}", shareExpires.slice(0, 10)) : c.shareNoticeBody,
           point1: c.shareNoticePoint1,
           point2: c.shareNoticePoint2,
           point3: c.shareNoticePoint3,
@@ -1506,10 +1532,11 @@ export function ViewingChatApp() {
           create: c.shareCreate,
           revoke: c.shareRevoke,
           regenerate: c.shareRegenerate,
-          copy: c.shareManage,
-          copyFailed: c.reviewCopyFailed,
+          copy: c.shareCopy,
+          copyFailed: c.shareCopyFailed,
           unavailable: c.shareUnavailable,
           needsRegenerate: c.shareNeedsRegenerate,
+          close: c.shareClose,
         }}
         onClose={() => setShareOpen(false)}
         onCreate={() => {
@@ -1519,10 +1546,23 @@ export function ViewingChatApp() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ viewingId: active.id }),
           }).then(async (response) => {
-            const data = (await response.json()) as { urlPath?: string; error?: string };
-            if (response.status === 503) setShareError(c.shareUnavailable);
+            const data = (await response.json()) as {
+              urlPath?: string;
+              error?: string;
+              code?: string;
+              link?: { id?: string; expiresAt?: string | null };
+            };
+            if (response.status === 429) setShareError(c.shareRateLimited);
+            else if (response.status === 503) setShareError(c.shareUnavailable);
+            else if (response.status === 409) setShareError(c.shareNoReportYet);
             else if (!response.ok) setShareError(data.error || c.shareUnavailable);
-            else setShareUrl(data.urlPath ? `${window.location.origin}${data.urlPath}` : null);
+            else {
+              setShareError(null);
+              setShareLinkId(data.link?.id ?? null);
+              setShareExpires(data.link?.expiresAt ?? null);
+              setShareNeedsRegenerate(false);
+              setShareUrl(data.urlPath ? `${window.location.origin}${data.urlPath}` : null);
+            }
           });
         }}
         onCopy={async () => {
@@ -1534,8 +1574,43 @@ export function ViewingChatApp() {
             return false;
           }
         }}
-        onRevoke={() => setShareUrl(null)}
-        onRegenerate={() => setShareUrl(null)}
+        onRevoke={() => {
+          if (!shareLinkId) return;
+          const previous = shareUrl;
+          void fetch(`/api/share/links/${shareLinkId}/revoke`, { method: "POST" }).then(async (response) => {
+            if (!response.ok) {
+              setShareUrl(previous);
+              setShareError(c.shareUnavailable);
+              return;
+            }
+            setShareUrl(null);
+            setShareLinkId(null);
+            setShareError(c.shareRevoked);
+          });
+        }}
+        onRegenerate={() => {
+          if (!shareLinkId) return;
+          if (!window.confirm(c.shareRegenerateConfirm)) return;
+          void fetch(`/api/share/links/${shareLinkId}/rotate`, { method: "POST" }).then(async (response) => {
+            const data = (await response.json()) as {
+              urlPath?: string;
+              code?: string;
+              link?: { id?: string; expiresAt?: string | null };
+            };
+            if (response.status === 429) {
+              setShareError(c.shareRateLimited);
+              return;
+            }
+            if (!response.ok || !data.urlPath) {
+              setShareError(c.shareUnavailable);
+              return;
+            }
+            setShareError(null);
+            setShareLinkId(data.link?.id ?? null);
+            setShareExpires(data.link?.expiresAt ?? null);
+            setShareUrl(`${window.location.origin}${data.urlPath}`);
+          });
+        }}
       />
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
       <IconRail
@@ -1719,7 +1794,7 @@ export function ViewingChatApp() {
                 </p>
                 {!userId ? (
                   <p className="mt-1 text-center text-[11px] text-[#6B7280]">
-                    {c.guestLocalNotice.replace("{days}", "3")}{" "}
+                    {c.guestLocalNotice.replace("{days}", String(guestDaysLeft(active)))}{" "}
                     <a
                       className="underline"
                       href={`/login?next=${encodeURIComponent(`/?thread=${active.id}`)}`}
@@ -1866,7 +1941,7 @@ export function ViewingChatApp() {
                   {c.actionSkip}
                 </QuickActionChip>
                 <SyncStatusPill
-                  state={!userId ? "local_only" : active.cloud?.state && active.cloud.state !== "local_only" ? active.cloud.state : "synced"}
+                  state={!userId ? "local_only" : active.cloud?.state ?? "syncing"}
                   labels={{
                     local: c.syncGuest,
                     synced: c.syncSynced,
@@ -1883,7 +1958,6 @@ export function ViewingChatApp() {
                         body: JSON.stringify({
                           clientUpdatedAt: active.updatedAt,
                           messages: active.messages,
-                          chatState: { v: 1, normalizedAddress: active.address },
                         }),
                       });
                       if (response.status === 402) {

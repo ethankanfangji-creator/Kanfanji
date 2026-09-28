@@ -7,6 +7,8 @@ import {
   isShareTokenFormat,
 } from "./crypto";
 import { decryptShareToken, encryptShareToken } from "./token-vault";
+import { chatShareExpiresAt, consumeShareCreateRateLimit } from "./share-rate-limit.server";
+import { buildChatReportPublication } from "./publication";
 import type { ShareLinkRecord } from "./types";
 import { resolveShareLinkGate } from "./public-dto";
 import {
@@ -31,6 +33,8 @@ export type ViewingShareRow = {
   property: Record<string, unknown> | null;
   updated_at: string;
   created_at: string;
+  report?: unknown;
+  chat_state?: unknown;
   shareLink?: ShareLinkRow | null;
 };
 
@@ -55,11 +59,11 @@ export type ShareLinkRow = {
 const LINK_COLUMNS =
   "id, viewing_id, token, token_ciphertext, capability, status, expires_at, password_hash, access_version, created_at, updated_at, revoked_at, last_resolved_at, published_snapshot, media_manifest";
 const LINK_GATE_COLUMNS =
-  "id, viewing_id, token, capability, status, expires_at, password_hash, access_version, created_at, updated_at, revoked_at, last_resolved_at";
+  "id, viewing_id, capability, status, expires_at, password_hash, access_version, created_at, updated_at, revoked_at, last_resolved_at";
 
 export type PublishedShareRow = {
   shareLink: ShareLinkRow;
-  snapshot: PublishedShareSnapshot;
+  snapshot: PublishedShareSnapshot | import("./publication").ChatReportShareSnapshot;
   mediaManifest: PublishedShareMediaItem[];
   ownerId: string;
 };
@@ -111,7 +115,7 @@ async function fetchOwnedViewing(
   const { data, error } = await supabase
     .from("viewings")
     .select(
-      "id, user_id, address, tags, pros, risks, photo_urls, share_token, property, updated_at, created_at",
+      "id, user_id, address, tags, pros, risks, photo_urls, share_token, property, report, chat_state, updated_at, created_at",
     )
     .eq("id", viewingId)
     .eq("user_id", userId)
@@ -194,6 +198,7 @@ export async function ensureOwnerShareLink(
     options && Object.hasOwn(options, "password") && options.password
       ? await hashSharePassword(options.password)
       : null;
+  if (!(await consumeShareCreateRateLimit(userId))) throw new Error("SHARE_RATE_LIMITED");
   const token = generateShareToken();
   const linkId = crypto.randomUUID();
   let tokenCiphertext: string;
@@ -202,7 +207,17 @@ export async function ensureOwnerShareLink(
   } catch {
     throw new Error("SHARE_UNAVAILABLE");
   }
-  const publication = buildSharePublication(viewing);
+  const publication = viewing.chat_state
+    ? buildChatReportPublication({
+        id: viewing.id,
+        user_id: viewing.user_id,
+        address: viewing.address,
+        report: viewing.report,
+        chat_state: viewing.chat_state,
+        updated_at: viewing.updated_at,
+      })
+    : { snapshot: buildSharePublication(viewing).snapshot, mediaManifest: buildSharePublication(viewing).mediaManifest };
+  const chatExpiry = viewing.chat_state ? chatShareExpiresAt() : null;
   const { data, error } = await supabase
     .from("share_links")
     .insert({
@@ -213,7 +228,9 @@ export async function ensureOwnerShareLink(
       token_ciphertext: tokenCiphertext,
       token_key_id: "v1",
       expires_at:
-        options && Object.hasOwn(options, "expiresAt") ? options.expiresAt ?? null : null,
+        options && Object.hasOwn(options, "expiresAt")
+          ? options.expiresAt ?? null
+          : chatExpiry,
       password_hash: passwordHash,
       published_snapshot: publication.snapshot,
       media_manifest: publication.mediaManifest,
@@ -304,23 +321,45 @@ export async function rotateOwnerShareLink(
 ): Promise<{ link: ShareLinkRecord; urlPath: string; needsRegenerate?: boolean }> {
   const row = await fetchOwnedLink(supabase, userId, linkId);
   if (!row || row.status !== "active") throw new Error("LINK_NOT_FOUND");
+  if (!(await consumeShareCreateRateLimit(userId))) throw new Error("SHARE_RATE_LIMITED");
+  await revokeOwnerShareLink(supabase, userId, linkId);
+  const viewing = await fetchOwnedViewing(supabase, userId, row.viewing_id);
+  if (!viewing) throw new Error("VIEWING_NOT_FOUND");
   const token = generateShareToken();
+  const nextId = crypto.randomUUID();
   let tokenCiphertext: string;
   try {
-    tokenCiphertext = encryptShareToken(token, linkId);
+    tokenCiphertext = encryptShareToken(token, nextId);
   } catch {
     throw new Error("SHARE_UNAVAILABLE");
   }
-  const { data, error } = await supabase.rpc("rotate_share_link", {
-    p_link_id: linkId,
-    p_user_id: userId,
-    p_token_hash: hashShareToken(token),
-    p_token_ciphertext: tokenCiphertext,
-  });
+  const publication = viewing.chat_state
+    ? buildChatReportPublication({
+        id: viewing.id,
+        user_id: viewing.user_id,
+        address: viewing.address,
+        report: viewing.report,
+        chat_state: viewing.chat_state,
+        updated_at: viewing.updated_at,
+      })
+    : buildSharePublication(viewing);
+  const { data, error } = await supabase
+    .from("share_links")
+    .insert({
+      id: nextId,
+      viewing_id: row.viewing_id,
+      token: null,
+      token_hash: hashShareToken(token),
+      token_ciphertext: tokenCiphertext,
+      token_key_id: "v1",
+      expires_at: viewing.chat_state ? chatShareExpiresAt() : null,
+      published_snapshot: publication.snapshot,
+      media_manifest: publication.mediaManifest,
+    })
+    .select(LINK_COLUMNS)
+    .single();
   if (error) throw error;
-  const next = (Array.isArray(data) ? data[0] : data) as ShareLinkRow | null;
-  if (!next) throw new Error("LINK_NOT_FOUND");
-  return { link: toShareLinkRecord(next), urlPath: `/s/${token}` };
+  return { link: toShareLinkRecord(data as ShareLinkRow), urlPath: `/s/${token}` };
 }
 
 export async function fetchViewingByShareTokenAdmin(
@@ -353,11 +392,11 @@ export async function fetchShareGateByTokenAdmin(
   token: string,
 ): Promise<ShareGateRow | null> {
   const trimmed = token.trim();
-  if (!trimmed) return null;
+  if (!isShareTokenFormat(trimmed)) return null;
   const { data, error } = await admin
     .from("share_links")
     .select(LINK_GATE_COLUMNS)
-    .eq("token", trimmed)
+    .eq("token_hash", hashShareToken(trimmed))
     .maybeSingle();
   if (error || !data) return null;
   return { shareLink: data as ShareLinkRow };

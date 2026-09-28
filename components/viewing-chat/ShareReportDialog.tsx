@@ -29,6 +29,7 @@ export function ShareReportDialog({
     copyFailed: string;
     unavailable: string;
     needsRegenerate: string;
+    close: string;
   };
   url: string | null;
   needsRegenerate: boolean;
@@ -66,9 +67,9 @@ export function ShareReportDialog({
           </label>
         ) : null}
         <div className="mt-4 flex flex-wrap gap-2">
-          <button type="button" className="rounded-full border px-3 py-2 text-[12px] font-bold" onClick={onClose}>
-            Close
-          </button>
+        <button type="button" className="rounded-full border px-3 py-2 text-[12px] font-bold" onClick={onClose}>
+          {labels.close}
+        </button>
           {!url ? (
             <button
               type="button"

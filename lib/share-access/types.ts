@@ -85,6 +85,18 @@ export type PublicSharePayload = {
     pros: string[];
     risks: string[];
   };
+  chatReport?: {
+    version: 2;
+    title: string;
+    address: string;
+    summary: string | null;
+    pros: string[];
+    risks: string[];
+    reportGeneratedAt: string;
+    publishedAt: string;
+    checklist: Array<{ question: string; answer: string; status: "ok" | "risk" | "unknown" }>;
+    fields: Array<{ fieldId: string; value: string; status: string }>;
+  };
   /** Honest flags for the viewer. */
   meta: {
     passwordProtected: boolean;

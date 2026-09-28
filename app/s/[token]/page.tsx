@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { ArrowLeft, MapPin, ShieldAlert } from "lucide-react";
+import { ChatReportShareCard } from "@/components/share-card/ChatReportShareCard";
 import { DecisionSummaryCard } from "@/components/share-card/DecisionSummaryCard";
 import { ShareUnlockForm } from "@/components/share-card/ShareUnlockForm";
 import { resolvePublicShare } from "@/lib/share";
@@ -162,18 +163,27 @@ function renderResult(token: string, result: PublicShareResult) {
     );
   }
   if (result.status !== "active") {
-    const titles: Record<string, string> = {
-      missing: "找不到分享",
-      revoked: "分享已取消",
-      expired: "分享已過期",
-      forbidden: "無權限",
-      error: "載入失敗",
-    };
     return (
       <ShareStatusPage
-        title={titles[result.status] ?? "無法開啟"}
-        body={result.message}
+        title="此分享連結已失效"
+        body="連結可能已過期、被分享者取消，或網址不完整。請向分享者索取新連結。"
       />
+    );
+  }
+
+  if (result.chatReport) {
+    return (
+      <ShareShell>
+        <ChatReportShareCard
+          address={result.chatReport.address}
+          generatedAt={result.chatReport.reportGeneratedAt}
+          summary={result.chatReport.summary}
+          pros={result.chatReport.pros}
+          risks={result.chatReport.risks}
+          checklist={result.chatReport.checklist}
+          fields={result.chatReport.fields}
+        />
+      </ShareShell>
     );
   }
 
@@ -213,6 +223,13 @@ function renderResult(token: string, result: PublicShareResult) {
       )}
     </ShareShell>
   );
+}
+
+export async function generateMetadata() {
+  return {
+    title: "看房報告（唯讀分享）",
+    robots: { index: false, follow: false },
+  };
 }
 
 export default async function ShareCardPage({

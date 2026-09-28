@@ -100,7 +100,18 @@ export async function POST(req: Request) {
     }
     const message = error instanceof Error ? error.message : "建立分享連結失敗";
     const status =
-      message === "VIEWING_NOT_FOUND" ? 404 : message === "SHARE_UNAVAILABLE" ? 503 : 500;
-    return NextResponse.json({ error: message }, { status });
+      message === "VIEWING_NOT_FOUND"
+        ? 404
+        : message === "SHARE_UNAVAILABLE"
+          ? 503
+          : message === "SHARE_RATE_LIMITED"
+            ? 429
+            : message === "REPORT_NOT_READY"
+              ? 409
+              : 500;
+    return NextResponse.json(
+      { error: message, ...(status === 429 ? { code: "rate_limited" } : {}) },
+      { status },
+    );
   }
 }

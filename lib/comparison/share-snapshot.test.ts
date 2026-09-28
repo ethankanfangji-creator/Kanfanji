@@ -95,6 +95,49 @@ describe("share snapshots", () => {
     expect(JSON.stringify(snapshot)).not.toContain("價格 999 萬");
   });
 
+  it("accepts the builders and a single address cell", () => {
+    const fromDraft = snapshotFromDraft(draft, { includeNotes: false });
+    expect(() => parseCompareShareSnapshot(fromDraft, fromDraft.columns.length)).not.toThrow();
+    const fromThread = snapshotFromThreadColumns([
+      { threadId: "t1", rows: { address: { text: "100 Main" } } } as never,
+      { threadId: "t2", rows: { address: { text: "200 Main" } } } as never,
+    ]);
+    expect(() => parseCompareShareSnapshot(fromThread, 2)).not.toThrow();
+    expect(() =>
+      parseCompareShareSnapshot(
+        {
+          version: 2,
+          source: "chat_history",
+          createdAt: "t",
+          rows: ["address"],
+          columns: [
+            { title: "A", cells: { address: { text: "A" } } },
+            { title: "B", cells: { address: { text: "B" } } },
+          ],
+        },
+        2,
+      ),
+    ).not.toThrow();
+  });
+
+  it("rejects an unknown cell key", () => {
+    expect(() =>
+      parseCompareShareSnapshot(
+        {
+          version: 2,
+          source: "chat_history",
+          createdAt: "t",
+          rows: ["address"],
+          columns: [
+            { title: "A", cells: { address: { text: "A" }, mystery: { text: "no" } } },
+            { title: "B", cells: { address: { text: "B" } } },
+          ],
+        },
+        2,
+      ),
+    ).toThrow();
+  });
+
   it("rejects an unknown snapshot key", () => {
     expect(() =>
       parseCompareShareSnapshot(

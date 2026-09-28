@@ -23,7 +23,7 @@ export const compareShareSnapshotSchema = z
     rows: z.array(rowKey).max(40),
     columns: z.array(z.object({
       title: z.string().max(200),
-      cells: z.record(rowKey, cell).optional(),
+      cells: z.partialRecord(rowKey, cell).optional(),
     }).strict()).min(2).max(5),
   })
   .strict();

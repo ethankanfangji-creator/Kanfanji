@@ -248,7 +248,7 @@ export function IconRail({
           </div>
           {compareMode && maxHintShown ? (
             <p className="px-3 pb-1 text-[12px] font-semibold text-[#92400E]" role="status">
-              {messages.compareLite.compareMaxReached}
+              {maxItems <= 2 ? messages.compare.gateTooManyFree : messages.compare.gateTooManyPro}
             </p>
           ) : null}
           <ul className="min-h-0 flex-1 overflow-y-auto">
@@ -375,8 +375,9 @@ export function IconRail({
           </ul>
           {compareMode ? (
             <CompareSelectionBar
-              selectedText={formatMessage(messages.compareLite.compareSelectedCount, {
+              selectedText={formatMessage(messages.compare.selectedCount, {
                 n: selectedIds.length,
+                max: maxItems,
               })}
               openText={formatMessage(messages.compareLite.compareOpen, {
                 n: selectedIds.length,

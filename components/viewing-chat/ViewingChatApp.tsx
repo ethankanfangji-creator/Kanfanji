@@ -2245,9 +2245,10 @@ export function ViewingChatApp() {
           startNew: c.startNewViewing,
           compareToggle: t.compareLite.compareToggle,
           compareCancel: t.compareLite.compareCancel,
-          compareSelectedCount: t.compareLite.compareSelectedCount,
+          compareSelectedCount: t.compare.selectedCount,
           compareOpen: t.compareLite.compareOpen,
-          compareMaxReached: t.compareLite.compareMaxReached,
+          compareTooManyFree: t.compare.gateTooManyFree,
+          compareTooManyPro: t.compare.gateTooManyPro,
         }}
       />
 

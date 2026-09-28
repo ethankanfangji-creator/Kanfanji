@@ -84,6 +84,7 @@ export async function authorizeAiRequest(
       } else {
         Object.assign(error, { retryAfter: quota.retryAfter });
       }
+      Object.assign(error, { issuedCookie: issued });
       throw error;
     }
     if (quota.allowed) tier = quota.tier;
@@ -111,7 +112,8 @@ export function aiErrorResponse(error: unknown): NextResponse {
       resetsAt?: string | null;
     };
     const retryAfter = extra.retryAfter;
-    return NextResponse.json(
+    const issued = (error as AiInputError & { issuedCookie?: { value: string; maxAge: number } | null }).issuedCookie;
+    const response = NextResponse.json(
       {
         error: "AI request could not be completed.",
         code: error.code,
@@ -127,6 +129,10 @@ export function aiErrorResponse(error: unknown): NextResponse {
             : undefined,
       },
     );
+    if (issued && (error.status === 429 || error.status === 503)) {
+      response.cookies.set(AI_GUEST_COOKIE, issued.value, guestCookieOptions(issued.maxAge));
+    }
+    return response;
   }
   const timedOut =
     error instanceof Error &&

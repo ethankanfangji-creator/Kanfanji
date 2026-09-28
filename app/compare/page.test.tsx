@@ -16,10 +16,15 @@ const STORAGE_KEY = "kanfangji.viewingChat.threads.v1";
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
+  vi.unstubAllGlobals();
 });
 
 beforeEach(() => {
   window.localStorage.setItem("kanfangji.locale", "zh-Hant");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(JSON.stringify({ compareId: "cmp", outcome: "created" }), { status: 200 })),
+  );
 });
 
 describe("ChatComparePage", () => {

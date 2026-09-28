@@ -31,6 +31,7 @@ import {
   type ThreadCompareColumn,
 } from "@/lib/comparison/from-thread";
 import { getLocalThread } from "@/lib/viewing-chat/local-store";
+import { snapshotFromThreadColumns } from "@/lib/comparison/share-snapshot";
 
 let columnSnapshot: { key: string; columns: CompareColumnView[] | null } = {
   key: "",
@@ -106,27 +107,35 @@ export function ChatComparePage() {
     locale,
     missing: lite.compareMissingOnDevice,
   });
-  const [gate, setGate] = useState<string | null>(null);
+  const [gate, setGate] = useState<
+    | { kind: "pending" }
+    | { kind: "allowed"; compareId: string }
+    | { kind: "blocked"; reason: "login" | "upgrade" | "failed" }
+  >({ kind: "pending" });
   useEffect(() => {
     if (ids.length < 2) return;
     let cancelled = false;
+    setGate({ kind: "pending" });
     void fetch("/api/compare/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ source: "chat_history", itemIds: ids }),
     }).then(async (response) => {
       if (cancelled) return;
-      if (response.status === 401) setGate(messages.compare.gateLoginBody);
-      else if (response.status === 402 || response.status === 400) setGate(messages.compare.gateUpgradeBody);
-      else if (!response.ok) setGate(messages.compare.startFailed);
-      else setGate(null);
+      if (response.status === 401) setGate({ kind: "blocked", reason: "login" });
+      else if (response.status === 402 || response.status === 400) setGate({ kind: "blocked", reason: "upgrade" });
+      else if (!response.ok) setGate({ kind: "blocked", reason: "failed" });
+      else {
+        const body = (await response.json()) as { compareId?: string };
+        setGate({ kind: "allowed", compareId: body.compareId ?? "" });
+      }
     }).catch(() => {
-      if (!cancelled) setGate(null);
+      if (!cancelled) setGate({ kind: "blocked", reason: "failed" });
     });
     return () => {
       cancelled = true;
     };
-  }, [ids, messages.compare.gateLoginBody, messages.compare.gateUpgradeBody, messages.compare.startFailed]);
+  }, [ids]);
   const columns = useSyncExternalStore(
     subscribeToThreads,
     () => threadsClientSnapshot(snapshotKey),
@@ -238,7 +247,43 @@ export function ChatComparePage() {
           {lite.compareBack}
         </button>
         <h1 className="mt-2 text-[20px] font-[800] tracking-tight">{lite.compareTitle}</h1>
-        {gate ? <p className="mt-4 text-[14px] leading-6">{gate}</p> : null}
+        {gate.kind === "allowed" && found.length >= 2 ? (
+          <button
+            type="button"
+            className="mt-3 text-sm font-bold underline"
+            onClick={() => {
+              void fetch("/api/compare/shares", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  compareId: gate.compareId,
+                  snapshot: snapshotFromThreadColumns(found),
+                  acknowledgeAddresses: true,
+                }),
+              });
+            }}
+          >
+            {messages.compare.share}
+          </button>
+        ) : null}
+        {gate.kind === "pending" && ids.length >= 2 ? <p className="mt-4 text-sm">載入中</p> : null}
+        {gate.kind === "blocked" && gate.reason === "login" ? (
+          <div className="mt-4 space-y-3">
+            <p>{messages.compare.gateLoginBody}</p>
+            <a className="inline-flex font-bold underline" href={`/login?mode=signup&next=${encodeURIComponent(`/compare?ids=${ids.join(",")}`)}`}>
+              {messages.compare.gateLoginCta}
+            </a>
+          </div>
+        ) : null}
+        {gate.kind === "blocked" && gate.reason === "upgrade" ? (
+          <div className="mt-4 space-y-3">
+            <p>{messages.compare.gateUpgradeBody}</p>
+            <Link href="/login" className="inline-flex font-bold underline">
+              {messages.aiBoundary.ctaUpgrade}
+            </Link>
+          </div>
+        ) : null}
+        {gate.kind === "blocked" && gate.reason === "failed" ? <p className="mt-4">{messages.compare.startFailed}</p> : null}
         <p className="mt-1 text-[12px] text-[#6B7280]">{lite.compareSubtitle}</p>
 
         {ids.length < 2 ? (
@@ -251,7 +296,7 @@ export function ChatComparePage() {
               {lite.compareBackHome}
             </Link>
           </div>
-        ) : gate ? null : columns ? (
+        ) : gate.kind === "allowed" && columns ? (
           <div className="mt-6">
             <ChatCompareBoard
               columns={columns}

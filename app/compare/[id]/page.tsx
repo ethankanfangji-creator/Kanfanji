@@ -38,6 +38,9 @@ export default function ComparePage({
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState("");
   const [shareUrl, setShareUrl] = useState("");
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareAck, setShareAck] = useState(false);
+  const [shareId, setShareId] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -67,12 +70,16 @@ export default function ComparePage({
     await putComparison(touched);
   }
 
-  async function onShare() {
+  function onShare() {
     if (!draft?.serverCompareId) {
       setError(messages.compare.startFailed);
       return;
     }
-    if (!window.confirm(messages.compare.shareAcknowledge)) return;
+    setShareOpen(true);
+  }
+
+  async function createShare() {
+    if (!draft?.serverCompareId || !shareAck) return;
     setBusy(true);
     try {
       const response = await fetch("/api/compare/shares", {
@@ -84,12 +91,14 @@ export default function ComparePage({
           acknowledgeAddresses: true,
         }),
       });
-      const body = (await response.json()) as { url?: string; code?: string };
+      const body = (await response.json()) as { url?: string; code?: string; shareId?: string };
       if (!response.ok || !body.url) {
         setError(response.status === 429 ? messages.compare.shareRateLimited : messages.compare.startFailed);
         return;
       }
       setShareUrl(body.url);
+      if (body.shareId) setShareId(body.shareId);
+      setShareOpen(false);
       await navigator.clipboard?.writeText(body.url);
     } catch (err) {
       setError(err instanceof Error ? err.message : messages.compare.error);
@@ -201,6 +210,25 @@ export default function ComparePage({
           ) : null}
         </div>
 
+        {shareOpen ? (
+          <div className="mb-4 rounded-xl border border-black/10 bg-white p-4 text-sm" role="dialog">
+            <h2 className="font-bold">{messages.compare.shareNoticeTitle}</h2>
+            <p className="mt-2">{messages.compare.shareNoticeBody}</p>
+            <ul className="mt-2 list-disc pl-5">
+              <li>{messages.compare.shareNoticePoint1}</li>
+              <li>{messages.compare.shareNoticePoint2}</li>
+              <li>{messages.compare.shareNoticePoint3}</li>
+            </ul>
+            <label className="mt-3 flex items-center gap-2">
+              <input type="checkbox" checked={shareAck} onChange={(event) => setShareAck(event.target.checked)} />
+              {messages.compare.shareAcknowledge}
+            </label>
+            <button type="button" className="mt-3 font-bold underline" disabled={!shareAck || busy} onClick={() => void createShare()}>
+              {messages.compare.shareCreate}
+            </button>
+          </div>
+        ) : null}
+
         {COMPARE_SHARE_ENABLED && shareUrl ? (
           <div
             role="status"
@@ -211,9 +239,24 @@ export default function ComparePage({
             <p className="font-bold mb-1 inline-flex items-center gap-1">
               <Copy className="w-3.5 h-3.5" /> {labels.shareHint}
             </p>
+            <p>{messages.compare.shareCopyOnce}</p>
             <a href={shareUrl} className="text-[#2563EB]">
               {shareUrl}
             </a>
+            {shareId ? (
+              <button
+                type="button"
+                className="mt-2 block font-bold underline"
+                onClick={() => {
+                  void fetch(`/api/compare/shares/${shareId}/revoke`, { method: "POST" }).then(() => {
+                    setShareUrl("");
+                    setError(messages.compare.shareRevoked);
+                  });
+                }}
+              >
+                {messages.compare.shareRevoke}
+              </button>
+            ) : null}
           </div>
         ) : null}
 

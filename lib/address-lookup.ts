@@ -1,7 +1,5 @@
 import { enrichMetroOpenData, type MetroOpenData } from "@/lib/metro-opendata";
 import { normalizeAddress } from "@/lib/normalize-address";
-import { findOrCreateProperty } from "@/lib/properties";
-
 export type Market = "CA" | "US" | "TW" | "TH" | "OTHER";
 
 export type AddressLookupResult = {
@@ -241,45 +239,17 @@ async function withMetroOpenData(result: AddressLookupResult): Promise<AddressLo
   };
 }
 
-async function withPropertyRegistry(result: AddressLookupResult): Promise<AddressLookupResult> {
-  const lat = result.details.lat;
-  const lng = result.details.lng;
+function withPropertyRegistry(result: AddressLookupResult): AddressLookupResult {
   const normalized =
     result.details.normalizedAddress || result.displayAddress.toLowerCase().trim();
-
-  if (lat == null || lng == null || !Number.isFinite(lat) || !Number.isFinite(lng)) {
-    return result;
-  }
-
-  try {
-    const zoning = result.details.openData?.zoningCode || null;
-    const countryCode =
-      result.details.countryCode ||
-      (result.market === "OTHER" || result.market === "TH" ? null : result.market);
-    const propertyId = await findOrCreateProperty({
+  if (!normalized) return result;
+  return {
+    ...result,
+    details: {
+      ...result.details,
       normalizedAddress: normalized,
-      lat,
-      lng,
-      zoning,
-      countryCode,
-      admin1: result.details.province ?? null,
-      city: result.details.city ?? null,
-      postalCode: result.details.postalCode ?? null,
-    });
-
-    return {
-      ...result,
-      propertyId,
-      details: {
-        ...result.details,
-        propertyId,
-        normalizedAddress: normalized,
-      },
-    };
-  } catch {
-    // Registry is best-effort prep; lookup still succeeds without property_id
-    return result;
-  }
+    },
+  };
 }
 
 export async function lookupAddressDetails(

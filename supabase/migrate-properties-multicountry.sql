@@ -154,6 +154,6 @@ begin
 end;
 $$;
 
-revoke all on function public.find_or_create_property(text, double precision, double precision, text, integer, text, text, text, text) from public;
+revoke all on function public.find_or_create_property(text, double precision, double precision, text, integer, text, text, text, text) from public, anon, authenticated;
 grant execute on function public.find_or_create_property(text, double precision, double precision, text, integer, text, text, text, text)
-  to anon, authenticated, service_role;
+  to service_role;

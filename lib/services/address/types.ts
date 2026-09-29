@@ -1,6 +1,6 @@
 /**
  * Address suggest + lookup. Implementations must run server-side for third-party geocoders.
- * Real adapter: `createServerAddressService` — used by /api/address-suggest and /api/lookup-address.
+ * Real adapter: `createServerAddressService` — used by /api/address-suggest.
  */
 
 import type { AddressSuggestion } from "@/lib/domain";

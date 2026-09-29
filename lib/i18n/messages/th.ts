@@ -832,6 +832,7 @@ const th: Messages = {
     emptyHistory: "ยังไม่มีประวัติ",
     deleteHistory: "ลบรายการ",
     deleteHistoryConfirm: "ลบประวัติชมบ้านนี้หรือไม่?",
+    deleteFailed: "ลบประวัติจากคลาวด์ไม่สำเร็จ โปรดลองอีกครั้ง",
     pinHistory: "ปักหมุด",
     unpinHistory: "เลิกปักหมุด",
     recentHint: "ชมบ้านล่าสุด",

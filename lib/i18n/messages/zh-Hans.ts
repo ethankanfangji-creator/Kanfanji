@@ -816,6 +816,7 @@ const zhHans: Messages = {
     emptyHistory: "尚无看房纪录",
     deleteHistory: "删除纪录",
     deleteHistoryConfirm: "确定要删除这笔看房纪录？",
+    deleteFailed: "无法从云端删除这笔记录，请再试一次。",
     pinHistory: "钉选纪录",
     unpinHistory: "取消钉选",
     recentHint: "最近的看房",

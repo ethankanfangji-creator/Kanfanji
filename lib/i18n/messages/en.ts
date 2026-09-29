@@ -834,6 +834,7 @@ const en: Messages = {
     emptyHistory: "No viewings yet",
     deleteHistory: "Delete record",
     deleteHistoryConfirm: "Delete this viewing record?",
+    deleteFailed: "Could not delete this record from the cloud. Try again.",
     pinHistory: "Pin record",
     unpinHistory: "Unpin",
     recentHint: "Recent viewings",

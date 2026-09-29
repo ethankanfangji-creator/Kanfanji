@@ -128,3 +128,27 @@ export async function pushViewingThread(input: {
   }
   return finish(response);
 }
+
+const deletedThreadIds = new Set<string>();
+
+export function wasThreadDeletedHere(threadId: string) {
+  return deletedThreadIds.has(threadId);
+}
+
+export function markThreadDeletedHere(threadId: string) {
+  deletedThreadIds.add(threadId);
+}
+
+export async function deleteViewingThread(
+  threadId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ ok: boolean; status: number }> {
+  const response = await fetchImpl(`/api/viewing-chat/threads/${threadId}`, {
+    method: "DELETE",
+  });
+  if (response.ok || response.status === 404) {
+    deletedThreadIds.add(threadId);
+    return { ok: true, status: response.status };
+  }
+  return { ok: false, status: response.status };
+}

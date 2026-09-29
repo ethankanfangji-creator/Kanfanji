@@ -26,7 +26,7 @@ vi.mock("@/utils/supabase/admin", () => ({
   }),
 }));
 
-import { DELETE, PUT } from "./route";
+import { DELETE, GET, PUT } from "./route";
 
 const message = {
   id: "m1",
@@ -129,6 +129,7 @@ describe("PUT /api/viewing-chat/threads/:id", () => {
       { params: Promise.resolve({ id: "11111111-1111-4111-8111-111111111111" }) },
     );
     expect(response.status).toBe(200);
+    expect(query.eq).toHaveBeenCalledWith("revision", 2);
     const patch = query.update.mock.calls.at(-1)?.[0] as {
       chat_state: { pinned: boolean; propertyRecord: { fields: { price: { value: string }; floor: { value: string } } } };
     };
@@ -162,6 +163,58 @@ describe("PUT /api/viewing-chat/threads/:id", () => {
     });
     expect(response.status).toBe(200);
     expect(storage.remove).toHaveBeenCalledWith(["owner-1/11111111-1111-4111-8111-111111111111/photos/pic.jpg"]);
+  });
+
+  it("returns 503 when the viewing read fails", async () => {
+    query.update.mockClear();
+    query.maybeSingle.mockResolvedValueOnce({ data: null, error: { message: "timeout" } });
+    const response = await PUT(
+      new Request("http://test/threads/id", {
+        method: "PUT",
+        body: JSON.stringify({ baseRevision: 2, messages: [message], chatState: { v: 1 } }),
+      }),
+      { params: Promise.resolve({ id: "11111111-1111-4111-8111-111111111111" }) },
+    );
+    expect(response.status).toBe(503);
+    expect(query.update).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 when the revision update loses the race", async () => {
+    query.eq.mockClear();
+    query.maybeSingle
+      .mockResolvedValueOnce({
+        data: {
+          id: "11111111-1111-4111-8111-111111111111",
+          user_id: "owner-1",
+          messages: [message],
+          revision: 2,
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({ data: { user_id: "owner-1", revision: 3 }, error: null });
+    const response = await PUT(
+      new Request("http://test/threads/id", {
+        method: "PUT",
+        body: JSON.stringify({ baseRevision: 2, messages: [message], chatState: { v: 1 } }),
+      }),
+      { params: Promise.resolve({ id: "11111111-1111-4111-8111-111111111111" }) },
+    );
+    expect(response.status).toBe(409);
+    expect(query.eq).toHaveBeenCalledWith("revision", 2);
+  });
+
+  it("returns 503 when a GET read fails and 404 when the row is gone", async () => {
+    query.maybeSingle.mockResolvedValueOnce({ data: null, error: { message: "timeout" } });
+    const failed = await GET(new Request("http://test"), {
+      params: Promise.resolve({ id: "11111111-1111-4111-8111-111111111111" }),
+    });
+    expect(failed.status).toBe(503);
+    query.maybeSingle.mockResolvedValueOnce({ data: null, error: null });
+    const missing = await GET(new Request("http://test"), {
+      params: Promise.resolve({ id: "11111111-1111-4111-8111-111111111111" }),
+    });
+    expect(missing.status).toBe(404);
   });
 
   it("returns 413 when the body is over 2MB", async () => {

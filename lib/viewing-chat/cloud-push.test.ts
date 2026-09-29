@@ -65,6 +65,27 @@ describe("pushViewingThread", () => {
     expect(result.deleted).toBe(true);
     expect(calls).toEqual(["PUT"]);
   });
+
+  it("sends a local report on PUT so a failed report write can be retried", async () => {
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { report?: { summary?: string } };
+      expect(body.report?.summary).toBe("kept");
+      return new Response(JSON.stringify({ revision: 4 }), { status: 200 });
+    });
+    const result = await pushViewingThread({
+      threadId: "thread-1",
+      address: "1 Main",
+      baseRevision: 3,
+      previouslySynced: true,
+      messages: [],
+      chatState: { v: 1 },
+      report: { summary: "kept" },
+      clientUpdatedAt: "2026-09-28T00:00:00.000Z",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(result.status).toBe(200);
+    expect(result.revision).toBe(4);
+  });
 });
 
 describe("syncedThreadIdsMissingFromCloud", () => {

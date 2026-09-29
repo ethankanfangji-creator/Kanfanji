@@ -36,10 +36,17 @@ export async function PUT(
     const raw = await request.text();
     assertChatBodySize(raw);
     const body = await readJsonObject(new Request(request.url, { method: "PUT", body: raw }));
-    assertAllowedKeys(body, ["clientUpdatedAt", "baseRevision", "messages", "chatState"]);
+    assertAllowedKeys(body, ["clientUpdatedAt", "baseRevision", "messages", "chatState", "report"]);
     const clientUpdatedAt = parseClientUpdatedAt(body.clientUpdatedAt);
     const messages = body.messages === undefined ? undefined : parseChatMessages(body.messages);
     const chatState = body.chatState === undefined ? undefined : parseChatState(body.chatState);
+    if (
+      body.report !== undefined &&
+      (!body.report || typeof body.report !== "object" || Array.isArray(body.report))
+    ) {
+      throw new RequestValidationError("INVALID_FIELD_TYPE", "report");
+    }
+    const report = body.report === undefined ? undefined : body.report;
     const baseRevision = body.baseRevision;
     if (baseRevision !== undefined && (!Number.isInteger(baseRevision) || Number(baseRevision) < 1)) {
       throw new RequestValidationError("INVALID_FIELD_TYPE", "baseRevision");
@@ -50,7 +57,8 @@ export async function PUT(
       .select("id, user_id, messages, revision, chat_state")
       .eq("id", id)
       .maybeSingle();
-    if (current.error || !current.data || current.data.user_id !== user.id) {
+    if (current.error) return noStore({ code: "unavailable" }, 503);
+    if (!current.data || current.data.user_id !== user.id) {
       return noStore({ code: "not_found" }, 404);
     }
     const revision = Number(current.data.revision ?? 1);
@@ -64,18 +72,28 @@ export async function PUT(
       ? (current.data.messages as ChatMessage[])
       : [];
     const merged = messages ? appendChatMessages(existing, messages) : undefined;
-    const { error } = await admin
+    const { data: updated, error } = await admin
       .from("viewings")
       .update({
         ...(merged ? { messages: merged } : {}),
         ...(chatState ? { chat_state: mergeChatState(current.data.chat_state, chatState) } : {}),
+        ...(report ? { report } : {}),
         ...(clientUpdatedAt ? { client_updated_at: clientUpdatedAt } : {}),
         revision: revision + 1,
         updated_at: new Date().toISOString(),
       })
       .eq("id", id)
-      .eq("user_id", user.id);
+      .eq("user_id", user.id)
+      .eq("revision", revision)
+      .select("revision")
+      .maybeSingle();
     if (error) return noStore({ code: "unavailable" }, 503);
+    if (!updated) {
+      const again = await admin.from("viewings").select("user_id, revision").eq("id", id).maybeSingle();
+      if (again.error) return noStore({ code: "unavailable" }, 503);
+      if (!again.data || again.data.user_id !== user.id) return noStore({ code: "not_found" }, 404);
+      return noStore({ code: "stale", serverRevision: Number(again.data.revision ?? revision) }, 409);
+    }
     return noStore({ ok: true, revision: revision + 1 });
   } catch (error) {
     if (error instanceof RequestValidationError) {
@@ -102,7 +120,8 @@ export async function GET(
     .select("id, user_id, address, messages, report, metadata, chat_state, revision, updated_at")
     .eq("id", id)
     .maybeSingle();
-  if (error || !data || data.user_id !== user.id) return noStore({ code: "not_found" }, 404);
+  if (error) return noStore({ code: "unavailable" }, 503);
+  if (!data || data.user_id !== user.id) return noStore({ code: "not_found" }, 404);
   return noStore(data);
 }
 

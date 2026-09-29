@@ -189,6 +189,7 @@ export function ViewingChatApp() {
   const chatSearchInputRef = useRef<HTMLInputElement>(null);
   const syncTimers = useRef(new Map<string, number>());
   const threadCreations = useRef(new Map<string, Promise<void>>());
+  const removedThreadIds = useRef(new Set<string>());
   const requestShareRef = useRef<() => void>(() => undefined);
   const claimNoticeRef = useRef("");
 
@@ -441,11 +442,17 @@ export function ViewingChatApp() {
   }
 
   async function pushLocalThread(threadId: string) {
+    if (removedThreadIds.current.has(threadId)) return;
     if (userId) await attachStoredMedia(threadId);
+    if (removedThreadIds.current.has(threadId)) return;
     const thread = getLocalThread(threadId);
     if (!thread || !userId || thread.cloud?.state === "blocked_limit") return;
     const result = await syncWithRetry({
       put: async () => {
+        if (removedThreadIds.current.has(threadId)) {
+          await fetch(`/api/viewing-chat/threads/${threadId}`, { method: "DELETE" }).catch(() => undefined);
+          return { status: 200 };
+        }
         const current = getLocalThread(threadId);
         if (!current) return { status: 404 };
         const pushed = await pushViewingThread({
@@ -456,9 +463,13 @@ export function ViewingChatApp() {
           messages: current.messages,
           chatState: buildChatStatePayload(current),
           clientUpdatedAt: new Date().toISOString(),
-          report: current.report,
+          report: current.report ?? undefined,
           metadata: current.metadata,
         });
+        if (removedThreadIds.current.has(threadId)) {
+          await fetch(`/api/viewing-chat/threads/${threadId}`, { method: "DELETE" }).catch(() => undefined);
+          return { status: 200 };
+        }
         if (pushed.deleted) {
           deleteLocalThread(threadId);
           if (activeId === threadId) setActiveId(null);
@@ -485,8 +496,9 @@ export function ViewingChatApp() {
         return { status: pushed.status };
       },
     });
-    if (result !== "synced") {
-      patchLocalThread(threadId, { cloud: { state: result } });
+    if (result !== "synced" && !removedThreadIds.current.has(threadId)) {
+      const current = getLocalThread(threadId);
+      patchLocalThread(threadId, { cloud: { ...current?.cloud, state: result } });
     }
     refreshLocal();
   }
@@ -880,6 +892,7 @@ export function ViewingChatApp() {
       conversationStatus: "reviewing",
     });
     refreshLocal();
+    queueCloudSync(active.id);
     void generateReport({
       record: nextRecord,
       skippedFields: active.collectionSkippedFields ?? [],
@@ -1327,7 +1340,9 @@ export function ViewingChatApp() {
       );
       if (!ok) return;
     }
-    const record = override?.record ?? active.propertyRecord;
+    const latest = getLocalThread(active.id) ?? active;
+    const record = override?.record ?? latest.propertyRecord;
+    const skippedFields = override?.skippedFields ?? latest.collectionSkippedFields ?? [];
     setBusy(true);
     setStatus(c.generatingReport);
     try {
@@ -1335,13 +1350,19 @@ export function ViewingChatApp() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          address: active.address,
+          address: latest.address,
           locale,
           viewingId: active.id.startsWith("local_") ? "" : active.id,
-          messages: active.messages,
+          messages: latest.messages,
           propertyRecord: record ?? null,
-          skippedFields: override?.skippedFields ?? active.collectionSkippedFields ?? [],
-          propertyData: active.propertyData ?? null,
+          skippedFields,
+          propertyData: latest.propertyData ?? null,
+          chatState: buildChatStatePayload({
+            ...latest,
+            propertyRecord: record ?? null,
+            collectionSkippedFields: skippedFields,
+            conversationStatus: "completed",
+          }),
           consentVersion: AI_CONSENT_VERSION,
           consentSessionId: consentSessionId(),
           identityKind: userId ? "user" : "guest",
@@ -1350,6 +1371,8 @@ export function ViewingChatApp() {
       const data = (await response.json()) as {
         messages?: ChatMessage[];
         report?: ViewingChatThread["report"];
+        persisted?: boolean;
+        revision?: number;
         error?: string;
         code?: string;
       };
@@ -1369,12 +1392,30 @@ export function ViewingChatApp() {
         throw Object.assign(new Error(ui.message), { aiUi: ui });
       }
       saveLocalMessages(active.id, data.messages, data.report ?? null);
+      const stored = getLocalThread(active.id);
+      const blocked = stored?.cloud?.state === "blocked_limit";
+      const cloudBacked = Boolean(userId && !active.id.startsWith("local_") && !blocked);
+      const persisted = data.persisted === true;
       patchLocalThread(active.id, {
         stage: "report_ready",
         conversationStatus: "completed",
+        propertyRecord: record ?? stored?.propertyRecord,
+        ...(cloudBacked
+          ? {
+              cloud: persisted
+                ? {
+                    ...stored?.cloud,
+                    state: "synced" as const,
+                    revision: typeof data.revision === "number" ? data.revision : stored?.cloud?.revision,
+                    lastSyncedAt: new Date().toISOString(),
+                  }
+                : { ...stored?.cloud, state: "failed" as const },
+            }
+          : {}),
       });
+      if (cloudBacked && !persisted) queueCloudSync(active.id);
       refreshLocal();
-      setStatus("");
+      setStatus(cloudBacked && !persisted ? c.syncRetry : "");
     } catch (error) {
       const aiUi =
         error && typeof error === "object" && "aiUi" in error
@@ -1548,8 +1589,40 @@ export function ViewingChatApp() {
     leaveCompareMode();
   }
 
-  function deleteThread(id: string) {
+  async function deleteThread(id: string) {
     if (!window.confirm(c.deleteHistoryConfirm)) return;
+    removedThreadIds.current.add(id);
+    const timer = syncTimers.current.get(id);
+    if (timer) window.clearTimeout(timer);
+    syncTimers.current.delete(id);
+    const creating = threadCreations.current.get(id);
+    if (creating) await creating.catch(() => undefined);
+    const thread = getLocalThread(id);
+    const onCloud = Boolean(
+      userId &&
+        thread &&
+        (thread.ownerUserId === userId ||
+          thread.cloud?.state === "synced" ||
+          thread.cloud?.state === "syncing" ||
+          thread.cloud?.state === "failed" ||
+          typeof thread.cloud?.revision === "number"),
+    );
+    if (onCloud) {
+      try {
+        const response = await fetch(`/api/viewing-chat/threads/${id}`, { method: "DELETE" });
+        if (!response.ok && response.status !== 404) {
+          removedThreadIds.current.delete(id);
+          queueCloudSync(id);
+          setStatus(c.syncRetry);
+          return;
+        }
+      } catch {
+        removedThreadIds.current.delete(id);
+        queueCloudSync(id);
+        setStatus(c.syncRetry);
+        return;
+      }
+    }
     deleteLocalThread(id);
     void removeMediaByThread(id);
     refreshLocal();

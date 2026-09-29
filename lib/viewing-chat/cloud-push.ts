@@ -74,6 +74,7 @@ export async function pushViewingThread(input: {
         messages: input.messages,
         chatState: input.chatState,
         clientUpdatedAt: input.clientUpdatedAt,
+        ...(input.report ? { report: input.report } : {}),
       }),
     });
   const createRow = () =>

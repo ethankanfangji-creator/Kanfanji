@@ -14,4 +14,25 @@ describe("appendChatMessages", () => {
     expect(merged[0]?.id).toBe("m0");
     expect(merged.at(-1)?.id).toBe("new-ai");
   });
+
+  it("replaces an existing message and keeps a path the later copy still has", () => {
+    const merged = appendChatMessages(
+      [{ id: "m1", text: "first", media: [{ id: "a", path: null }] }],
+      [{ id: "m1", text: "edited", media: [{ id: "a", path: "user/view/photos/a.jpg" }] }],
+    );
+    expect(merged).toEqual([
+      { id: "m1", text: "edited", media: [{ id: "a", path: "user/view/photos/a.jpg" }] },
+    ]);
+  });
+
+  it("keeps a stored path when a later copy of the same attachment omits it", () => {
+    const merged = appendChatMessages(
+      [{ id: "m1", media: [{ id: "a", path: "user/view/photos/a.jpg" }] }],
+      [{ id: "m1", text: "note", media: [{ id: "a", path: null }] }],
+    );
+    expect(merged[0]).toMatchObject({
+      text: "note",
+      media: [{ id: "a", path: "user/view/photos/a.jpg" }],
+    });
+  });
 });

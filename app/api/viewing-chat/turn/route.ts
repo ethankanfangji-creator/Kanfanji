@@ -45,32 +45,39 @@ async function persistAppendedMessages(
   chatState?: Record<string, unknown>,
 ) {
   const admin = createAdminClient();
-  const current = await admin
-    .from("viewings")
-    .select("messages, revision, photo_urls, video_urls, audio_urls, chat_state")
-    .eq("id", viewingId)
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (current.error || !current.data) return false;
-  const existing = Array.isArray(current.data.messages)
-    ? (current.data.messages as ChatMessage[])
-    : [];
-  const merged = appendChatMessages(existing, incoming);
-  const revision = Number(current.data.revision ?? 1);
-  const mediaPatch = await acceptedMediaColumns(admin, userId, viewingId, incoming, current.data);
-  const { error } = await admin
-    .from("viewings")
-    .update({
-      messages: merged,
-      ...(chatState ? { chat_state: mergeChatState(current.data.chat_state, chatState) } : {}),
-      ...mediaPatch,
-      revision: revision + 1,
-      updated_at: new Date().toISOString(),
-      client_updated_at: new Date().toISOString(),
-    })
-    .eq("id", viewingId)
-    .eq("user_id", userId);
-  return !error;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const current = await admin
+      .from("viewings")
+      .select("messages, revision, photo_urls, video_urls, audio_urls, chat_state")
+      .eq("id", viewingId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (current.error || !current.data) return false;
+    const existing = Array.isArray(current.data.messages)
+      ? (current.data.messages as ChatMessage[])
+      : [];
+    const merged = appendChatMessages(existing, incoming);
+    const revision = Number(current.data.revision ?? 1);
+    const mediaPatch = await acceptedMediaColumns(admin, userId, viewingId, incoming, current.data);
+    const { data, error } = await admin
+      .from("viewings")
+      .update({
+        messages: merged,
+        ...(chatState ? { chat_state: mergeChatState(current.data.chat_state, chatState) } : {}),
+        ...mediaPatch,
+        revision: revision + 1,
+        updated_at: new Date().toISOString(),
+        client_updated_at: new Date().toISOString(),
+      })
+      .eq("id", viewingId)
+      .eq("user_id", userId)
+      .eq("revision", revision)
+      .select("id")
+      .maybeSingle();
+    if (error) return false;
+    if (data) return true;
+  }
+  return false;
 }
 
 async function acceptedMediaColumns(

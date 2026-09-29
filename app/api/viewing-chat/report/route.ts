@@ -79,6 +79,7 @@ export async function POST(request: Request) {
     const nextMessages = [...messages, aiMessage];
 
     let persisted = false;
+    let revision: number | undefined;
     if (viewingId) {
       const supabase = await createClient();
       const {
@@ -90,31 +91,38 @@ export async function POST(request: Request) {
           chatState = parseChatState(body.chatState);
         }
         const admin = createAdminClient();
-        const current = await admin
-          .from("viewings")
-          .select("messages, revision, chat_state")
-          .eq("id", viewingId)
-          .eq("user_id", user.id)
-          .maybeSingle();
-        if (!current.error && current.data) {
+        for (let attempt = 0; attempt < 3 && !persisted; attempt += 1) {
+          const current = await admin
+            .from("viewings")
+            .select("messages, revision, chat_state")
+            .eq("id", viewingId)
+            .eq("user_id", user.id)
+            .maybeSingle();
+          if (current.error || !current.data) break;
           const existing = Array.isArray(current.data.messages)
             ? (current.data.messages as ChatMessage[])
             : [];
           const merged = appendChatMessages(existing, nextMessages);
-          const revision = Number(current.data.revision ?? 1);
-          const { error } = await admin
+          const baseRevision = Number(current.data.revision ?? 1);
+          const { data, error } = await admin
             .from("viewings")
             .update({
               messages: merged,
               report,
               ...(chatState ? { chat_state: mergeChatState(current.data.chat_state, chatState) } : {}),
-              revision: revision + 1,
+              revision: baseRevision + 1,
               updated_at: new Date().toISOString(),
               client_updated_at: new Date().toISOString(),
             })
             .eq("id", viewingId)
-            .eq("user_id", user.id);
-          persisted = !error;
+            .eq("user_id", user.id)
+            .eq("revision", baseRevision)
+            .select("id")
+            .maybeSingle();
+          if (error) break;
+          if (!data) continue;
+          persisted = true;
+          revision = baseRevision + 1;
         }
       }
     }
@@ -126,6 +134,7 @@ export async function POST(request: Request) {
         messages: nextMessages,
         propertyReport,
         persisted,
+        revision,
       }),
     );
   } catch (error) {

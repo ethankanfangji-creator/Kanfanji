@@ -154,7 +154,7 @@ export async function pullCloudThreads(userId: string) {
       continue;
     }
     if (detail.status !== 404) {
-      patchLocalThread(thread.id, { cloud: { state: "failed" } });
+      patchLocalThread(thread.id, { cloud: { ...thread.cloud, state: "failed" } });
       continue;
     }
     if (thread.cloud?.revision || thread.cloud?.state === "synced") {
@@ -175,7 +175,7 @@ export async function pullCloudThreads(userId: string) {
     patchLocalThread(thread.id, {
       cloud: pushed.status >= 200 && pushed.status < 300
         ? { state: "synced", lastSyncedAt: new Date().toISOString(), revision: pushed.revision }
-        : { state: "failed" },
+        : { ...thread.cloud, state: "failed" },
     });
   }
 }

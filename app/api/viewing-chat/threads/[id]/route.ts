@@ -138,9 +138,19 @@ async function removeViewingObjects(
   const bucket = admin.storage.from("viewing-media");
   for (const folder of ["photos", "videos", "audios"]) {
     const prefix = `${userId}/${viewingId}/${folder}`;
-    const listed = await bucket.list(prefix);
-    const names = (listed.data ?? []).map((item) => item.name).filter(Boolean);
+    const names: string[] = [];
+    for (let offset = 0; ; offset += 100) {
+      const listed = await bucket.list(prefix, { limit: 100, offset });
+      if (listed.error) {
+        console.error("viewing_media_list_failed");
+        break;
+      }
+      const batch = listed.data ?? [];
+      names.push(...batch.map((item) => item.name).filter(Boolean));
+      if (batch.length < 100) break;
+    }
     if (names.length === 0) continue;
-    await bucket.remove(names.map((name) => `${prefix}/${name}`));
+    const removed = await bucket.remove(names.map((name) => `${prefix}/${name}`));
+    if (removed.error) console.error("viewing_media_delete_failed");
   }
 }

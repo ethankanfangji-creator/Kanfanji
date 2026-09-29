@@ -841,8 +841,6 @@ const zhHans: Messages = {
     emptyAnswer: "尚未填写",
     emptyChat: "确认地址后即可开始现场记录：文字、语音或照片",
     emptyChatCapture: "记下现场观察、气味、噪音，或拍下要确认的细节",
-    emptyChatCollect:
-      "（选用）贴上卖屋链接、房源文字，或上传截图／屋况照片",
     addressPlaceholder: "输入看房地址…",
     confirmAddress: "确认并开始",
     generateReport: "完成看房／生成报告",
@@ -948,8 +946,6 @@ const zhHans: Messages = {
       q_tw_docs: "记得跟中介要誊本与不动产说明书",
       q_tw_rain_revisit: "短名单要不要排雨天回访看漏水？",
     },
-    sourceGuidance:
-      "（选用）若要补强房源资料，可贴上卖屋链接、房源文字，或上传截图与文件。完成后仍可回到现场记录。",
     sourceExtracting: "正在抽取与分析房源资料…",
     sourceAdded: "已新增房源资料",
     sourceAddedOk: "已收到房源资料并完成初步抽取。你可继续补充，或回到现场记录。",
@@ -1053,8 +1049,6 @@ const zhHans: Messages = {
     reportRisks: "风险",
     reportPartial: "报告整理暂时失败，对话内容已保留。可重新产生。",
     guestLocalNoticeToday: "只存在这台装置，今天之内会删除，注册登录即可永久保存",
-    composerSupplementHint: "想补充什么？直接说即可，不一定要依问题顺序。",
-    composerCorrectHint: "要更正哪一项？例如「不是 1280，是 1250 万」。",
     reviewTitle: "确认看房资料",
     reviewHint: "完成代表你可以结束，不是所有栏位都要填满。请区分已确认、主观感受、推测与尚未确认。",
     reviewConfirm: "确认并生成报告",

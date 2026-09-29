@@ -319,6 +319,14 @@ export async function revokeOwnerShareLink(
   return toShareLinkRecord(next);
 }
 
+function nextChatShareExpiry(chatState: unknown, currentExpiresAt: string | null) {
+  if (!chatState) return currentExpiresAt;
+  const cap = Date.parse(chatShareExpiresAt());
+  const current = currentExpiresAt ? Date.parse(currentExpiresAt) : Number.NaN;
+  if (!Number.isFinite(current)) return new Date(cap).toISOString();
+  return new Date(Math.min(current, cap)).toISOString();
+}
+
 export async function rotateOwnerShareLink(
   supabase: SupabaseClient,
   userId: string,
@@ -353,7 +361,7 @@ export async function rotateOwnerShareLink(
     p_new_id: nextId,
     p_token_hash: hashShareToken(token),
     p_token_ciphertext: tokenCiphertext,
-    p_expires_at: viewing.chat_state ? chatShareExpiresAt() : null,
+    p_expires_at: nextChatShareExpiry(viewing.chat_state, row.expires_at),
     p_snapshot: publication.snapshot,
     p_manifest: publication.mediaManifest,
   });

@@ -805,7 +805,6 @@ export type Messages = {
     emptyAnswer: string;
     emptyChat: string;
     emptyChatCapture: string;
-    emptyChatCollect: string;
     addressPlaceholder: string;
     confirmAddress: string;
     generateReport: string;
@@ -918,7 +917,6 @@ export type Messages = {
       q_tw_docs: string;
       q_tw_rain_revisit: string;
     };
-    sourceGuidance: string;
     sourceExtracting: string;
     sourceAdded: string;
     sourceAddedOk: string;
@@ -1022,8 +1020,6 @@ export type Messages = {
     reportRisks: string;
     reportPartial: string;
     guestLocalNoticeToday: string;
-    composerSupplementHint: string;
-    composerCorrectHint: string;
     reviewTitle: string;
     reviewHint: string;
     reviewConfirm: string;

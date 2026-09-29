@@ -1,7 +1,8 @@
 import { claimLocalThreads } from "./claim-local-threads";
 import { applyChatStateToLocal } from "./chat-state";
-import { buildChatStatePayload, pushViewingThread } from "./cloud-push";
+import { buildChatStatePayload, pushViewingThread, syncedThreadIdsMissingFromCloud } from "./cloud-push";
 import {
+  deleteLocalThread,
   getLocalThread,
   listLocalThreads,
   patchLocalThread,
@@ -94,6 +95,10 @@ export async function pullCloudThreads(userId: string) {
   const list = (await listResponse.json()) as {
     threads?: Array<{ id: string; updatedAt: string }>;
   };
+  const remoteIds = new Set((list.threads ?? []).map((thread) => thread.id));
+  for (const id of syncedThreadIdsMissingFromCloud(listLocalThreads(), remoteIds, userId)) {
+    deleteLocalThread(id);
+  }
   for (const remote of list.threads ?? []) {
     const local = getLocalThread(remote.id);
     const localNewer = local && local.updatedAt >= remote.updatedAt && local.cloud?.state === "synced";
@@ -150,9 +155,14 @@ export async function pullCloudThreads(userId: string) {
       patchLocalThread(thread.id, { cloud: { state: "failed" } });
       continue;
     }
+    if (thread.cloud?.revision || thread.cloud?.state === "synced") {
+      deleteLocalThread(thread.id);
+      continue;
+    }
     const pushed = await pushViewingThread({
       threadId: thread.id,
       address: thread.address,
+      previouslySynced: false,
       messages: thread.messages,
       chatState: buildChatStatePayload(thread),
       clientUpdatedAt: new Date().toISOString(),

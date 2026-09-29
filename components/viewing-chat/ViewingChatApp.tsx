@@ -452,12 +452,18 @@ export function ViewingChatApp() {
           threadId,
           address: current.address,
           baseRevision: current.cloud?.revision,
+          previouslySynced: current.cloud?.state === "synced" || typeof current.cloud?.revision === "number",
           messages: current.messages,
           chatState: buildChatStatePayload(current),
           clientUpdatedAt: new Date().toISOString(),
           report: current.report,
           metadata: current.metadata,
         });
+        if (pushed.deleted) {
+          deleteLocalThread(threadId);
+          if (activeId === threadId) setActiveId(null);
+          return { status: 200 };
+        }
         if (pushed.status === 409 && pushed.remote?.messages) {
           const remoteMessages = pushed.remote.messages as ChatMessage[];
           saveLocalMessages(threadId, appendChatMessages(remoteMessages, current.messages));
@@ -640,9 +646,16 @@ export function ViewingChatApp() {
             propertyRecord: seedRecord,
           },
         }),
-      }).then((response) => {
+      }).then(async (response) => {
+        const body = (await response.json().catch(() => ({}))) as { revision?: number };
         const state = response.status === 402 ? "blocked_limit" : response.ok ? "synced" : "failed";
-        patchLocalThread(thread.id, { cloud: { state }, ownerUserId: userId });
+        patchLocalThread(thread.id, {
+          ownerUserId: userId,
+          cloud: {
+            state,
+            revision: typeof body.revision === "number" ? body.revision : response.ok ? 1 : undefined,
+          },
+        });
         refreshLocal();
       }).catch(() => {
         patchLocalThread(thread.id, { cloud: { state: "failed" }, ownerUserId: userId });

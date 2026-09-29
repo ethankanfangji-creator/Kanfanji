@@ -205,7 +205,16 @@ describe("ResendVerificationButton cooldown", () => {
     await act(async () => {
       screen.getByRole("button", { name: "沒收到信？重新寄送" }).click();
     });
-    await flushCooldown();
+    let stored = false;
+    for (let step = 0; step < 20 && !stored; step += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      stored = Object.keys(window.localStorage).some((key) =>
+        key.startsWith("kanfangji.authCooldown.signup."),
+      );
+    }
+    expect(stored).toBe(true);
     view.unmount();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(20_000);

@@ -21,6 +21,9 @@ export function parseChatMessages(value: unknown): ChatMessage[] {
     if (typeof message.type !== "string") {
       throw new RequestValidationError("INVALID_FIELD_TYPE", "messages");
     }
+    if (typeof message.timestamp !== "string" || Number.isNaN(Date.parse(message.timestamp))) {
+      throw new RequestValidationError("INVALID_FIELD_TYPE", "messages");
+    }
     return message as ChatMessage;
   });
 }

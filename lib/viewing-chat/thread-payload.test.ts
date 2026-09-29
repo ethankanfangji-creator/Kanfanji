@@ -7,6 +7,12 @@ describe("thread payload", () => {
     expect(() => parseChatMessages("garbage")).toThrow(RequestValidationError);
   });
 
+  it("rejects a message without a timestamp", () => {
+    expect(() =>
+      parseChatMessages([{ id: "m1", role: "user", type: "text", text: "hi" }]),
+    ).toThrow(RequestValidationError);
+  });
+
   it("rejects a numeric chat state", () => {
     expect(() => parseChatState(123)).toThrow(RequestValidationError);
   });

@@ -861,8 +861,6 @@ const en: Messages = {
       "After confirming an address, start on-site capture with notes, voice, or photos",
     emptyChatCapture:
       "Log observations, smells, noise, or photo anything you need to verify",
-    emptyChatCollect:
-      "(Optional) Paste a listing URL or text, or upload screenshots / condition photos",
     addressPlaceholder: "Enter viewing address…",
     confirmAddress: "Confirm & start",
     generateReport: "Finish viewing / Generate report",
@@ -969,8 +967,6 @@ const en: Messages = {
       q_tw_docs: "Ask agent for title extract + property disclosure form",
       q_tw_rain_revisit: "Schedule a rainy-day revisit for the shortlist?",
     },
-    sourceGuidance:
-      "(Optional) To enrich listing data, paste a URL or text, or upload screenshots and docs. You can return to on-site notes anytime.",
     sourceExtracting: "Extracting and analyzing listing data…",
     sourceAdded: "Listing data added",
     sourceAddedOk:
@@ -1077,8 +1073,6 @@ const en: Messages = {
     reportRisks: "Risks",
     reportPartial: "The report could not be organized. The conversation is kept. You can generate it again.",
     guestLocalNoticeToday: "Stored only on this device. It will be deleted today. Sign in to keep it.",
-    composerSupplementHint: "What else should we record? Any order is fine.",
-    composerCorrectHint: "What should we correct? e.g. “not 1280 — 1250.”",
     reviewTitle: "Review property facts",
     reviewHint: "Done means you are ready to stop — not that every field is filled. Separate confirmed facts, impressions, inferences, and gaps.",
     reviewConfirm: "Confirm & generate report",

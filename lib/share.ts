@@ -160,6 +160,25 @@ export async function resolvePublicShare(
     }
 
     const published = row.snapshot;
+    if (published.version === 2) {
+      void touchShareResolved(admin, row).catch(() => undefined);
+      return {
+        version: 1,
+        capability: "read",
+        status: "active",
+        title: published.title,
+        address: published.address,
+        updatedAt: published.reportGeneratedAt,
+        decisionSummary: null,
+        photoUrls: [],
+        chatReport: published,
+        meta: {
+          passwordProtected: Boolean(row.shareLink.password_hash),
+          expiresAt: row.shareLink.expires_at,
+          snapshotUpdatedAt: published.publishedAt,
+        },
+      };
+    }
     let decision = published.decisionSummary;
     if (decision) {
       decision = await hydratePublishedDecisionSummary(

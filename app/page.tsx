@@ -1,5 +1,10 @@
+import { Suspense } from "react";
 import { ViewingChatApp } from "@/components/viewing-chat/ViewingChatApp";
 
 export default function Home() {
-  return <ViewingChatApp />;
+  return (
+    <Suspense fallback={null}>
+      <ViewingChatApp />
+    </Suspense>
+  );
 }

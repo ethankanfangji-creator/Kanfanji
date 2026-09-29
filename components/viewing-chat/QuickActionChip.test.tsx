@@ -3,60 +3,31 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CollectionQuickActions } from "./CollectionQuickActions";
-import { ReportQuickActions } from "./ReportQuickActions";
+import { QuickActionChip } from "./QuickActionChip";
 
 afterEach(() => cleanup());
 
-describe("quick-action chips", () => {
-  it("keeps report action clicks and uses outline chips (not filled blue)", async () => {
+describe("QuickActionChip", () => {
+  it("runs the click and stays an outline chip", async () => {
     const user = userEvent.setup();
-    const onAction = vi.fn();
-    const { container } = render(
-      <ReportQuickActions
-        actions={[
-          { id: "supplement", label: "Add info" },
-          { id: "finish", label: "Finish" },
-        ]}
-        onAction={onAction}
-      />,
-    );
-
-    const row = container.firstElementChild as HTMLElement;
-    expect(row.className).toMatch(/overflow-x-auto/);
-    expect(row.className).not.toMatch(/flex-wrap/);
-
-    const finish = screen.getByRole("button", { name: "Finish" });
-    expect(finish.className).toMatch(/bg-white/);
-    expect(finish.className).not.toMatch(/bg-\[#DBEAFE\]/);
-
-    await user.click(finish);
-    expect(onAction).toHaveBeenCalledWith("finish");
+    const onClick = vi.fn();
+    render(<QuickActionChip onClick={onClick}>Skip</QuickActionChip>);
+    const button = screen.getByRole("button", { name: "Skip" });
+    expect(button.className).toMatch(/bg-white/);
+    expect(button.className).not.toMatch(/bg-\[#DBEAFE\]/);
+    await user.click(button);
+    expect(onClick).toHaveBeenCalledOnce();
   });
 
-  it("keeps collection action clicks on the shared chip", async () => {
+  it("does not fire when disabled", async () => {
     const user = userEvent.setup();
-    const onPasteUrl = vi.fn();
+    const onClick = vi.fn();
     render(
-      <CollectionQuickActions
-        labels={{
-          pasteUrl: "Paste URL",
-          uploadPhoto: "Photos",
-          uploadScreenshot: "Screenshot",
-          uploadHoaDoc: "HOA",
-          pasteText: "Paste text",
-          skip: "Skip",
-        }}
-        onPasteUrl={onPasteUrl}
-        onUploadPhoto={vi.fn()}
-        onUploadScreenshot={vi.fn()}
-        onUploadHoaDoc={vi.fn()}
-        onPasteText={vi.fn()}
-        onSkip={vi.fn()}
-      />,
+      <QuickActionChip disabled onClick={onClick}>
+        Skip
+      </QuickActionChip>,
     );
-
-    await user.click(screen.getByRole("button", { name: "Paste URL" }));
-    expect(onPasteUrl).toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Skip" }));
+    expect(onClick).not.toHaveBeenCalled();
   });
 });

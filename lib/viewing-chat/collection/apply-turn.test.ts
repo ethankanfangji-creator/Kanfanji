@@ -35,10 +35,8 @@ describe("applyCollectionTurn", () => {
       evidence: seeded.evidence,
       skippedFields: seeded.skippedFields,
     });
-    expect(wrap.intent).toBe("request_summary");
-    expect(wrap.record.mode).toBe("confirming");
-    expect(wrap.nextQuestions).toEqual([]);
-    expect(wrap.replyText).toMatch(/整理|報告/);
+    expect(wrap.intent).not.toBe("request_summary");
+    expect(wrap.record.mode).not.toBe("confirming");
   });
 
   it("records mid-turn noise without requiring it to be the active question", () => {

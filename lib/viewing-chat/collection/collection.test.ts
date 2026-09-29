@@ -98,7 +98,7 @@ describe("extractPropertyFacts", () => {
       text: "整理一下",
       messageId: "msg_wrap",
     });
-    expect(result.intent).toBe("request_summary");
+    expect(result.intent).not.toBe("request_summary");
   });
 
   it("marks area unknown when user skips ping", () => {
@@ -237,10 +237,7 @@ describe("getNextQuestions", () => {
     expect(qs.length).toBeLessThanOrEqual(3);
   });
 
-  it("returns empty array when user asks to wrap up (confirming mode)", () => {
-    const extracted = extractPropertyFacts({ text: "整理一下" });
-    expect(extracted.intent).toBe("request_summary");
-
+  it("returns empty array when the record is already confirming", () => {
     const record = createEmptyPropertyRecord({ mode: "confirming" });
     const qs = getNextQuestions(record, [], []);
     expect(qs).toEqual([]);
@@ -337,7 +334,7 @@ describe("pipeline integration", () => {
     expect(record.fields.noise?.rawText).toMatch(/吵/);
 
     const wrap = extractPropertyFacts({ text: "先這樣，整理一下" });
-    expect(wrap.intent).toBe("request_summary");
+    expect(wrap.intent).not.toBe("request_summary");
     record = { ...record, mode: "confirming" };
     qs = getNextQuestions(record, evidence, skipArea.skippedFieldIds);
     expect(qs).toEqual([]);

@@ -1,0 +1,14 @@
+import { chatShareExpiresAt } from "./share-rate-limit.server";
+
+export function assertChatShareExpiry(
+  viewing: { chat_state?: unknown },
+  patch: { expiresAt?: string | null },
+  now = new Date(),
+) {
+  if (!viewing.chat_state) return;
+  if (!Object.hasOwn(patch, "expiresAt")) return;
+  if (patch.expiresAt == null) throw new Error("SHARE_EXPIRES_INVALID");
+  const requested = Date.parse(patch.expiresAt);
+  const cap = Date.parse(chatShareExpiresAt(now));
+  if (!Number.isFinite(requested) || requested > cap) throw new Error("SHARE_EXPIRES_INVALID");
+}

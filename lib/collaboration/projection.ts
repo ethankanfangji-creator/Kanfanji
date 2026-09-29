@@ -68,6 +68,7 @@ const OWNER_KEYS = [
   "share_token",
   "client_updated_at",
   "is_pro",
+  "chat_state",
 ] as const;
 
 const NON_OWNER_PROPERTY_KEYS = [

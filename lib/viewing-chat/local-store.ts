@@ -5,6 +5,7 @@
 import type { PropertyIntel } from "@/lib/property-intel/types";
 import type { PropertyReport } from "@/lib/property-facts/report-types";
 import type { ChatMessage, ChatReportSnapshot, ViewingChatThread } from "./types";
+import { isExpiredGuestThread } from "./guest-retention";
 
 const STORAGE_KEY = "kanfangji.viewingChat.threads.v1";
 
@@ -57,7 +58,29 @@ function readAll(): ViewingChatThread[] {
 
 function writeAll(threads: ViewingChatThread[]) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(threads.slice(0, 40)));
+  const payload = JSON.stringify(threads);
+  try {
+    window.localStorage.setItem(STORAGE_KEY, payload);
+  } catch (error) {
+    const name = error instanceof DOMException ? error.name : "";
+    if (name === "QuotaExceededError" || name === "NS_ERROR_DOM_QUOTA_REACHED") {
+      const kept = threads.filter((thread) => !isExpiredGuestThread(thread));
+      try {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(kept));
+        return;
+      } catch {
+        throw new LocalStoreFullError();
+      }
+    }
+    throw error;
+  }
+}
+
+export class LocalStoreFullError extends Error {
+  constructor() {
+    super("local_store_full");
+    this.name = "LocalStoreFullError";
+  }
 }
 
 export function listLocalThreads(): ViewingChatThread[] {

@@ -1,75 +1,65 @@
 import { describe, expect, it } from "vitest";
-import { buildSharePublication } from "./publication";
+import { buildChatReportPublication, ChatReportShareSnapshotSchema } from "./publication";
 
-const viewing = {
-  id: "view",
-  user_id: "owner",
-  address: "Mutable address",
-  pros: ["legacy pro"],
-  risks: ["legacy risk"],
-  photo_urls: ["owner/view/photos/photo-1.jpg"],
-  updated_at: "2026-09-15T12:00:00.000Z",
-  property: {
-    decisionSummary: {
-      version: 1 as const,
-      address: "Published address",
-      viewingAt: "",
-      unitLabel: "8A",
-      priceLabel: "$1",
-      layoutLabel: "2B",
-      listingUrl: "",
-      setupNotes: "",
-      overallRating: 4,
-      pros: [{ id: "p1", text: "Selected", selected: true }],
-      risks: [{ id: "r1", text: "Hidden", selected: false }],
-      facts: [],
-      followUps: [],
-      actionItems: [],
-      photos: [
-        {
-          id: "photo-1",
-          url: "blob:local-preview",
-          remotePath: "owner/view/photos/photo-1.jpg",
-          tag: "客廳",
-          note: "",
-          selected: true,
+describe("buildChatReportPublication", () => {
+  it("omits chat messages and viewing ids", () => {
+    const snapshot = buildChatReportPublication({
+      id: "viewing-secret-id",
+      user_id: "user-secret-id",
+      address: "1 Main St",
+      updated_at: "2026-09-28T00:00:00.000Z",
+      report: {
+        summary: "Bright living room",
+        pros: ["light"],
+        risks: ["noise"],
+        checklist: [],
+        generatedAt: "2026-09-28T00:00:00.000Z",
+      },
+      chat_state: {
+        propertyRecord: {
+          fields: {
+            price: { value: "1250 萬", status: "confirmed" },
+            odor: { value: "unknown note", status: "unknown" },
+          },
         },
-      ],
-      disclaimer: "Disclaimer",
-      generatedAt: "2026-09-15T12:00:00.000Z",
-    },
-  },
-};
-
-describe("share publication snapshot", () => {
-  it("freezes only selected allowlisted fields and stable media paths", () => {
-    const result = buildSharePublication(viewing, "2026-09-15T13:00:00.000Z");
-    expect(result.snapshot.address).toBe("Published address");
-    expect(result.snapshot.decisionSummary?.pros).toHaveLength(1);
-    expect(result.snapshot.decisionSummary?.risks).toEqual([]);
-    expect(result.snapshot.decisionSummary?.photos[0]?.url).toBe("");
-    expect(result.mediaManifest).toEqual([
-      { id: "photo-1", path: "owner/view/photos/photo-1.jpg" },
-    ]);
-    expect(JSON.stringify(result.snapshot)).not.toContain("blob:");
-    expect(JSON.stringify(result.snapshot)).not.toContain("remotePath");
+      },
+    }).snapshot;
+    const encoded = JSON.stringify(snapshot);
+    expect(encoded).not.toContain("價格 999 萬");
+    expect(encoded).not.toContain("viewing-secret-id");
+    expect(encoded).not.toContain("user-secret-id");
+    expect(snapshot.fields.map((field) => field.fieldId)).toEqual(["price"]);
   });
 
-  it("refuses selected media that has not completed upload", () => {
-    const localOnly = structuredClone(viewing);
-    localOnly.property.decisionSummary.photos[0].remotePath = null as unknown as string;
-    expect(() => buildSharePublication(localOnly)).toThrow("SHARE_MEDIA_NOT_READY");
+  it("rejects a missing report", () => {
+    expect(() =>
+      buildChatReportPublication({
+        id: "v",
+        user_id: "u",
+        address: "1 Main",
+        report: null,
+        chat_state: {},
+        updated_at: "2026-09-28T00:00:00.000Z",
+      }),
+    ).toThrow(/REPORT_NOT_READY/);
   });
 
-  it("refuses cross-owner, cross-viewing, and unassociated object paths", () => {
-    for (const path of [
-      "other/view/photos/photo-1.jpg",
-      "owner/other-view/photos/photo-1.jpg",
-      "owner/view/photos/not-associated.jpg",
-    ]) {
-      const forged = structuredClone(viewing);
-      forged.property.decisionSummary.photos[0].remotePath = path;
-      expect(() => buildSharePublication(forged)).toThrow("SHARE_MEDIA_NOT_READY");
-    }
+  it("rejects unknown snapshot keys", () => {
+    expect(
+      ChatReportShareSnapshotSchema.safeParse({
+        version: 2,
+        kind: "chat_report",
+        title: "看房報告",
+        address: "1 Main",
+        publishedAt: "2026-09-28T00:00:00.000Z",
+        reportGeneratedAt: "2026-09-28T00:00:00.000Z",
+        summary: null,
+        pros: [],
+        risks: [],
+        checklist: [],
+        fields: [],
+        leaked: true,
+      }).success,
+    ).toBe(false);
   });
 });

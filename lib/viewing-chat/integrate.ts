@@ -123,6 +123,12 @@ export async function integrateChatTurn(input: {
     note?: string;
   }>;
   replyTo?: ChatMessage["replyTo"];
+  replyContext?: {
+    targetMessageId: string;
+    targetRole: "user" | "ai";
+    quotedText: string;
+    targetFieldIds: PropertyFieldId[];
+  };
   agendaActiveId?: string | null;
   agendaSkippedIds?: string[];
   agendaMarket?: "US" | "CA" | "TW" | "OTHER" | null;
@@ -200,10 +206,13 @@ export async function integrateChatTurn(input: {
       evidence: priorEvidence,
       address: input.address,
       locale: input.locale,
-      focusFieldIds: input.collectionFocusFieldIds ?? [],
+      focusFieldIds: input.replyContext?.targetFieldIds.length
+        ? input.replyContext.targetFieldIds
+        : (input.collectionFocusFieldIds ?? []),
       pendingConfirm: input.pendingConfirm ?? null,
       userTurnCount,
     },
+    replyContext: input.replyContext,
     message: {
       id: userMessage.id,
       text: input.userText,
@@ -336,6 +345,10 @@ export async function buildChatReport(input: {
   messages: ChatMessage[];
   /** Structured property report — LLM may only cite evidence values from this. */
   propertyReport?: import("@/lib/property-facts/report-types").PropertyReport | null;
+  propertyRecord?: {
+    fields?: Record<string, { value?: string | null; status?: string }>;
+  } | null;
+  propertyData?: unknown;
   signal?: AbortSignal;
 }): Promise<{ report: ChatReportSnapshot; aiMessage: ChatMessage; extractionStatus: "ok" | "extraction_failed"; rawAiResponse?: string }> {
   const openai = new OpenAI({ apiKey: input.apiKey });
@@ -383,6 +396,19 @@ export async function buildChatReport(input: {
       })()
     : "(no structured property evidence — use chat only; do not invent listing facts)";
 
+  const confirmedLines = Object.entries(input.propertyRecord?.fields ?? {})
+    .filter(([, field]) =>
+      field && ["confirmed", "corrected", "subjective"].includes(String(field.status)),
+    )
+    .map(([id, field]) => `- ${id}: ${String(field?.value ?? "").slice(0, 300)} (${field?.status})`)
+    .join("\n");
+  const confirmedBlock = confirmedLines
+    ? `USER_CONFIRMED_FIELDS (核對過的值；與對話衝突時以它為準。unknown 欄位寫成未確認):\n${confirmedLines}`
+    : "USER_CONFIRMED_FIELDS: (none)";
+  const listingBlock = input.propertyData
+    ? `LISTING_DATA (房源方提供、未經查證):\n${JSON.stringify(input.propertyData).slice(0, 8000)}`
+    : "";
+
   const completion = await openai.chat.completions.create(
     {
       model: "gpt-4o-mini",
@@ -405,6 +431,8 @@ Create a concise open-house report from chat + PROPERTY_EVIDENCE only.
           content: `Address: ${input.address}
 PROPERTY_EVIDENCE:
 ${propertyFactsBlock}
+${confirmedBlock}
+${listingBlock}
 Bank memory:
 ${bank.map((b) => `- ${b.question}: ${b.answer || "unknown"}`).join("\n")}
 Chat:

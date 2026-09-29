@@ -36,7 +36,7 @@ export function viewingRecorderSystemPrompt(
 9. 回覆先摘要已理解內容，再提出最多三個最重要的可選追問。
 10. 不要要求使用者按照固定順序回答。
 11. ${languageLine(locale)}
-12. 若使用者表示完成，進入 review，不要自行聲稱所有資料完整。`;
+12. 使用者按「完成」才進入確認；對話裡出現「完成」二字不要當成結束。不要自行聲稱所有資料完整。`;
 }
 
 /** Shorter reminder for polish-only calls (facts already extracted). */
@@ -50,7 +50,7 @@ export function viewingRecorderPolishRules(
 - 不可責備使用者沒按順序回答；可跳過、可換話題。
 - 先確認已理解內容，再保留最多三個可選追問。
 - ${languageLine(locale)}
-- 若進入整理／完成，不要聲稱資料已全部完整。`;
+- 不要把對話裡的「完成」當成結束訊號。不要聲稱資料已全部完整。`;
 }
 
 export function viewingRecorderReportRules(

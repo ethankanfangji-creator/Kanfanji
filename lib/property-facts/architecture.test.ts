@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDefaultPipelineDeps } from "./services/defaults";
 import { MemoryEvidenceStore } from "./services/evidence-store";
 import { assemblePropertyFacts } from "./orchestrator";
@@ -56,6 +56,13 @@ describe("EvidenceStore memory", () => {
 });
 
 describe("assemblePropertyFacts with fake geocoder", () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ rows: [] }), { status: 200 })),
+    );
+  });
+
   it("still returns a card with data gaps when geocode is stubbed", async () => {
     const fakeGeo: GeocodingProvider = {
       async geocode(query): Promise<GeocodeResult> {

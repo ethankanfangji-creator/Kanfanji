@@ -24,7 +24,19 @@ export async function POST(_req: Request, ctx: Ctx) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "重新產生連結失敗";
-    const status = message === "LINK_NOT_FOUND" ? 404 : 500;
-    return NextResponse.json({ error: message }, { status });
+    const status =
+      message === "LINK_NOT_FOUND"
+        ? 404
+        : message === "SHARE_RATE_LIMITED"
+          ? 429
+          : message === "SHARE_UNAVAILABLE"
+            ? 503
+            : message === "REPORT_NOT_READY"
+              ? 409
+              : 500;
+    return NextResponse.json(
+      { error: message, ...(status === 429 ? { code: "rate_limited" } : {}) },
+      { status },
+    );
   }
 }

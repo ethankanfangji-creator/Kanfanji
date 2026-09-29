@@ -23,14 +23,6 @@ export function classifyTurnIntent(input: {
   const skippedFieldIds: PropertyFieldId[] = [];
 
   if (
-    /整理一下|先這樣|完成|產生報告|出報告|給我摘要|summarize|wrap up|that'?s enough|finish(ed)?\b|先到這/i.test(
-      text,
-    )
-  ) {
-    return { intent: "finish", skippedFieldIds };
-  }
-
-  if (
     /(?:坪數|幾坪|面積|sq\s*ft).{0,12}(?:不知道|不清楚|跳過|之後再補)|(?:不知道|不清楚|跳過|之後再補).{0,12}(?:坪數|幾坪|面積)|skip(?:ping)?.{0,12}(?:area|ping)/i.test(
       text,
     )
@@ -104,7 +96,7 @@ export function classifyTurnIntent(input: {
       /\d+\s*萬|\d+\s*坪|\d+房|優點|缺點|噪音|吵|採光|地址|格局|開價|售價/i.test(
         text,
       ) ||
-      text.length >= 8
+      text.length >= 4
     ) {
       return { intent: "supplement", skippedFieldIds };
     }

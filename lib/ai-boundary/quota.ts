@@ -26,6 +26,10 @@ function envLimit(name: string, fallback: number): number {
   return Number.isInteger(value) ? Math.max(1, Math.min(value, 10_000)) : fallback;
 }
 
+export function intelKeyFingerprint(raw: string): string {
+  return fingerprint(raw);
+}
+
 function fingerprint(value: string): string {
   const secret = process.env.AI_QUOTA_HASH_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!secret) throw new Error("quota secret missing");

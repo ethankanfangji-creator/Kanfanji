@@ -155,14 +155,3 @@ export function createInitialStageContext(): StageContext {
     reportReady: false,
   };
 }
-
-/** Collection-phase stages where we should not pretend a full report exists. */
-export function isCollectingStage(stage: PropertyChatStage): boolean {
-  return (
-    stage === "address_received" ||
-    stage === "awaiting_property_source" ||
-    stage === "collecting_sources" ||
-    stage === "extracting_data" ||
-    stage === "awaiting_user_confirmation"
-  );
-}

@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { toStoragePath } from "@/lib/media-paths";
 import {
   isDecisionSummarySnapshot,
@@ -103,9 +104,110 @@ export function buildSharePublication(
   };
 }
 
-export function isPublishedShareSnapshot(value: unknown): value is PublishedShareSnapshot {
+function scrubShareText(value: string): string {
+  return value.replace(/[\u0000-\u001F]/g, "").slice(0, 300);
+}
+
+export const ChatReportShareSnapshotSchema = z
+  .object({
+    version: z.literal(2),
+    kind: z.literal("chat_report"),
+    title: z.string(),
+    address: z.string(),
+    publishedAt: z.string(),
+    reportGeneratedAt: z.string(),
+    summary: z.string().nullable(),
+    pros: z.array(z.string()).max(3),
+    risks: z.array(z.string()).max(3),
+    checklist: z
+      .array(
+        z.object({
+          question: z.string(),
+          answer: z.string(),
+          status: z.enum(["ok", "risk", "unknown"]),
+        }),
+      )
+      .max(20),
+    fields: z.array(
+      z.object({
+        fieldId: z.string(),
+        value: z.string(),
+        status: z.enum(["confirmed", "subjective", "inferred", "corrected"]),
+      }),
+    ),
+  })
+  .strict();
+
+export type ChatReportShareSnapshot = z.infer<typeof ChatReportShareSnapshotSchema>;
+
+export class ReportNotReadyError extends Error {
+  constructor() {
+    super("REPORT_NOT_READY");
+    this.name = "ReportNotReadyError";
+  }
+}
+
+export function buildChatReportPublication(viewing: {
+  id: string;
+  user_id: string;
+  address: string;
+  report: unknown;
+  chat_state: unknown;
+  updated_at: string;
+}): { snapshot: ChatReportShareSnapshot; mediaManifest: [] } {
+  if (!viewing.report || typeof viewing.report !== "object") throw new ReportNotReadyError();
+  const report = viewing.report as {
+    summary?: string;
+    pros?: string[];
+    risks?: string[];
+    checklist?: Array<{ question?: string; answer?: string; status?: string }>;
+    generatedAt?: string;
+  };
+  const fieldsRecord = (
+    viewing.chat_state as {
+      propertyRecord?: { fields?: Record<string, { value?: unknown; status?: string }> };
+    } | null
+  )?.propertyRecord?.fields;
+  const fields = Object.entries(fieldsRecord ?? {})
+    .filter(([, field]) => {
+      const status = String(field?.status ?? "");
+      return field?.value != null && status !== "unknown" && status !== "skipped";
+    })
+    .map(([fieldId, field]) => ({
+      fieldId,
+      value: scrubShareText(String(field.value)),
+      status: field.status as "confirmed" | "subjective" | "inferred" | "corrected",
+    }));
+  const snapshot = ChatReportShareSnapshotSchema.parse({
+    version: 2,
+    kind: "chat_report",
+    title: "看房報告",
+    address: scrubShareText(viewing.address),
+    publishedAt: new Date().toISOString(),
+    reportGeneratedAt: report.generatedAt ?? viewing.updated_at,
+    summary: report.summary ? scrubShareText(report.summary) : null,
+    pros: (report.pros ?? []).slice(0, 3).map(scrubShareText),
+    risks: (report.risks ?? []).slice(0, 3).map(scrubShareText),
+    checklist: (report.checklist ?? []).slice(0, 20).map((item) => ({
+      question: scrubShareText(item.question ?? ""),
+      answer: scrubShareText(item.answer ?? ""),
+      status: item.status === "ok" || item.status === "risk" ? item.status : "unknown",
+    })),
+    fields,
+  });
+  const encoded = JSON.stringify(snapshot);
+  if (encoded.includes(viewing.id) || encoded.includes(viewing.user_id)) {
+    throw new Error("SHARE_SNAPSHOT_LEAK");
+  }
+  return { snapshot, mediaManifest: [] };
+}
+
+export function isPublishedShareSnapshot(
+  value: unknown,
+): value is PublishedShareSnapshot | ChatReportShareSnapshot {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const row = value as Record<string, unknown>;
+  if (row.version === 2) return ChatReportShareSnapshotSchema.safeParse(value).success;
   return (
     row.version === 1 &&
     typeof row.title === "string" &&

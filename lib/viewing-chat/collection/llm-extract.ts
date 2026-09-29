@@ -54,6 +54,7 @@ export async function extractPropertyFactsWithLlm(input: {
   messageId: string | null;
   locale?: string;
   signal?: AbortSignal;
+  replyNote?: string;
 }): Promise<LlmExtractResult> {
   if (!input.apiKey || !input.text.trim() || input.text.trim().length < 4) {
     return { fields: [] };
@@ -77,7 +78,8 @@ export async function extractPropertyFactsWithLlm(input: {
 - fieldId 限：address,price,area,layout,floor,noise,transit,pros,cons,odor,light,water_damage,electrical,plumbing,hvac,parking,amenities,year_built
 - 只使用使用者原文有根據的資訊；模糊保留原文並標 inferred 或 unknown
 - 不可自行補精確數字；不可把推測當 confirmed
-- 沒有可抽欄位時回 { "fields": [] }`,
+- 沒有可抽欄位時回 { "fields": [] }
+${input.replyNote ?? ""}`,
           },
           {
             role: "user",

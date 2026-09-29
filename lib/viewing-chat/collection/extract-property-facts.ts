@@ -172,14 +172,6 @@ function classifyIntent(
   if (!t) return "other";
 
   if (
-    /整理一下|先這樣|完成|產生報告|出報告|給我摘要|summarize|wrap up|that'?s enough|finish(ed)?\b/i.test(
-      t,
-    )
-  ) {
-    return "request_summary";
-  }
-
-  if (
     /不知道|不清楚|之後再補|暫時跳過|跳過|略過|先跳過|skip(?:\s+for\s+now)?|don'?t know|not sure|later/i.test(
       t,
     ) ||

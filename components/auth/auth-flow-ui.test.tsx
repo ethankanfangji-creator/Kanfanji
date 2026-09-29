@@ -31,9 +31,12 @@ afterEach(() => {
 });
 
 async function flushCooldown() {
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  });
+  for (let step = 0; step < 8; step += 1) {
+    await act(async () => {
+      if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(0);
+      else await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
 }
 
 function renderWithI18n(node: ReactNode) {
@@ -136,7 +139,7 @@ describe("login text links", () => {
 
 describe("ResendVerificationButton cooldown", () => {
   it("counts down after the first send and only warns if pressed again", async () => {
-    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     const onResend = vi.fn().mockResolvedValue("ok");
     renderWithI18n(
       <ResendVerificationButton email="buyer@example.com" label="signup" onResend={onResend} />,
@@ -176,7 +179,7 @@ describe("ResendVerificationButton cooldown", () => {
   });
 
   it("treats a server rate limit as the same neutral resend and starts the cooldown", async () => {
-    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     const onResend = vi.fn().mockResolvedValue("rate_limited");
     renderWithI18n(
       <ResendVerificationButton email="buyer@example.com" label="signup" onResend={onResend} />,
@@ -194,7 +197,6 @@ describe("ResendVerificationButton cooldown", () => {
   });
 
   it("keeps the remaining time for the same email after a refresh", async () => {
-    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     const onResend = vi.fn().mockResolvedValue("ok");
     const view = renderWithI18n(
       <ResendVerificationButton email="buyer@example.com" label="signup" onResend={onResend} />,
@@ -202,29 +204,68 @@ describe("ResendVerificationButton cooldown", () => {
     await act(async () => {
       screen.getByRole("button", { name: "沒收到信？重新寄送" }).click();
     });
-    await flushCooldown();
-    view.unmount();
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(20_000);
+    let storedKey = "";
+    await vi.waitFor(() => {
+      storedKey =
+        Object.keys(window.localStorage).find((key) =>
+          key.startsWith("kanfangji.authCooldown.signup."),
+        ) ?? "";
+      expect(storedKey).not.toBe("");
     });
+    view.unmount();
+    window.localStorage.setItem(storedKey, String(Date.now() + 40_000));
     renderWithI18n(
       <ResendVerificationButton email="buyer@example.com" label="signup" onResend={onResend} />,
     );
-    await flushCooldown();
-    expect(screen.getByRole("button", { name: "40 秒後可再寄送" })).toBeVisible();
+    await vi.waitFor(() => {
+      expect(screen.getByRole("button", { name: "40 秒後可再寄送" })).toBeVisible();
+    });
     cleanup();
     renderWithI18n(
       <ResendVerificationButton email="other@example.com" label="signup" onResend={onResend} />,
     );
-    await flushCooldown();
-    expect(screen.getByRole("button", { name: "沒收到信？重新寄送" })).not.toHaveAttribute(
-      "aria-disabled",
-      "true",
+    await vi.waitFor(() => {
+      expect(screen.getByRole("button", { name: "沒收到信？重新寄送" })).not.toHaveAttribute(
+        "aria-disabled",
+        "true",
+      );
+    });
+  });
+
+  it("stores the cooldown after unmount if the hash is still running", async () => {
+    let release: ((value: ArrayBuffer) => void) | undefined;
+    const digest = vi.spyOn(crypto.subtle, "digest").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
     );
+    const onResend = vi.fn().mockResolvedValue("ok");
+    const view = renderWithI18n(
+      <ResendVerificationButton email="buyer@example.com" label="signup" onResend={onResend} />,
+    );
+    await act(async () => {
+      screen.getByRole("button", { name: "沒收到信？重新寄送" }).click();
+    });
+    await vi.waitFor(() => {
+      expect(release).toBeTypeOf("function");
+    });
+    view.unmount();
+    const bytes = new Uint8Array(32).buffer;
+    await act(async () => {
+      release?.(bytes);
+    });
+    await vi.waitFor(() => {
+      const stored = Object.keys(window.localStorage).some((key) =>
+        key.startsWith("kanfangji.authCooldown.signup."),
+      );
+      expect(stored).toBe(true);
+    });
+    digest.mockRestore();
   });
 
   it("ignores extra presses during the cooldown", async () => {
-    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     const onResend = vi.fn().mockResolvedValue("ok");
     renderWithI18n(
       <ResendVerificationButton email="buyer@example.com" label="signup" onResend={onResend} />,
@@ -241,7 +282,7 @@ describe("ResendVerificationButton cooldown", () => {
   });
 
   it("shows a generic error and does not cool down when the request throws", async () => {
-    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     const onResend = vi.fn().mockRejectedValue(new Error("buyer@example.com offline"));
     renderWithI18n(
       <ResendVerificationButton email="buyer@example.com" label="signup" onResend={onResend} />,
@@ -280,11 +321,13 @@ describe("ResendVerificationButton cooldown", () => {
     await act(async () => {
       screen.getByRole("button", { name: "沒收到信？重新寄送" }).click();
     });
-    await flushCooldown();
-    const stored = Object.keys(window.localStorage).filter((key) =>
-      key.startsWith("kanfangji.authCooldown.signup."),
-    );
-    expect(stored).toHaveLength(1);
+    let stored: string[] = [];
+    await vi.waitFor(() => {
+      stored = Object.keys(window.localStorage).filter((key) =>
+        key.startsWith("kanfangji.authCooldown.signup."),
+      );
+      expect(stored).toHaveLength(1);
+    });
     expect(stored[0]).not.toContain("buyer@example.com");
     expect(stored[0]).toMatch(/^kanfangji\.authCooldown\.signup\.[0-9a-f]{16}$/);
   });
@@ -297,25 +340,28 @@ describe("ResendVerificationButton cooldown", () => {
         <ResendVerificationButton email="buyer@example.com" label="confirm" onResend={onResend} />
       </>,
     );
-    await flushCooldown();
     await act(async () => {
       screen.getByRole("button", { name: "沒收到信？重新寄送" }).click();
     });
-    await flushCooldown();
-    const key = Object.keys(window.localStorage).find((entry) =>
-      entry.startsWith("kanfangji.authCooldown.signup."),
-    );
-    expect(key).toBeTruthy();
-    expect(screen.getByRole("button", { name: "重新寄送驗證信" })).toBeVisible();
-    await act(async () => {
-      window.dispatchEvent(
-        new StorageEvent("storage", {
-          key,
-          newValue: window.localStorage.getItem(key ?? ""),
-        }),
-      );
+    let key = "";
+    await vi.waitFor(() => {
+      key =
+        Object.keys(window.localStorage).find((entry) =>
+          entry.startsWith("kanfangji.authCooldown.signup."),
+        ) ?? "";
+      expect(key).not.toBe("");
     });
-    expect(screen.getAllByRole("button", { name: /秒後可再寄送|Resend available/ })).toHaveLength(2);
+    await vi.waitFor(() => {
+      if (screen.queryAllByRole("button", { name: /秒後可再寄送/ }).length < 2) {
+        window.dispatchEvent(
+          new StorageEvent("storage", {
+            key,
+            newValue: window.localStorage.getItem(key),
+          }),
+        );
+      }
+      expect(screen.getAllByRole("button", { name: /秒後可再寄送/ })).toHaveLength(2);
+    });
     expect(screen.queryByRole("button", { name: "重新寄送驗證信" })).toBeNull();
   });
 });

@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, vi } from "vitest";
 import { deriveJurisdiction, jurisdictionKey } from "@/lib/property-facts/jurisdiction";
 import type { GeocodingProvider } from "@/lib/property-facts/interfaces";
 import type { GeocodeResult } from "@/lib/property-facts/geocode";
@@ -46,6 +46,7 @@ function fakeUsGeocoder(): GeocodingProvider {
 describe("createPropertyReportApi + persist", () => {
   beforeEach(() => {
     resetPropertyReportMemoryStore();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200 })));
   });
 
   it("persists reportId and serves GET-equivalent by id + evidence", async () => {

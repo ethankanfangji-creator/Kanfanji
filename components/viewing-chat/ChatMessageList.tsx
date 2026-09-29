@@ -12,8 +12,32 @@ import {
 } from "@/lib/viewing-chat/types";
 import { resolveAgendaId } from "@/lib/viewing-chat/agenda-catalog";
 import { agendaIdToFieldId } from "@/lib/viewing-chat/collection/field-map";
+import { ChatReportBubble } from "@/components/viewing-chat/ChatReportBubble";
+import { useChatMediaUrl } from "@/components/viewing-chat/useChatMediaUrl";
 import { InitialReportCard } from "@/components/viewing-chat/InitialReportCard";
+import type { ChatMediaRef } from "@/lib/viewing-chat/types";
 
+function MediaRefView({ item, missing }: { item: ChatMediaRef; missing: string }) {
+  const media = useChatMediaUrl(item);
+  if (media.status === "loading") {
+    return <div className="h-28 w-28 animate-pulse rounded-xl bg-black/5" role="status" aria-busy="true" />;
+  }
+  const url = media.url;
+  if (!url) return <p className="text-[12px] opacity-70">{missing}</p>;
+  if (item.kind === "image") {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={url} alt={item.name} className="h-28 w-28 rounded-xl object-cover" />
+    );
+  }
+  if (item.kind === "video") return <video src={url} controls preload="metadata" className="max-h-40 rounded-xl" />;
+  if (item.kind === "audio") return <audio src={url} controls />;
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className="text-[13px] font-semibold underline">
+      {item.name}
+    </a>
+  );
+}
 const LONG_PRESS_MS = 480;
 const MOVE_CANCEL_PX = 12;
 
@@ -143,7 +167,7 @@ export function ChatMessageList({
           <div
             key={message.id}
             data-chat-message-id={message.id}
-            className={`flex scroll-mt-24 ${isUser ? "justify-end" : "justify-start"}`}
+            className={`group flex scroll-mt-24 ${isUser ? "justify-end" : "justify-start"}`}
             onContextMenu={
               replyable
                 ? (event) => {
@@ -183,6 +207,7 @@ export function ChatMessageList({
             onPointerLeave={replyable ? () => clearPress() : undefined}
           >
             <div
+              tabIndex={replyable ? 0 : undefined}
               className={`max-w-[min(92%,420px)] select-none rounded-[20px] px-3.5 py-2.5 text-[14px] leading-[1.45] ${
                 isUser
                   ? "bg-[#DBEAFE] text-[#1E3A8A]"
@@ -212,26 +237,26 @@ export function ChatMessageList({
                 <p className="font-medium">{message.transcript || message.text}</p>
               ) : null}
               {message.type === "text" && message.text ? <p>{message.text}</p> : null}
-              {message.type === "photo" ? (
+              {message.media?.length ? (
                 <div className="space-y-1.5">
-                  {message.url ? (
+                  {message.media.map((item) => (
+                    <MediaRefView key={item.id} item={item} missing={c.mediaOnOtherDevice} />
+                  ))}
+                  {message.text ? <p>{message.text}</p> : null}
+                </div>
+              ) : message.type === "photo" ? (
+                <div className="space-y-1.5">
+                  {message.url && !message.url.startsWith("blob:") && !message.url.startsWith("data:") ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={message.url}
-                      alt=""
-                      className="h-28 w-28 rounded-xl object-cover"
-                    />
+                    <img src={message.url} alt="" className="h-28 w-28 rounded-xl object-cover" />
                   ) : (
-                    <p className="text-[12px] opacity-70">📷 photo</p>
+                    <p className="text-[12px] opacity-70">{c.mediaLegacyBroken}</p>
                   )}
                   {message.text ? <p>{message.text}</p> : null}
                 </div>
-              ) : null}
-              {message.type === "file" ? (
+              ) : message.type === "file" ? (
                 <div className="space-y-1">
-                  <p className="text-[13px] font-semibold">
-                    📎 {message.fileName || "file"}
-                  </p>
+                  <p className="text-[13px] font-semibold">{message.fileName || "file"}</p>
                   {message.text ? <p>{message.text}</p> : null}
                 </div>
               ) : null}
@@ -254,9 +279,9 @@ export function ChatMessageList({
                 <InitialReportCard
                   report={message.initialReport}
                   labels={{
-                    title: "初始房源分析",
-                    completeness: "資料完整度",
-                    disclaimer: "聲明",
+                    title: c.initialReportTitle,
+                    completeness: c.initialReportCompleteness,
+                    disclaimer: c.initialReportDisclaimer,
                   }}
                 />
               ) : null}
@@ -317,39 +342,41 @@ export function ChatMessageList({
                 </div>
               ) : null}
               {message.type === "report" && message.report ? (
-                <div className="mt-1 space-y-2">
-                  <p className="font-bold">看房報告</p>
-                  <div>
-                    <p className="text-[11px] font-bold text-[#166534]">優點</p>
-                    <ul className="list-disc pl-4 text-[12px]">
-                      {message.report.pros.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div>
-                    <p className="text-[11px] font-bold text-[#991B1B]">風險</p>
-                    <ul className="list-disc pl-4 text-[12px]">
-                      {message.report.risks.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
-                  {onShareReport ? (
-                    <button
-                      type="button"
-                      onClick={onShareReport}
-                      className="mt-1 rounded-full bg-black px-3 py-1.5 text-[12px] font-bold text-white"
-                    >
-                      {shareLabel || "分享連結"}
-                    </button>
-                  ) : null}
-                </div>
+                <ChatReportBubble
+                  summary={message.report.summary}
+                  pros={message.report.pros}
+                  risks={message.report.risks}
+                  checklist={message.report.checklist}
+                  generatedAt={
+                    message.report.generatedAt && !Number.isNaN(Date.parse(message.report.generatedAt))
+                      ? new Date(message.report.generatedAt).toLocaleString()
+                      : undefined
+                  }
+                  labels={{
+                    title: c.reportTitle,
+                    pros: c.reportPros,
+                    risks: c.reportRisks,
+                    checklist: c.reportTitle,
+                    unconfirmed: c.reportPartial,
+                  }}
+                  shareLabel={shareLabel}
+                  onShare={onShareReport}
+                />
               ) : null}
               <p className="mt-1 text-[10px] opacity-50">
                 {new Date(message.timestamp).toLocaleTimeString()}
               </p>
             </div>
+            {replyable ? (
+              <button
+                type="button"
+                aria-label={replyLabel || "Reply"}
+                className="mx-1 hidden h-7 w-7 shrink-0 items-center justify-center self-center rounded-full text-[#6B7280] hover:bg-black/5 [@media(hover:hover)]:group-hover:inline-flex [@media(hover:hover)]:group-focus-within:inline-flex"
+                onClick={() => onReply?.(toReplyRef(message))}
+              >
+                <Reply className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
           </div>
         );
       })}

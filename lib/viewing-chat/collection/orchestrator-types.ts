@@ -104,6 +104,12 @@ export type ProcessUserTurnInput = {
    */
   apiKey?: string;
   signal?: AbortSignal;
+  replyContext?: {
+    targetMessageId: string;
+    targetRole: "user" | "ai";
+    quotedText: string;
+    targetFieldIds: PropertyFieldId[];
+  };
   /**
    * Optional polish override (tests / custom providers).
    * On failure, return `{ text: draft, warning: "llm_failed" | "extraction_failed", extractionStatus }`.

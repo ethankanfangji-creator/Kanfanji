@@ -1,5 +1,7 @@
 # Share access security
 
+Viewing report links store `token_hash` (SHA-256) and `token_ciphertext` (AES-256-GCM, prefix `v1.`). The key is the server-only variable `SHARE_TOKEN_ENC_KEY` (base64, 32 bytes). It must not use a `NEXT_PUBLIC_` name. If the key is missing, creation fails and no plaintext token is stored.
+
 ## Runtime model (implemented)
 
 Public share control is enforced **server-side** using:

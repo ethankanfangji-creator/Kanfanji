@@ -1,8 +1,10 @@
 import type { Metadata, Viewport } from "next";
+import { cookies, headers } from "next/headers";
 import { Noto_Sans_TC } from "next/font/google";
 import { AnalyticsProvider } from "@/components/analytics/AnalyticsProvider";
 import { I18nProvider } from "@/components/I18nProvider";
 import { OfflineAppShell } from "@/components/OfflineAppShell";
+import { detectLocale, htmlLang, isLocale, LOCALE_STORAGE_KEY } from "@/lib/i18n/config";
 import "./globals.css";
 
 const notoSansTc = Noto_Sans_TC({
@@ -22,11 +24,15 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  const jar = await cookies();
+  const accept = (await headers()).get("accept-language");
+  const stored = jar.get(LOCALE_STORAGE_KEY)?.value;
+  const initialLocale = isLocale(stored) ? stored : detectLocale(accept?.split(",")[0]);
   return (
-    <html lang="zh-Hant" className={`${notoSansTc.className} h-full antialiased`}>
+    <html lang={htmlLang(initialLocale)} className={`${notoSansTc.className} h-full antialiased`}>
       <body className="min-h-full">
-        <I18nProvider>
+        <I18nProvider initialLocale={initialLocale}>
           <AnalyticsProvider>
             <OfflineAppShell />
             <main id="main-content">{children}</main>

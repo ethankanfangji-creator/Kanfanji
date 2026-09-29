@@ -21,7 +21,7 @@ export type MediaLibraryItem = {
 };
 
 const DB_NAME = "kanfangji.mediaLibrary";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE = "files";
 
 function kindFromMime(mime: string): MediaKind {
@@ -36,8 +36,11 @@ function openDb(): Promise<IDBDatabase> {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
-      if (!db.objectStoreNames.contains(STORE)) {
-        db.createObjectStore(STORE, { keyPath: "id" });
+      const store = db.objectStoreNames.contains(STORE)
+        ? req.transaction?.objectStore(STORE)
+        : db.createObjectStore(STORE, { keyPath: "id" });
+      if (store && !store.indexNames.contains("threadId")) {
+        store.createIndex("threadId", "threadId", { unique: false });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -120,6 +123,28 @@ export async function addMediaFile(
     sourceLabel: row.sourceLabel ?? null,
     url: URL.createObjectURL(file),
   };
+}
+
+export async function getMediaBlob(id: string): Promise<Blob | null> {
+  if (typeof indexedDB === "undefined") return null;
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readonly");
+    const req = tx.objectStore(STORE).get(id);
+    req.onsuccess = () => resolve((req.result as StoredRow | undefined)?.blob ?? null);
+    req.onerror = () => reject(req.error ?? new Error("idb_get_failed"));
+  });
+}
+
+export async function listMediaByThread(threadId: string): Promise<MediaLibraryItem[]> {
+  const all = await listMediaLibrary();
+  return all.filter((item) => item.threadId === threadId);
+}
+
+export async function removeMediaByThread(threadId: string): Promise<number> {
+  const rows = await listMediaByThread(threadId);
+  await Promise.all(rows.map((row) => removeMediaFile(row.id)));
+  return rows.length;
 }
 
 export async function removeMediaFile(id: string): Promise<void> {

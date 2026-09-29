@@ -424,10 +424,14 @@ export function composeAssistantMessage(input: {
       parts.push(
         lang === "en"
           ? "Nothing urgent to remind you of — add more notes, or finish when ready."
-          : "目前沒有特別急著提醒的；想到再補，或說「整理一下／完成」也可以。",
+          : "目前沒有特別急著提醒的；想到再補，想結束時按下方「完成」。",
       );
     }
   }
 
-  return parts.filter(Boolean).join("\n\n");
+  const joined = parts.filter(Boolean).join("\n\n");
+  if (/幫我出報告|出報告|完成了|產生報告|wrap up|finish(ed)?\b/i.test(input.sourceText)) {
+    return `${joined}\n\n${lang === "en" ? "To finish, press Finish below." : "要結束的話按下方「完成」。"}`;
+  }
+  return joined;
 }

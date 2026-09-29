@@ -23,6 +23,7 @@ export type ReviewCardLabels = {
   valuePlaceholder: string;
   share: string;
   shared: string;
+  copyFailed: string;
   statusConfirmed: string;
   statusSubjective: string;
   statusInferred: string;
@@ -107,6 +108,7 @@ export function ReviewCard({
 }) {
   const [drafts, setDrafts] = useState<ReviewFieldDraft[]>(() => toDraft(record));
   const [shareNote, setShareNote] = useState<string | null>(null);
+  const [copyFallback, setCopyFallback] = useState<string | null>(null);
 
   useEffect(() => {
     setDrafts(toDraft(record));
@@ -131,16 +133,18 @@ export function ReviewCard({
         statusLabels,
       });
       try {
-        if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-          await navigator.clipboard.writeText(text);
-          setShareNote(labels.shared);
-          return;
+        if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+          throw new Error("clipboard_unavailable");
         }
+        await navigator.clipboard.writeText(text);
+        setCopyFallback(null);
+        setShareNote(labels.shared);
+        return;
       } catch {
-        /* fall through */
+        setCopyFallback(text);
+        setShareNote(labels.copyFailed);
+        return;
       }
-      setShareNote(labels.shared);
-      return;
     }
     await onShare(drafts);
     setShareNote(labels.shared);
@@ -209,6 +213,9 @@ export function ReviewCard({
         })}
       </div>
       <div className="flex shrink-0 flex-col gap-2 border-t border-[#93C5FD]/60 px-3 py-2.5">
+        {copyFallback ? (
+          <textarea readOnly value={copyFallback} className="h-24 w-full rounded-xl border border-black/10 p-2 text-[12px]" />
+        ) : null}
         {shareNote ? (
           <p className="text-center text-[11px] font-semibold text-[#166534]">{shareNote}</p>
         ) : null}

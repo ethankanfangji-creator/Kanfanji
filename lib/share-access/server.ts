@@ -2,11 +2,17 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   generateShareToken,
   hashSharePassword,
+  hashShareToken,
   verifySharePassword,
+  isShareTokenFormat,
 } from "./crypto";
+import { decryptShareToken, encryptShareToken } from "./token-vault";
+import { assertChatShareExpiry } from "./chat-share-expiry";
+import { chatShareExpiresAt, consumeShareCreateRateLimit } from "./share-rate-limit.server";
 import type { ShareLinkRecord } from "./types";
 import { resolveShareLinkGate } from "./public-dto";
 import {
+  buildChatReportPublication,
   buildSharePublication,
   isPublishedShareSnapshot,
   parseMediaManifest,
@@ -28,13 +34,16 @@ export type ViewingShareRow = {
   property: Record<string, unknown> | null;
   updated_at: string;
   created_at: string;
+  report?: unknown;
+  chat_state?: unknown;
   shareLink?: ShareLinkRow | null;
 };
 
 export type ShareLinkRow = {
   id: string;
   viewing_id: string;
-  token: string;
+  token: string | null;
+  token_ciphertext?: string | null;
   capability: "read";
   status: "active" | "revoked";
   expires_at: string | null;
@@ -49,13 +58,13 @@ export type ShareLinkRow = {
 };
 
 const LINK_COLUMNS =
-  "id, viewing_id, token, capability, status, expires_at, password_hash, access_version, created_at, updated_at, revoked_at, last_resolved_at, published_snapshot, media_manifest";
+  "id, viewing_id, token, token_ciphertext, capability, status, expires_at, password_hash, access_version, created_at, updated_at, revoked_at, last_resolved_at, published_snapshot, media_manifest";
 const LINK_GATE_COLUMNS =
-  "id, viewing_id, token, capability, status, expires_at, password_hash, access_version, created_at, updated_at, revoked_at, last_resolved_at";
+  "id, viewing_id, capability, status, expires_at, password_hash, access_version, created_at, updated_at, revoked_at, last_resolved_at";
 
 export type PublishedShareRow = {
   shareLink: ShareLinkRow;
-  snapshot: PublishedShareSnapshot;
+  snapshot: PublishedShareSnapshot | import("./publication").ChatReportShareSnapshot;
   mediaManifest: PublishedShareMediaItem[];
   ownerId: string;
 };
@@ -64,6 +73,21 @@ export type ShareGateRow = {
   shareLink: ShareLinkRow;
 };
 
+function publicPathForRow(row: ShareLinkRow): { urlPath: string; needsRegenerate: boolean } {
+  if (row.token_ciphertext) {
+    try {
+      return {
+        urlPath: `/s/${decryptShareToken(row.token_ciphertext, row.id)}`,
+        needsRegenerate: false,
+      };
+    } catch {
+      return { urlPath: "", needsRegenerate: true };
+    }
+  }
+  if (row.token) return { urlPath: `/s/${row.token}`, needsRegenerate: false };
+  return { urlPath: "", needsRegenerate: true };
+}
+
 export function toShareLinkRecord(row: ShareLinkRow): ShareLinkRecord {
   const expired =
     row.expires_at && new Date(row.expires_at).getTime() <= Date.now();
@@ -71,7 +95,7 @@ export function toShareLinkRecord(row: ShareLinkRow): ShareLinkRecord {
   return {
     id: row.id,
     viewingId: row.viewing_id,
-    token: row.token,
+    token: row.token ?? "",
     capability: "read",
     status,
     expiresAt: row.expires_at,
@@ -92,7 +116,7 @@ async function fetchOwnedViewing(
   const { data, error } = await supabase
     .from("viewings")
     .select(
-      "id, user_id, address, tags, pros, risks, photo_urls, share_token, property, updated_at, created_at",
+      "id, user_id, address, tags, pros, risks, photo_urls, share_token, property, report, chat_state, updated_at, created_at",
     )
     .eq("id", viewingId)
     .eq("user_id", userId)
@@ -105,9 +129,9 @@ export async function getOwnerShareLink(
   supabase: SupabaseClient,
   userId: string,
   viewingId: string,
-): Promise<{ link: ShareLinkRecord | null; viewing: ViewingShareRow | null }> {
+): Promise<{ link: ShareLinkRecord | null; viewing: ViewingShareRow | null; urlPath: string; needsRegenerate: boolean }> {
   const viewing = await fetchOwnedViewing(supabase, userId, viewingId);
-  if (!viewing) return { link: null, viewing: null };
+  if (!viewing) return { link: null, viewing: null, urlPath: "", needsRegenerate: false };
   const { data, error } = await supabase
     .from("share_links")
     .select(LINK_COLUMNS)
@@ -116,9 +140,12 @@ export async function getOwnerShareLink(
     .is("revoked_at", null)
     .maybeSingle();
   if (error) throw error;
+  const row = data as ShareLinkRow | null;
+  const path = row ? publicPathForRow(row) : { urlPath: "", needsRegenerate: false };
   return {
-    link: data ? toShareLinkRecord(data as ShareLinkRow) : null,
+    link: row ? toShareLinkRecord(row) : null,
     viewing,
+    ...path,
   };
 }
 
@@ -147,9 +174,10 @@ export async function ensureOwnerShareLink(
     password?: string | null;
     rotateToken?: boolean;
   },
-): Promise<{ link: ShareLinkRecord; urlPath: string }> {
+): Promise<{ link: ShareLinkRecord; urlPath: string; needsRegenerate?: boolean }> {
   const viewing = await fetchOwnedViewing(supabase, userId, viewingId);
   if (!viewing) throw new Error("VIEWING_NOT_FOUND");
+  if (options) assertChatShareExpiry(viewing, options);
 
   if (options?.rotateToken) {
     const current = await getOwnerShareLink(supabase, userId, viewingId);
@@ -165,7 +193,7 @@ export async function ensureOwnerShareLink(
       Object.keys(patch).length > 0
         ? await updateOwnerShareLink(supabase, userId, current.link.id, patch)
         : current.link;
-    return { link, urlPath: `/s/${link.token}` };
+    return { link, urlPath: current.urlPath, needsRegenerate: current.needsRegenerate };
   }
 
   const passwordHash =
@@ -173,14 +201,38 @@ export async function ensureOwnerShareLink(
       ? await hashSharePassword(options.password)
       : null;
   const token = generateShareToken();
-  const publication = buildSharePublication(viewing);
+  const linkId = crypto.randomUUID();
+  let tokenCiphertext: string;
+  try {
+    tokenCiphertext = encryptShareToken(token, linkId);
+  } catch {
+    throw new Error("SHARE_UNAVAILABLE");
+  }
+  const publication = viewing.chat_state
+    ? buildChatReportPublication({
+        id: viewing.id,
+        user_id: viewing.user_id,
+        address: viewing.address,
+        report: viewing.report,
+        chat_state: viewing.chat_state,
+        updated_at: viewing.updated_at,
+      })
+      : { snapshot: buildSharePublication(viewing).snapshot, mediaManifest: buildSharePublication(viewing).mediaManifest };
+  if (!(await consumeShareCreateRateLimit(userId))) throw new Error("SHARE_RATE_LIMITED");
+  const chatExpiry = viewing.chat_state ? chatShareExpiresAt() : null;
   const { data, error } = await supabase
     .from("share_links")
     .insert({
+      id: linkId,
       viewing_id: viewingId,
-      token,
+      token: null,
+      token_hash: hashShareToken(token),
+      token_ciphertext: tokenCiphertext,
+      token_key_id: "v1",
       expires_at:
-        options && Object.hasOwn(options, "expiresAt") ? options.expiresAt ?? null : null,
+        options && Object.hasOwn(options, "expiresAt")
+          ? options.expiresAt ?? null
+          : chatExpiry,
       password_hash: passwordHash,
       published_snapshot: publication.snapshot,
       media_manifest: publication.mediaManifest,
@@ -203,6 +255,9 @@ export async function updateOwnerShareLink(
 ): Promise<ShareLinkRecord> {
   const row = await fetchOwnedLink(supabase, userId, linkId);
   if (!row || row.status !== "active") throw new Error("LINK_NOT_FOUND");
+  const viewing = await fetchOwnedViewing(supabase, userId, row.viewing_id);
+  if (!viewing) throw new Error("LINK_NOT_FOUND");
+  assertChatShareExpiry(viewing, patch);
   const setExpires = Object.hasOwn(patch, "expiresAt");
   const setPassword = Object.hasOwn(patch, "password");
   if (!setExpires && !setPassword) return toShareLinkRecord(row);
@@ -264,23 +319,56 @@ export async function revokeOwnerShareLink(
   return toShareLinkRecord(next);
 }
 
+function nextChatShareExpiry(chatState: unknown, currentExpiresAt: string | null) {
+  if (!chatState) return currentExpiresAt;
+  const cap = Date.parse(chatShareExpiresAt());
+  const current = currentExpiresAt ? Date.parse(currentExpiresAt) : Number.NaN;
+  if (!Number.isFinite(current)) return new Date(cap).toISOString();
+  return new Date(Math.min(current, cap)).toISOString();
+}
+
 export async function rotateOwnerShareLink(
   supabase: SupabaseClient,
   userId: string,
   linkId: string,
-): Promise<{ link: ShareLinkRecord; urlPath: string }> {
+): Promise<{ link: ShareLinkRecord; urlPath: string; needsRegenerate?: boolean }> {
   const row = await fetchOwnedLink(supabase, userId, linkId);
   if (!row || row.status !== "active") throw new Error("LINK_NOT_FOUND");
+  const viewing = await fetchOwnedViewing(supabase, userId, row.viewing_id);
+  if (!viewing) throw new Error("VIEWING_NOT_FOUND");
   const token = generateShareToken();
-  const { data, error } = await supabase.rpc("rotate_share_link", {
-    p_link_id: linkId,
+  const nextId = crypto.randomUUID();
+  let tokenCiphertext: string;
+  try {
+    tokenCiphertext = encryptShareToken(token, nextId);
+  } catch {
+    throw new Error("SHARE_UNAVAILABLE");
+  }
+  const publication = viewing.chat_state
+    ? buildChatReportPublication({
+        id: viewing.id,
+        user_id: viewing.user_id,
+        address: viewing.address,
+        report: viewing.report,
+        chat_state: viewing.chat_state,
+        updated_at: viewing.updated_at,
+      })
+    : buildSharePublication(viewing);
+  if (!(await consumeShareCreateRateLimit(userId))) throw new Error("SHARE_RATE_LIMITED");
+  const { data, error } = await supabase.rpc("rotate_chat_share_link", {
+    p_old_id: linkId,
     p_user_id: userId,
-    p_token: token,
+    p_new_id: nextId,
+    p_token_hash: hashShareToken(token),
+    p_token_ciphertext: tokenCiphertext,
+    p_expires_at: nextChatShareExpiry(viewing.chat_state, row.expires_at),
+    p_snapshot: publication.snapshot,
+    p_manifest: publication.mediaManifest,
   });
   if (error) throw error;
-  const next = (Array.isArray(data) ? data[0] : data) as ShareLinkRow | null;
-  if (!next) throw new Error("LINK_NOT_FOUND");
-  return { link: toShareLinkRecord(next), urlPath: `/s/${token}` };
+  const inserted = (Array.isArray(data) ? data[0] : data) as ShareLinkRow | null;
+  if (!inserted) throw new Error("LINK_CONFLICT");
+  return { link: toShareLinkRecord(inserted), urlPath: `/s/${token}` };
 }
 
 export async function fetchViewingByShareTokenAdmin(
@@ -288,10 +376,10 @@ export async function fetchViewingByShareTokenAdmin(
   token: string,
 ): Promise<PublishedShareRow | null> {
   const trimmed = token.trim();
-  if (!trimmed) return null;
+  if (!isShareTokenFormat(trimmed)) return null;
 
-  const { data, error } = await admin.rpc("resolve_share_publication", {
-    p_token: trimmed,
+  const { data, error } = await admin.rpc("resolve_share_publication_by_hash", {
+    p_token_hash: hashShareToken(trimmed),
   });
   if (error || !data || typeof data !== "object" || Array.isArray(data)) return null;
   const resolved = data as { shareLink?: unknown; ownerId?: unknown };
@@ -313,11 +401,11 @@ export async function fetchShareGateByTokenAdmin(
   token: string,
 ): Promise<ShareGateRow | null> {
   const trimmed = token.trim();
-  if (!trimmed) return null;
+  if (!isShareTokenFormat(trimmed)) return null;
   const { data, error } = await admin
     .from("share_links")
     .select(LINK_GATE_COLUMNS)
-    .eq("token", trimmed)
+    .eq("token_hash", hashShareToken(trimmed))
     .maybeSingle();
   if (error || !data) return null;
   return { shareLink: data as ShareLinkRow };

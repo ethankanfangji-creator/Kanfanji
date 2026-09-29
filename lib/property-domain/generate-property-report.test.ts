@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { deriveJurisdiction, jurisdictionKey } from "@/lib/property-facts/jurisdiction";
 import type { GeocodingProvider } from "@/lib/property-facts/interfaces";
 import type { GeocodeResult } from "@/lib/property-facts/geocode";
@@ -40,6 +40,10 @@ function fakeUsGeocoder(): GeocodingProvider {
 }
 
 describe("generatePropertyReport", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200 })));
+  });
+
   it("runs the full flow with a fake geocoder", async () => {
     const result = await generatePropertyReport("1 Main St, Seattle, WA", {
       bypassCache: true,

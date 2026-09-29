@@ -369,6 +369,15 @@ export type Messages = {
     stageBuild: string;
     reportTitle: string;
     chatReportTitle: string;
+    closeHome: string;
+    readonlyFoot: string;
+    openApp: string;
+    noAddress: string;
+    updatedLabel: string;
+    empty: string;
+    aiCaution: string;
+    checkedFields: string;
+    shellEyebrow: string;
     invalidTitle: string;
     invalidBody: string;
     reportProperty: string;
@@ -955,6 +964,7 @@ export type Messages = {
     statusMissing: string;
     statusSkipped: string;
     statusConflict: string;
+    statusCorrected: string;
     sectionConfirmed: string;
     sectionSubjective: string;
     sectionInferred: string;
@@ -986,6 +996,14 @@ export type Messages = {
     guestLimitBody: string;
     guestLimitSignIn: string;
     guestLimitCancel: string;
+    guestLimitDelete: string;
+    guestLimitDeleteConfirm: string;
+    claimLimitNotice: string;
+    viewingNotFound: string;
+    syncNewer: string;
+    initialReportTitle: string;
+    initialReportCompleteness: string;
+    initialReportDisclaimer: string;
     shareUnavailable: string;
     shareManage: string;
     shareNeedsRegenerate: string;

@@ -112,7 +112,11 @@ export async function POST(req: Request) {
             ? 400
             : 500;
     return NextResponse.json(
-      { error: message, ...(status === 429 ? { code: "rate_limited" } : {}) },
+      {
+        error: message,
+        ...(status === 429 ? { code: "rate_limited" } : {}),
+        ...(status === 404 ? { code: "VIEWING_NOT_FOUND" } : {}),
+      },
       { status },
     );
   }

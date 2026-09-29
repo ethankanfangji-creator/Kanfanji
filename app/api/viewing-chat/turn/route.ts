@@ -44,7 +44,7 @@ async function persistAppendedMessages(
   const admin = createAdminClient();
   const current = await admin
     .from("viewings")
-    .select("messages")
+    .select("messages, revision, photo_urls")
     .eq("id", viewingId)
     .eq("user_id", userId)
     .maybeSingle();
@@ -53,11 +53,20 @@ async function persistAppendedMessages(
     ? (current.data.messages as ChatMessage[])
     : [];
   const merged = appendChatMessages(existing, incoming);
+  const revision = Number(current.data.revision ?? 1);
+  const photoUrls = Array.isArray(current.data.photo_urls)
+    ? (current.data.photo_urls as string[])
+    : [];
+  const uploaded = incoming.flatMap((message) =>
+    (message.media ?? []).map((item) => item.path).filter((path): path is string => Boolean(path)),
+  );
   const { error } = await admin
     .from("viewings")
     .update({
       messages: merged,
       ...(chatState ? { chat_state: chatState } : {}),
+      ...(uploaded.length ? { photo_urls: [...new Set([...photoUrls, ...uploaded])] } : {}),
+      revision: revision + 1,
       updated_at: new Date().toISOString(),
       client_updated_at: new Date().toISOString(),
     })

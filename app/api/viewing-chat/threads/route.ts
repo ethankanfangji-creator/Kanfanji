@@ -1,7 +1,18 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
+import {
+  assertAllowedKeys,
+  readJsonObject,
+  RequestValidationError,
+} from "@/lib/http/validation";
 import { createViewingRow } from "@/lib/viewings/create-gate.server";
+import {
+  assertChatBodySize,
+  parseChatMessages,
+  parseChatState,
+  parseClientUpdatedAt,
+} from "@/lib/viewing-chat/thread-payload";
 
 export const runtime = "nodejs";
 
@@ -20,24 +31,37 @@ export async function POST(request: Request) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return noStore({ code: "UNAUTHENTICATED" }, 401);
-  const body = (await request.json()) as Record<string, unknown>;
+  try {
+  const raw = await request.text();
+  assertChatBodySize(raw);
+  const body = await readJsonObject(new Request(request.url, { method: "POST", body: raw }));
+  assertAllowedKeys(body, [
+    "threadId",
+    "address",
+    "clientUpdatedAt",
+    "messages",
+    "report",
+    "metadata",
+    "chatState",
+  ]);
   const threadId = typeof body.threadId === "string" ? body.threadId : "";
   const address = typeof body.address === "string" ? body.address.trim() : "";
   if (!UUID_V4.test(threadId) || address.length < 1 || address.length > 500) {
     return noStore({ code: "invalid" }, 400);
   }
-  const encoded = JSON.stringify(body);
-  if (encoded.length > 2_000_000) return noStore({ code: "too_large" }, 413);
+  const messages = body.messages === undefined ? [] : parseChatMessages(body.messages);
+  const chatState = body.chatState === undefined ? null : parseChatState(body.chatState);
+  const clientUpdatedAt = parseClientUpdatedAt(body.clientUpdatedAt);
   const admin = createAdminClient();
   const result = await createViewingRow(admin, user.id, {
     id: threadId,
     address,
     idempotencyKey: `chat:${threadId}`,
-    clientUpdatedAt: typeof body.clientUpdatedAt === "string" ? body.clientUpdatedAt : undefined,
-    messages: Array.isArray(body.messages) ? body.messages : [],
+    clientUpdatedAt,
+    messages,
     report: body.report ?? null,
     metadata: body.metadata ?? null,
-    chatState: body.chatState ?? null,
+    chatState,
   });
   if (result.outcome === "limit_reached") {
     return noStore(
@@ -46,6 +70,13 @@ export async function POST(request: Request) {
     );
   }
   return noStore(result, result.outcome === "created" ? 201 : 200);
+  } catch (error) {
+    if (error instanceof RequestValidationError) {
+      const status = error.code === "BODY_TOO_LARGE" ? 413 : 400;
+      return noStore({ code: error.code, field: error.field }, status);
+    }
+    return noStore({ code: "unavailable" }, 503);
+  }
 }
 
 export async function GET() {

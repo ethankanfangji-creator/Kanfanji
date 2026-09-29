@@ -158,6 +158,7 @@ export type ViewingChatThread = {
     state: "local_only" | "syncing" | "synced" | "failed" | "blocked_limit";
     lastSyncedAt?: string | null;
     error?: string;
+    revision?: number;
   };
 };
 

@@ -12,7 +12,10 @@ import { projectFactCardToReport } from "@/lib/property-facts/report";
 import { buildChatReport } from "@/lib/viewing-chat/integrate";
 import { FIELD_CATALOG } from "@/lib/viewing-chat/collection/field-catalog";
 import type { ChatMessage } from "@/lib/viewing-chat/types";
+import { appendChatMessages } from "@/lib/viewing-chat/append-messages";
+import { parseChatState } from "@/lib/viewing-chat/thread-payload";
 import { createClient } from "@/utils/supabase/server";
+import { createAdminClient } from "@/utils/supabase/admin";
 
 export const runtime = "nodejs";
 
@@ -74,22 +77,44 @@ export async function POST(request: Request) {
     });
     const nextMessages = [...messages, aiMessage];
 
+    let persisted = false;
     if (viewingId) {
       const supabase = await createClient();
       const {
         data: { user },
       } = await supabase.auth.getUser();
       if (user) {
-        await supabase
+        let chatState: Record<string, unknown> | undefined;
+        if (body.chatState !== undefined) {
+          chatState = parseChatState(body.chatState);
+        }
+        const admin = createAdminClient();
+        const current = await admin
           .from("viewings")
-          .update({
-            messages: nextMessages,
-            report,
-            updated_at: new Date().toISOString(),
-            client_updated_at: new Date().toISOString(),
-          })
+          .select("messages, revision")
           .eq("id", viewingId)
-          .eq("user_id", user.id);
+          .eq("user_id", user.id)
+          .maybeSingle();
+        if (!current.error && current.data) {
+          const existing = Array.isArray(current.data.messages)
+            ? (current.data.messages as ChatMessage[])
+            : [];
+          const merged = appendChatMessages(existing, nextMessages);
+          const revision = Number(current.data.revision ?? 1);
+          const { error } = await admin
+            .from("viewings")
+            .update({
+              messages: merged,
+              report,
+              ...(chatState ? { chat_state: chatState } : {}),
+              revision: revision + 1,
+              updated_at: new Date().toISOString(),
+              client_updated_at: new Date().toISOString(),
+            })
+            .eq("id", viewingId)
+            .eq("user_id", user.id);
+          persisted = !error;
+        }
       }
     }
 
@@ -99,6 +124,7 @@ export async function POST(request: Request) {
         aiMessage,
         messages: nextMessages,
         propertyReport,
+        persisted,
       }),
     );
   } catch (error) {

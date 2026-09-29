@@ -41,12 +41,17 @@ import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 import {
   createLocalThread,
   deleteLocalThread,
+  getLocalThread,
   listLocalThreads,
   patchLocalThread,
   saveLocalMessages,
   setLocalThreadPinned,
 } from "@/lib/viewing-chat/local-store";
 import { addMediaFile, removeMediaByThread } from "@/lib/viewing-chat/media-library";
+import { uploadViewingFile, appendViewingPath } from "@/lib/media";
+import { claimAccountThreads, pullCloudThreads } from "@/lib/viewing-chat/claim-account";
+import { buildChatStatePayload, pushViewingThread } from "@/lib/viewing-chat/cloud-push";
+import { appendChatMessages } from "@/lib/viewing-chat/append-messages";
 import { GuestLimitDialog } from "@/components/viewing-chat/GuestLimitDialog";
 import { ShareReportDialog } from "@/components/viewing-chat/ShareReportDialog";
 import { syncWithRetry } from "@/lib/viewing-chat/cloud-sync";
@@ -187,6 +192,7 @@ export function ViewingChatApp() {
   );
   const [composerHint, setComposerHint] = useState<string | null>(null);
   const chatSearchInputRef = useRef<HTMLInputElement>(null);
+  const syncTimers = useRef(new Map<string, number>());
 
   const active = useMemo(
     () => threads.find((thread) => thread.id === activeId) ?? null,
@@ -247,12 +253,27 @@ export function ViewingChatApp() {
   }, []);
 
   useEffect(() => {
-    if (searchParams.get("share") !== "1" || !userId) return;
-    const threadId = searchParams.get("thread");
-    if (threadId) setActiveId(threadId);
-    requestShare();
-    router.replace(threadId ? `/?thread=${threadId}` : "/");
-  }, [searchParams, userId, router]);
+    if (!userId) return;
+    let cancelled = false;
+    void (async () => {
+      const claim = await claimAccountThreads(userId);
+      await pullCloudThreads(userId);
+      if (cancelled) return;
+      refreshLocal();
+      if (claim.blocked > 0 && !sessionStorage.getItem("kf.claim.notice")) {
+        sessionStorage.setItem("kf.claim.notice", "1");
+        setStatus(c.claimLimitNotice);
+      }
+      if (searchParams.get("share") !== "1") return;
+      const threadId = searchParams.get("thread");
+      if (threadId) setActiveId(threadId);
+      window.setTimeout(() => requestShare(), 0);
+      router.replace(threadId ? `/?thread=${threadId}` : "/");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, searchParams, router]);
 
   useEffect(() => {
     if (!chatSearchOpen) return;
@@ -409,6 +430,83 @@ export function ViewingChatApp() {
 
   function refreshLocal() {
     setThreads(listLocalThreads());
+  }
+
+  function queueCloudSync(threadId: string) {
+    if (!userId) return;
+    const previous = syncTimers.current.get(threadId);
+    if (previous) window.clearTimeout(previous);
+    const timer = window.setTimeout(() => {
+      void pushLocalThread(threadId);
+    }, 800);
+    syncTimers.current.set(threadId, timer);
+  }
+
+  async function pushLocalThread(threadId: string) {
+    const thread = getLocalThread(threadId);
+    if (!thread || !userId || thread.cloud?.state === "blocked_limit") return;
+    const result = await syncWithRetry({
+      put: async () => {
+        const current = getLocalThread(threadId);
+        if (!current) return { status: 404 };
+        const pushed = await pushViewingThread({
+          threadId,
+          address: current.address,
+          baseRevision: current.cloud?.revision,
+          messages: current.messages,
+          chatState: buildChatStatePayload(current),
+          clientUpdatedAt: new Date().toISOString(),
+          report: current.report,
+          metadata: current.metadata,
+        });
+        if (pushed.status === 409 && pushed.remote?.messages) {
+          const remoteMessages = pushed.remote.messages as ChatMessage[];
+          saveLocalMessages(threadId, appendChatMessages(remoteMessages, current.messages));
+          patchLocalThread(threadId, {
+            cloud: { ...current.cloud, state: "syncing", revision: pushed.revision },
+          });
+          setStatus(c.syncNewer);
+        }
+        if (pushed.status >= 200 && pushed.status < 300) {
+          patchLocalThread(threadId, {
+            ownerUserId: userId,
+            cloud: {
+              state: "synced",
+              lastSyncedAt: new Date().toISOString(),
+              revision: pushed.revision,
+            },
+          });
+        }
+        return { status: pushed.status };
+      },
+    });
+    if (result !== "synced") {
+      patchLocalThread(threadId, { cloud: { state: result } });
+    }
+    refreshLocal();
+  }
+
+  async function rememberMedia(file: File, threadId: string, address: string) {
+    const saved = await addMediaFile(file, threadId, address);
+    let path: string | null = null;
+    if (userId && saved.kind !== "file") {
+      try {
+        const folder = saved.kind === "video" ? "videos" : saved.kind === "audio" ? "audios" : "photos";
+        const column = saved.kind === "video" ? "video_urls" : saved.kind === "audio" ? "audio_urls" : "photo_urls";
+        path = await uploadViewingFile(threadId, folder, file, saved.id);
+        await appendViewingPath(threadId, column, path);
+      } catch {
+        path = null;
+      }
+    }
+    return {
+      id: saved.id,
+      kind: saved.kind,
+      name: saved.name,
+      mime: saved.mime,
+      size: saved.size,
+      path,
+    };
   }
 
   function startNewProperty() {
@@ -674,6 +772,7 @@ export function ViewingChatApp() {
       lastTurnChanges: [change],
       messages: [...active.messages, msg],
     });
+    queueCloudSync(active.id);
     refreshLocal();
   }
 
@@ -832,15 +931,7 @@ export function ViewingChatApp() {
         fileName: opts.file?.name,
       });
       if (opts.file) {
-        const saved = await addMediaFile(opts.file, active.id, active.address);
-        userMsg.media = [{
-          id: saved.id,
-          kind: saved.kind,
-          name: saved.name,
-          mime: saved.mime,
-          size: saved.size,
-          path: null,
-        }];
+        userMsg.media = [await rememberMedia(opts.file, active.id, active.address)];
       }
       saveLocalMessages(active.id, [...active.messages, userMsg]);
       refreshLocal();
@@ -1026,15 +1117,7 @@ export function ViewingChatApp() {
     const media: ChatMediaRef[] = [];
     const remember = async (blob: Blob, name: string) => {
       const file = blob instanceof File ? blob : new File([blob], name, { type: blob.type || "application/octet-stream" });
-      const saved = await addMediaFile(file, active.id, active.address);
-      media.push({
-        id: saved.id,
-        kind: saved.kind,
-        name: saved.name,
-        mime: saved.mime,
-        size: saved.size,
-        path: null,
-      });
+      media.push(await rememberMedia(file, active.id, active.address));
     };
     if (payload.image) await remember(payload.image, payload.image.name);
     if (payload.file) await remember(payload.file, payload.file.name);
@@ -1145,6 +1228,7 @@ export function ViewingChatApp() {
         extractionStatus?: "ok" | "extraction_failed";
         collectionFocusFieldIds?: PropertyFieldId[];
         pendingConfirm?: ViewingChatThread["pendingConfirm"];
+        persisted?: boolean;
         error?: string;
         code?: string;
       };
@@ -1186,6 +1270,7 @@ export function ViewingChatApp() {
       });
 
       saveLocalMessages(active.id, nextMessages);
+      if (userId && data.persisted === false) queueCloudSync(active.id);
       setPendingUserMessageId(null);
       patchLocalThread(active.id, {
         agendaActiveId:
@@ -1364,22 +1449,24 @@ export function ViewingChatApp() {
   }
 
   function requestShare() {
-    if (!active) return;
+    const queryThread = searchParams.get("thread");
+    const target = active ?? (queryThread ? listLocalThreads().find((item) => item.id === queryThread) ?? null : null);
+    if (!target) return;
     if (!configured || !userId) {
-      router.push(`/login?next=${encodeURIComponent(`/?thread=${active.id}&share=1`)}`);
+      router.push(`/login?next=${encodeURIComponent(`/?thread=${target.id}&share=1`)}`);
       return;
     }
-    if (active.cloud?.state === "blocked_limit") {
+    if (target.cloud?.state === "blocked_limit") {
       setStatus(c.shareBlockedLimit);
       return;
     }
-    if (active.cloud?.state && active.cloud.state !== "synced") {
+    if (target.cloud?.state && target.cloud.state !== "synced") {
       setStatus(c.shareSyncing);
       return;
     }
     setShareError(null);
     setShareOpen(true);
-    void fetch(`/api/share/links?viewingId=${encodeURIComponent(active.id)}`).then(async (response) => {
+    void fetch(`/api/share/links?viewingId=${encodeURIComponent(target.id)}`).then(async (response) => {
       if (!response.ok) return;
       const data = (await response.json()) as {
         url?: string | null;
@@ -1499,6 +1586,7 @@ export function ViewingChatApp() {
     const thread = listLocalThreads().find((item) => item.id === id);
     if (!thread) return;
     setLocalThreadPinned(id, !thread.pinned);
+    queueCloudSync(id);
     refreshLocal();
   }
 
@@ -1514,6 +1602,17 @@ export function ViewingChatApp() {
           signInLabel={c.guestLimitSignIn}
           cancelLabel={c.guestLimitCancel}
           signInHref="/login?next=/"
+          deleteLabel={c.guestLimitDelete}
+          onDelete={() => {
+            if (!window.confirm(c.guestLimitDeleteConfirm)) return;
+            const guest = listLocalThreads().find((thread) => !thread.ownerUserId);
+            if (guest) {
+              deleteLocalThread(guest.id);
+              void removeMediaByThread(guest.id);
+            }
+            setGuestLimitOpen(false);
+            refreshLocal();
+          }}
           onCancel={() => setGuestLimitOpen(false)}
         />
       ) : null}
@@ -1554,7 +1653,8 @@ export function ViewingChatApp() {
             };
             if (response.status === 429) setShareError(c.shareRateLimited);
             else if (response.status === 503) setShareError(c.shareUnavailable);
-            else if (response.status === 404 || response.status === 409) setShareError(c.shareNoReportYet);
+            else if (data.code === "VIEWING_NOT_FOUND" || response.status === 404) setShareError(c.viewingNotFound);
+            else if (response.status === 409) setShareError(c.shareNoReportYet);
             else if (!response.ok) setShareError(c.shareUnavailable);
             else {
               setShareError(null);

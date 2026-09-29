@@ -11,6 +11,7 @@ import {
 } from "@/components/auth/LoginGateDialog";
 import { useI18n } from "@/components/I18nProvider";
 import { claimGuestViewingData } from "@/lib/auth/claim-guest-data";
+import { claimAccountThreads } from "@/lib/viewing-chat/claim-account";
 import { reportAuthFailure, signupUiOutcome, type AuthFailureKind } from "@/lib/auth/auth-flow";
 import { safeInternalNextPath } from "@/lib/http/safe-next";
 import { createClient } from "@/utils/supabase/client";
@@ -67,6 +68,7 @@ export default function LoginPage() {
       return;
     }
     await claimGuestViewingData(user.id);
+    await claimAccountThreads(user.id);
     const next = new URLSearchParams(window.location.search).get("next");
     window.location.href = safeInternalNextPath(next);
   }

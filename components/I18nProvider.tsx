@@ -62,6 +62,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     setLocaleState(next);
     if (typeof window !== "undefined") {
       window.localStorage.setItem(LOCALE_STORAGE_KEY, next);
+      document.cookie = `${LOCALE_STORAGE_KEY}=${next}; path=/; max-age=31536000; samesite=lax`;
     }
   }, []);
 

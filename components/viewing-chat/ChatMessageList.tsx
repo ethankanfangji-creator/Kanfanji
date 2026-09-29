@@ -275,9 +275,9 @@ export function ChatMessageList({
                 <InitialReportCard
                   report={message.initialReport}
                   labels={{
-                    title: "初始房源分析",
-                    completeness: "資料完整度",
-                    disclaimer: "聲明",
+                    title: c.initialReportTitle,
+                    completeness: c.initialReportCompleteness,
+                    disclaimer: c.initialReportDisclaimer,
                   }}
                 />
               ) : null}

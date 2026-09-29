@@ -646,7 +646,7 @@ const th: Messages = {
     selectMode: "เลือกเพื่อเปรียบเทียบ",
     cancelSelect: "ยกเลิก",
     startCompare: "เปรียบเทียบที่เลือก",
-    selectHint: "Select 2–{max}",
+    selectHint: "เลือก 2–{max}",
     selectRange: "Select 2 to {max}",
     loading: "กำลังโหลด…",
     notFound: "ไม่พบการเปรียบเทียบบนอุปกรณ์นี้",
@@ -1074,7 +1074,7 @@ const th: Messages = {
     reviewValuePlaceholder: "แก้ไขหรือคงค่าเดิม",
     reviewShare: "แชร์สรุป",
     reviewShared: "คัดลอกสรุปการดูบ้านแล้ว",
-    reviewCopyFailed: "Could not copy. Select the text and copy it manually.",
+    reviewCopyFailed: "คัดลอกไม่ได้ เลือกข้อความแล้วคัดลอกเอง",
     fieldLabels: {
       address: "ที่อยู่",
       price: "ราคา",

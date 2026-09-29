@@ -35,7 +35,12 @@ function parseMessages(raw: FormDataEntryValue | null): ChatMessage[] {
   }
 }
 
-async function persistAppendedMessages(viewingId: string, userId: string, incoming: ChatMessage[]) {
+async function persistAppendedMessages(
+  viewingId: string,
+  userId: string,
+  incoming: ChatMessage[],
+  chatState?: Record<string, unknown>,
+) {
   const admin = createAdminClient();
   const current = await admin
     .from("viewings")
@@ -52,6 +57,7 @@ async function persistAppendedMessages(viewingId: string, userId: string, incomi
     .from("viewings")
     .update({
       messages: merged,
+      ...(chatState ? { chat_state: chatState } : {}),
       updated_at: new Date().toISOString(),
       client_updated_at: new Date().toISOString(),
     })
@@ -365,13 +371,25 @@ export async function POST(request: Request) {
     });
 
     // Persist full turn (user + AI + collection) for authenticated owners
+    let persisted = false;
     if (viewingId) {
       const supabase = await createClient();
       const {
         data: { user },
       } = await supabase.auth.getUser();
       if (user) {
-        const persisted = await persistAppendedMessages(viewingId, user.id, result.messages);
+        persisted = await persistAppendedMessages(viewingId, user.id, result.messages, {
+          v: 1,
+          normalizedAddress: address,
+          propertyRecord: result.propertyRecord,
+          propertyEvidence: result.propertyEvidence,
+          agendaActiveId: result.agendaActiveId,
+          agendaSkippedIds: result.agendaSkippedIds,
+          collectionSkippedFields: result.collectionSkippedFields,
+          collectionFocusFieldIds: result.collectionFocusFieldIds,
+          conversationStatus: result.conversationStatus,
+          pendingConfirm: result.pendingConfirm,
+        });
         if (!persisted) console.error("viewing_chat_turn_persist");
       }
     }
@@ -394,6 +412,7 @@ export async function POST(request: Request) {
         rawAiResponse: result.rawAiResponse,
         collectionFocusFieldIds: result.collectionFocusFieldIds,
         pendingConfirm: result.pendingConfirm,
+        persisted,
         ...sourceBundle,
       }),
     );

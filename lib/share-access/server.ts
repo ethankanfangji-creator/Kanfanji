@@ -176,6 +176,12 @@ export async function ensureOwnerShareLink(
 ): Promise<{ link: ShareLinkRecord; urlPath: string; needsRegenerate?: boolean }> {
   const viewing = await fetchOwnedViewing(supabase, userId, viewingId);
   if (!viewing) throw new Error("VIEWING_NOT_FOUND");
+  if (viewing.chat_state && options && Object.hasOwn(options, "expiresAt")) {
+    if (options.expiresAt == null) throw new Error("SHARE_EXPIRES_INVALID");
+    const requested = Date.parse(options.expiresAt);
+    const cap = Date.parse(chatShareExpiresAt());
+    if (!Number.isFinite(requested) || requested > cap) throw new Error("SHARE_EXPIRES_INVALID");
+  }
 
   if (options?.rotateToken) {
     const current = await getOwnerShareLink(supabase, userId, viewingId);
@@ -198,7 +204,6 @@ export async function ensureOwnerShareLink(
     options && Object.hasOwn(options, "password") && options.password
       ? await hashSharePassword(options.password)
       : null;
-  if (!(await consumeShareCreateRateLimit(userId))) throw new Error("SHARE_RATE_LIMITED");
   const token = generateShareToken();
   const linkId = crypto.randomUUID();
   let tokenCiphertext: string;
@@ -216,7 +221,8 @@ export async function ensureOwnerShareLink(
         chat_state: viewing.chat_state,
         updated_at: viewing.updated_at,
       })
-    : { snapshot: buildSharePublication(viewing).snapshot, mediaManifest: buildSharePublication(viewing).mediaManifest };
+      : { snapshot: buildSharePublication(viewing).snapshot, mediaManifest: buildSharePublication(viewing).mediaManifest };
+  if (!(await consumeShareCreateRateLimit(userId))) throw new Error("SHARE_RATE_LIMITED");
   const chatExpiry = viewing.chat_state ? chatShareExpiresAt() : null;
   const { data, error } = await supabase
     .from("share_links")
@@ -321,8 +327,6 @@ export async function rotateOwnerShareLink(
 ): Promise<{ link: ShareLinkRecord; urlPath: string; needsRegenerate?: boolean }> {
   const row = await fetchOwnedLink(supabase, userId, linkId);
   if (!row || row.status !== "active") throw new Error("LINK_NOT_FOUND");
-  if (!(await consumeShareCreateRateLimit(userId))) throw new Error("SHARE_RATE_LIMITED");
-  await revokeOwnerShareLink(supabase, userId, linkId);
   const viewing = await fetchOwnedViewing(supabase, userId, row.viewing_id);
   if (!viewing) throw new Error("VIEWING_NOT_FOUND");
   const token = generateShareToken();
@@ -343,6 +347,8 @@ export async function rotateOwnerShareLink(
         updated_at: viewing.updated_at,
       })
     : buildSharePublication(viewing);
+  if (!(await consumeShareCreateRateLimit(userId))) throw new Error("SHARE_RATE_LIMITED");
+  await revokeOwnerShareLink(supabase, userId, linkId);
   const { data, error } = await supabase
     .from("share_links")
     .insert({

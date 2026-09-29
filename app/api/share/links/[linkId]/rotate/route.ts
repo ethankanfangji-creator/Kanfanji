@@ -31,7 +31,9 @@ export async function POST(_req: Request, ctx: Ctx) {
           ? 429
           : message === "SHARE_UNAVAILABLE"
             ? 503
-            : 500;
+            : message === "REPORT_NOT_READY"
+              ? 409
+              : 500;
     return NextResponse.json(
       { error: message, ...(status === 429 ? { code: "rate_limited" } : {}) },
       { status },

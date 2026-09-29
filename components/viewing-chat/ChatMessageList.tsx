@@ -12,6 +12,7 @@ import {
 } from "@/lib/viewing-chat/types";
 import { resolveAgendaId } from "@/lib/viewing-chat/agenda-catalog";
 import { agendaIdToFieldId } from "@/lib/viewing-chat/collection/field-map";
+import { ChatReportBubble } from "@/components/viewing-chat/ChatReportBubble";
 import { useChatMediaUrl } from "@/components/viewing-chat/useChatMediaUrl";
 import { InitialReportCard } from "@/components/viewing-chat/InitialReportCard";
 import type { ChatMediaRef } from "@/lib/viewing-chat/types";
@@ -337,34 +338,22 @@ export function ChatMessageList({
                 </div>
               ) : null}
               {message.type === "report" && message.report ? (
-                <div className="mt-1 space-y-2">
-                  <p className="font-bold">看房報告</p>
-                  <div>
-                    <p className="text-[11px] font-bold text-[#166534]">優點</p>
-                    <ul className="list-disc pl-4 text-[12px]">
-                      {message.report.pros.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div>
-                    <p className="text-[11px] font-bold text-[#991B1B]">風險</p>
-                    <ul className="list-disc pl-4 text-[12px]">
-                      {message.report.risks.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
-                  {onShareReport ? (
-                    <button
-                      type="button"
-                      onClick={onShareReport}
-                      className="mt-1 rounded-full bg-black px-3 py-1.5 text-[12px] font-bold text-white"
-                    >
-                      {shareLabel || "分享連結"}
-                    </button>
-                  ) : null}
-                </div>
+                <ChatReportBubble
+                  summary={message.report.summary}
+                  pros={message.report.pros}
+                  risks={message.report.risks}
+                  checklist={message.report.checklist}
+                  generatedAt={message.report.generatedAt}
+                  labels={{
+                    title: c.reportTitle,
+                    pros: c.reportPros,
+                    risks: c.reportRisks,
+                    checklist: c.reportTitle,
+                    unconfirmed: c.reportPartial,
+                  }}
+                  shareLabel={shareLabel}
+                  onShare={onShareReport}
+                />
               ) : null}
               <p className="mt-1 text-[10px] opacity-50">
                 {new Date(message.timestamp).toLocaleTimeString()}

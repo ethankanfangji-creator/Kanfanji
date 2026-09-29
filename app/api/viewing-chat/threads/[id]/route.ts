@@ -1,6 +1,19 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
+import {
+  assertAllowedKeys,
+  readJsonObject,
+  RequestValidationError,
+} from "@/lib/http/validation";
+import { appendChatMessages } from "@/lib/viewing-chat/append-messages";
+import {
+  assertChatBodySize,
+  parseChatMessages,
+  parseChatState,
+  parseClientUpdatedAt,
+} from "@/lib/viewing-chat/thread-payload";
+import type { ChatMessage } from "@/lib/viewing-chat/types";
 
 export const runtime = "nodejs";
 
@@ -18,35 +31,55 @@ export async function PUT(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return noStore({ code: "UNAUTHENTICATED" }, 401);
-  const body = (await request.json()) as { clientUpdatedAt?: string; messages?: unknown; chatState?: unknown };
-  const admin = createAdminClient();
-  const current = await admin
-    .from("viewings")
-    .select("id, user_id, client_updated_at")
-    .eq("id", id)
-    .maybeSingle();
-  if (current.error || !current.data || current.data.user_id !== user.id) {
-    return noStore({ code: "not_found" }, 404);
+  try {
+    const raw = await request.text();
+    assertChatBodySize(raw);
+    const body = await readJsonObject(new Request(request.url, { method: "PUT", body: raw }));
+    assertAllowedKeys(body, ["clientUpdatedAt", "baseRevision", "messages", "chatState"]);
+    const clientUpdatedAt = parseClientUpdatedAt(body.clientUpdatedAt);
+    const messages = body.messages === undefined ? undefined : parseChatMessages(body.messages);
+    const chatState = body.chatState === undefined ? undefined : parseChatState(body.chatState);
+    const baseRevision = body.baseRevision;
+    if (baseRevision !== undefined && (!Number.isInteger(baseRevision) || Number(baseRevision) < 1)) {
+      throw new RequestValidationError("INVALID_FIELD_TYPE", "baseRevision");
+    }
+    const admin = createAdminClient();
+    const current = await admin
+      .from("viewings")
+      .select("id, user_id, messages, revision")
+      .eq("id", id)
+      .maybeSingle();
+    if (current.error || !current.data || current.data.user_id !== user.id) {
+      return noStore({ code: "not_found" }, 404);
+    }
+    const revision = Number(current.data.revision ?? 1);
+    if (typeof baseRevision === "number" && baseRevision !== revision) {
+      return noStore({ code: "stale", serverRevision: revision }, 409);
+    }
+    const existing = Array.isArray(current.data.messages)
+      ? (current.data.messages as ChatMessage[])
+      : [];
+    const merged = messages ? appendChatMessages(existing, messages) : undefined;
+    const { error } = await admin
+      .from("viewings")
+      .update({
+        ...(merged ? { messages: merged } : {}),
+        ...(chatState ? { chat_state: chatState } : {}),
+        ...(clientUpdatedAt ? { client_updated_at: clientUpdatedAt } : {}),
+        revision: revision + 1,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .eq("user_id", user.id);
+    if (error) return noStore({ code: "unavailable" }, 503);
+    return noStore({ ok: true, revision: revision + 1 });
+  } catch (error) {
+    if (error instanceof RequestValidationError) {
+      const status = error.code === "BODY_TOO_LARGE" ? 413 : 400;
+      return noStore({ code: error.code, field: error.field }, status);
+    }
+    return noStore({ code: "unavailable" }, 503);
   }
-  const serverUpdated = current.data.client_updated_at
-    ? new Date(String(current.data.client_updated_at)).getTime()
-    : 0;
-  const clientUpdated = body.clientUpdatedAt ? new Date(body.clientUpdatedAt).getTime() : 0;
-  if (serverUpdated > clientUpdated) {
-    return noStore({ code: "stale", serverUpdatedAt: current.data.client_updated_at }, 409);
-  }
-  const { error } = await admin
-    .from("viewings")
-    .update({
-      ...(body.messages !== undefined ? { messages: body.messages } : {}),
-      ...(body.chatState !== undefined ? { chat_state: body.chatState } : {}),
-      client_updated_at: body.clientUpdatedAt,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", id)
-    .eq("user_id", user.id);
-  if (error) return noStore({ code: "unavailable" }, 503);
-  return noStore({ ok: true });
 }
 
 export async function GET(
@@ -62,7 +95,7 @@ export async function GET(
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("viewings")
-    .select("id, user_id, messages, report, metadata, chat_state")
+    .select("id, user_id, address, messages, report, metadata, chat_state, revision, updated_at")
     .eq("id", id)
     .maybeSingle();
   if (error || !data || data.user_id !== user.id) return noStore({ code: "not_found" }, 404);

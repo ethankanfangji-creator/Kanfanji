@@ -250,7 +250,7 @@ export function ViewingChatApp() {
     if (searchParams.get("share") !== "1" || !userId) return;
     const threadId = searchParams.get("thread");
     if (threadId) setActiveId(threadId);
-    setShareOpen(true);
+    requestShare();
     router.replace(threadId ? `/?thread=${threadId}` : "/");
   }, [searchParams, userId, router]);
 
@@ -1554,8 +1554,8 @@ export function ViewingChatApp() {
             };
             if (response.status === 429) setShareError(c.shareRateLimited);
             else if (response.status === 503) setShareError(c.shareUnavailable);
-            else if (response.status === 409) setShareError(c.shareNoReportYet);
-            else if (!response.ok) setShareError(data.error || c.shareUnavailable);
+            else if (response.status === 404 || response.status === 409) setShareError(c.shareNoReportYet);
+            else if (!response.ok) setShareError(c.shareUnavailable);
             else {
               setShareError(null);
               setShareLinkId(data.link?.id ?? null);
@@ -1585,7 +1585,8 @@ export function ViewingChatApp() {
             }
             setShareUrl(null);
             setShareLinkId(null);
-            setShareError(c.shareRevoked);
+            setShareError(null);
+            setStatus(c.shareRevoked);
           });
         }}
         onRegenerate={() => {

@@ -197,8 +197,8 @@ export function useEmailCooldown(purpose: CooldownPurpose, email: string) {
     setUntil(nextUntil);
     setNow(Date.now());
     void cooldownStorageKey(purpose, email).then((key) => {
-      if (!alive.current) return;
       writeStored(key, nextUntil);
+      if (!alive.current) return;
       setStorageKey(key);
     });
   }

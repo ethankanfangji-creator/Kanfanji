@@ -9,6 +9,7 @@ import {
   upsertLocalThread,
 } from "./local-store";
 import { appendChatMessages } from "./append-messages";
+import { removeMediaByThread } from "./media-library";
 import type { ChatMessage, ViewingChatThread } from "./types";
 
 const LOCK_PREFIX = "kf.claim.";
@@ -98,6 +99,7 @@ export async function pullCloudThreads(userId: string) {
   const remoteIds = new Set((list.threads ?? []).map((thread) => thread.id));
   for (const id of syncedThreadIdsMissingFromCloud(listLocalThreads(), remoteIds, userId)) {
     deleteLocalThread(id);
+    void removeMediaByThread(id);
   }
   for (const remote of list.threads ?? []) {
     const local = getLocalThread(remote.id);
@@ -157,6 +159,7 @@ export async function pullCloudThreads(userId: string) {
     }
     if (thread.cloud?.revision || thread.cloud?.state === "synced") {
       deleteLocalThread(thread.id);
+      void removeMediaByThread(thread.id);
       continue;
     }
     const pushed = await pushViewingThread({

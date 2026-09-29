@@ -159,7 +159,7 @@ export async function POST(request: Request) {
       pros: Array.isArray(body.pros) ? body.pros : [],
       risks: Array.isArray(body.risks) ? body.risks : [],
       property: body.property ?? {},
-      property_id: body.property_id ?? null,
+      property_id: null,
       user_id: user!.id,
       is_pro: isPro,
       photo_urls: [] as string[],
@@ -173,31 +173,11 @@ export async function POST(request: Request) {
         : {}),
     };
 
-    let { data, error } = await admin
+    const { data, error } = await admin
       .from("viewings")
       .insert(payload)
       .select("id, revision")
       .single();
-
-    if (error?.message?.includes("property_id")) {
-      const withoutPropertyId = { ...payload };
-      delete (withoutPropertyId as { property_id?: string | null }).property_id;
-      ({ data, error } = await admin
-        .from("viewings")
-        .insert(withoutPropertyId)
-        .select("id, revision")
-        .single());
-    }
-    if (error?.message?.includes("property")) {
-      const withoutProperty = { ...payload };
-      delete (withoutProperty as { property?: Record<string, unknown> }).property;
-      delete (withoutProperty as { property_id?: string | null }).property_id;
-      ({ data, error } = await admin
-        .from("viewings")
-        .insert(withoutProperty)
-        .select("id, revision")
-        .single());
-    }
     throwOnSupabaseError(error, "viewings insert");
     if (!data?.id) {
       return NextResponse.json({ error: "存檔失敗：沒有回傳 id" }, { status: 500 });

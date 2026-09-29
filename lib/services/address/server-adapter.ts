@@ -1,6 +1,6 @@
 /**
  * Server-side AddressService wrapping BC Geocoder + Nominatim helpers.
- * Never call from client components — use /api/address-suggest and /api/lookup-address.
+ * Never call from client components — use /api/address-suggest.
  */
 
 import {

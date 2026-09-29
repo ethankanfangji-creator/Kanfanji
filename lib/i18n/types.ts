@@ -782,6 +782,7 @@ export type Messages = {
     emptyHistory: string;
     deleteHistory: string;
     deleteHistoryConfirm: string;
+    deleteFailed: string;
     pinHistory: string;
     unpinHistory: string;
     recentHint: string;

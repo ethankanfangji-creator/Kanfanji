@@ -816,6 +816,7 @@ const zhHant: Messages = {
     emptyHistory: "尚無看房紀錄",
     deleteHistory: "刪除紀錄",
     deleteHistoryConfirm: "確定要刪除這筆看房紀錄？",
+    deleteFailed: "無法從雲端刪除這筆紀錄，請再試一次。",
     pinHistory: "釘選紀錄",
     unpinHistory: "取消釘選",
     recentHint: "最近的看房",

@@ -1,6 +1,11 @@
 import { claimLocalThreads } from "./claim-local-threads";
 import { applyChatStateToLocal } from "./chat-state";
-import { buildChatStatePayload, pushViewingThread, syncedThreadIdsMissingFromCloud } from "./cloud-push";
+import {
+  buildChatStatePayload,
+  pushViewingThread,
+  syncedThreadIdsMissingFromCloud,
+  wasThreadDeletedHere,
+} from "./cloud-push";
 import {
   deleteLocalThread,
   getLocalThread,
@@ -102,6 +107,7 @@ export async function pullCloudThreads(userId: string) {
     void removeMediaByThread(id);
   }
   for (const remote of list.threads ?? []) {
+    if (wasThreadDeletedHere(remote.id)) continue;
     const local = getLocalThread(remote.id);
     const localNewer = local && local.updatedAt >= remote.updatedAt && local.cloud?.state === "synced";
     if (localNewer) continue;
@@ -141,6 +147,7 @@ export async function pullCloudThreads(userId: string) {
     });
   }
   for (const thread of listLocalThreads()) {
+    if (wasThreadDeletedHere(thread.id)) continue;
     if (thread.ownerUserId !== userId) continue;
     if (thread.cloud && thread.cloud.state !== "syncing") continue;
     const detail = await fetch(`/api/viewing-chat/threads/${thread.id}`);

@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { pushViewingThread, syncedThreadIdsMissingFromCloud } from "./cloud-push";
+import {
+  deleteViewingThread,
+  pushViewingThread,
+  syncedThreadIdsMissingFromCloud,
+  wasThreadDeletedHere,
+} from "./cloud-push";
 
 describe("pushViewingThread", () => {
   it("creates an unsynced thread with POST then PUT and does not GET", async () => {
@@ -64,6 +69,30 @@ describe("pushViewingThread", () => {
     });
     expect(result.deleted).toBe(true);
     expect(calls).toEqual(["PUT"]);
+  });
+});
+
+describe("deleteViewingThread", () => {
+  it("treats 200 and 404 as success so pull cannot restore the row", async () => {
+    const ok = await deleteViewingThread("gone-ok", async () => new Response("{}", { status: 200 }));
+    expect(ok).toEqual({ ok: true, status: 200 });
+    expect(wasThreadDeletedHere("gone-ok")).toBe(true);
+
+    const missing = await deleteViewingThread(
+      "gone-missing",
+      async () => new Response("{}", { status: 404 }),
+    );
+    expect(missing).toEqual({ ok: true, status: 404 });
+    expect(wasThreadDeletedHere("gone-missing")).toBe(true);
+  });
+
+  it("does not mark a thread deleted when the cloud delete fails", async () => {
+    const result = await deleteViewingThread(
+      "still-there",
+      async () => new Response("{}", { status: 503 }),
+    );
+    expect(result).toEqual({ ok: false, status: 503 });
+    expect(wasThreadDeletedHere("still-there")).toBe(false);
   });
 });
 

@@ -50,7 +50,12 @@ import {
 import { addMediaFile, getMediaBlob, removeMediaByThread } from "@/lib/viewing-chat/media-library";
 import { uploadViewingFile, appendViewingPath } from "@/lib/media";
 import { claimAccountThreads, pullCloudThreads } from "@/lib/viewing-chat/claim-account";
-import { buildChatStatePayload, pushViewingThread } from "@/lib/viewing-chat/cloud-push";
+import {
+  buildChatStatePayload,
+  deleteViewingThread,
+  pushViewingThread,
+  wasThreadDeletedHere,
+} from "@/lib/viewing-chat/cloud-push";
 import { appendChatMessages } from "@/lib/viewing-chat/append-messages";
 import { GuestLimitDialog } from "@/components/viewing-chat/GuestLimitDialog";
 import { ShareReportDialog } from "@/components/viewing-chat/ShareReportDialog";
@@ -441,54 +446,67 @@ export function ViewingChatApp() {
   }
 
   async function pushLocalThread(threadId: string) {
-    if (userId) await attachStoredMedia(threadId);
-    const thread = getLocalThread(threadId);
-    if (!thread || !userId || thread.cloud?.state === "blocked_limit") return;
-    const result = await syncWithRetry({
-      put: async () => {
-        const current = getLocalThread(threadId);
-        if (!current) return { status: 404 };
-        const pushed = await pushViewingThread({
-          threadId,
-          address: current.address,
-          baseRevision: current.cloud?.revision,
-          previouslySynced: current.cloud?.state === "synced" || typeof current.cloud?.revision === "number",
-          messages: current.messages,
-          chatState: buildChatStatePayload(current),
-          clientUpdatedAt: new Date().toISOString(),
-          report: current.report,
-          metadata: current.metadata,
-        });
-        if (pushed.deleted) {
-          deleteLocalThread(threadId);
-          if (activeId === threadId) setActiveId(null);
-          return { status: 200 };
-        }
-        if (pushed.status === 409 && pushed.remote?.messages) {
-          const remoteMessages = pushed.remote.messages as ChatMessage[];
-          saveLocalMessages(threadId, appendChatMessages(remoteMessages, current.messages));
-          patchLocalThread(threadId, {
-            cloud: { ...current.cloud, state: "syncing", revision: pushed.revision },
+    const previous = threadCreations.current.get(threadId);
+    if (previous) await previous;
+    const work = (async () => {
+      if (wasThreadDeletedHere(threadId)) return;
+      if (userId) await attachStoredMedia(threadId);
+      const thread = getLocalThread(threadId);
+      if (!thread || !userId || thread.cloud?.state === "blocked_limit") return;
+      const result = await syncWithRetry({
+        put: async () => {
+          const current = getLocalThread(threadId);
+          if (!current) return { status: 404 };
+          const pushed = await pushViewingThread({
+            threadId,
+            address: current.address,
+            baseRevision: current.cloud?.revision,
+            previouslySynced: current.cloud?.state === "synced" || typeof current.cloud?.revision === "number",
+            messages: current.messages,
+            chatState: buildChatStatePayload(current),
+            clientUpdatedAt: new Date().toISOString(),
+            report: current.report,
+            metadata: current.metadata,
           });
-          setStatus(c.syncNewer);
-        }
-        if (pushed.status >= 200 && pushed.status < 300) {
-          patchLocalThread(threadId, {
-            ownerUserId: userId,
-            cloud: {
-              state: "synced",
-              lastSyncedAt: new Date().toISOString(),
-              revision: pushed.revision,
-            },
-          });
-        }
-        return { status: pushed.status };
-      },
-    });
-    if (result !== "synced") {
-      patchLocalThread(threadId, { cloud: { state: result } });
+          if (pushed.deleted) {
+            deleteLocalThread(threadId);
+            if (activeId === threadId) setActiveId(null);
+            return { status: 200 };
+          }
+          if (pushed.status === 409 && pushed.remote?.messages) {
+            const remoteMessages = pushed.remote.messages as ChatMessage[];
+            saveLocalMessages(threadId, appendChatMessages(remoteMessages, current.messages));
+            patchLocalThread(threadId, {
+              cloud: { ...current.cloud, state: "syncing", revision: pushed.revision },
+            });
+            setStatus(c.syncNewer);
+          }
+          if (pushed.status >= 200 && pushed.status < 300) {
+            patchLocalThread(threadId, {
+              ownerUserId: userId,
+              cloud: {
+                state: "synced",
+                lastSyncedAt: new Date().toISOString(),
+                revision: pushed.revision,
+              },
+            });
+          }
+          return { status: pushed.status };
+        },
+      });
+      if (result !== "synced") {
+        patchLocalThread(threadId, { cloud: { state: result } });
+      }
+      refreshLocal();
+    })();
+    threadCreations.current.set(threadId, work);
+    try {
+      await work;
+    } finally {
+      if (threadCreations.current.get(threadId) === work) {
+        threadCreations.current.delete(threadId);
+      }
     }
-    refreshLocal();
   }
 
   async function uploadChatFile(threadId: string, file: File, mediaId: string, kind: string) {
@@ -1548,8 +1566,25 @@ export function ViewingChatApp() {
     leaveCompareMode();
   }
 
-  function deleteThread(id: string) {
+  async function deleteThread(id: string) {
     if (!window.confirm(c.deleteHistoryConfirm)) return;
+    const queued = syncTimers.current.get(id);
+    if (queued) window.clearTimeout(queued);
+    syncTimers.current.delete(id);
+    const inFlight = threadCreations.current.get(id);
+    if (inFlight) await inFlight;
+    if (userId) {
+      try {
+        const deleted = await deleteViewingThread(id);
+        if (!deleted.ok) {
+          setStatus(c.deleteFailed);
+          return;
+        }
+      } catch {
+        setStatus(c.deleteFailed);
+        return;
+      }
+    }
     deleteLocalThread(id);
     void removeMediaByThread(id);
     refreshLocal();

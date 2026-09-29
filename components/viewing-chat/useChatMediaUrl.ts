@@ -37,23 +37,26 @@ async function resolveUrl(ref: ChatMediaRef): Promise<string | null> {
   return signed.url;
 }
 
-export function useChatMediaUrl(ref: ChatMediaRef | null | undefined): string | null {
-  const [url, setUrl] = useState<string | null>(() => {
-    if (!ref) return null;
-    const cached = cache.get(ref.id);
-    return cached && cached.expiresAt > Date.now() + 30_000 ? cached.url : null;
-  });
+export function useChatMediaUrl(ref: ChatMediaRef | null | undefined): {
+  url: string | null;
+  status: "loading" | "ready" | "missing";
+} {
+  const [url, setUrl] = useState<string | null>(null);
+  const [status, setStatus] = useState<"loading" | "ready" | "missing">(ref ? "loading" : "missing");
 
   useEffect(() => {
     if (!ref) return;
     let active = true;
     void resolveUrl(ref).then((next) => {
-      if (active) setUrl(next);
+      if (!active) return;
+      setUrl(next);
+      setStatus(next ? "ready" : "missing");
     });
     return () => {
       active = false;
     };
   }, [ref]);
 
-  return url;
+  if (!ref) return { url: null, status: "missing" };
+  return { url, status };
 }

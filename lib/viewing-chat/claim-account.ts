@@ -1,5 +1,6 @@
 import { claimLocalThreads } from "./claim-local-threads";
-import { buildChatStatePayload } from "./cloud-push";
+import { applyChatStateToLocal } from "./chat-state";
+import { buildChatStatePayload, pushViewingThread } from "./cloud-push";
 import {
   getLocalThread,
   listLocalThreads,
@@ -10,12 +11,24 @@ import { appendChatMessages } from "./append-messages";
 import type { ChatMessage, ViewingChatThread } from "./types";
 
 const LOCK_PREFIX = "kf.claim.";
+const LOCK_MS = 2 * 60 * 1000;
+
+function claimLockFresh(lock: string) {
+  const raw = window.sessionStorage.getItem(lock);
+  const at = Number(raw);
+  if (!Number.isFinite(at) || Date.now() - at > LOCK_MS) {
+    window.sessionStorage.removeItem(lock);
+    return false;
+  }
+  return true;
+}
 
 export async function claimAccountThreads(userId: string): Promise<{ blocked: number }> {
   if (typeof window === "undefined") return { blocked: 0 };
   const lock = `${LOCK_PREFIX}${userId}`;
-  if (window.sessionStorage.getItem(lock)) return { blocked: 0 };
-  window.sessionStorage.setItem(lock, "1");
+  if (claimLockFresh(lock)) return { blocked: 0 };
+  window.sessionStorage.setItem(lock, String(Date.now()));
+  try {
   const pending = listLocalThreads()
     .filter((thread) => !thread.ownerUserId)
     .map((thread) => ({
@@ -67,7 +80,12 @@ export async function claimAccountThreads(userId: string): Promise<{ blocked: nu
       });
     }
   }
+  if (result.pending > 0) window.sessionStorage.removeItem(lock);
   return { blocked: result.blocked };
+  } catch (error) {
+    window.sessionStorage.removeItem(lock);
+    throw error;
+  }
 }
 
 export async function pullCloudThreads(userId: string) {
@@ -88,12 +106,12 @@ export async function pullCloudThreads(userId: string) {
       messages: ChatMessage[];
       report: ViewingChatThread["report"];
       metadata: ViewingChatThread["metadata"];
-      chat_state: { pinned?: boolean } | null;
+      chat_state: Record<string, unknown> | null;
       revision: number;
       updated_at: string;
       created_at?: string;
     };
-    const base = local ?? {
+    const base: ViewingChatThread = local ?? {
       id: row.id,
       address: row.address,
       createdAt: row.created_at ?? row.updated_at,
@@ -103,16 +121,16 @@ export async function pullCloudThreads(userId: string) {
       metadata: null,
       pinned: false,
     };
+    const restored = applyChatStateToLocal(base, row.chat_state);
     upsertLocalThread({
-      ...base,
-      address: row.address || base.address,
-      messages: appendChatMessages(base.messages ?? [], row.messages ?? []),
-      report: row.report ?? base.report,
-      metadata: row.metadata ?? base.metadata,
-      pinned: Boolean(row.chat_state?.pinned),
+      ...restored,
+      address: row.address || restored.address,
+      messages: appendChatMessages(restored.messages ?? [], row.messages ?? []),
+      report: row.report ?? restored.report,
+      metadata: row.metadata ?? restored.metadata,
       updatedAt: row.updated_at,
       ownerUserId: userId,
-      cloud: { state: "synced", lastSyncedAt: row.updated_at, revision: row.revision } as ViewingChatThread["cloud"],
+      cloud: { state: "synced", lastSyncedAt: row.updated_at, revision: row.revision },
     });
   }
   for (const thread of listLocalThreads()) {
@@ -120,10 +138,31 @@ export async function pullCloudThreads(userId: string) {
     if (thread.cloud && thread.cloud.state !== "syncing") continue;
     const detail = await fetch(`/api/viewing-chat/threads/${thread.id}`);
     if (detail.ok) {
-      const row = (await detail.json()) as { revision?: number; updated_at?: string };
+      const row = (await detail.json()) as { revision?: number; updated_at?: string; chat_state?: unknown };
+      const restored = applyChatStateToLocal(thread, row.chat_state);
       patchLocalThread(thread.id, {
-        cloud: { state: "synced", lastSyncedAt: row.updated_at ?? null, revision: row.revision } as ViewingChatThread["cloud"],
+        ...restored,
+        cloud: { state: "synced", lastSyncedAt: row.updated_at ?? null, revision: row.revision },
       });
+      continue;
     }
+    if (detail.status !== 404) {
+      patchLocalThread(thread.id, { cloud: { state: "failed" } });
+      continue;
+    }
+    const pushed = await pushViewingThread({
+      threadId: thread.id,
+      address: thread.address,
+      messages: thread.messages,
+      chatState: buildChatStatePayload(thread),
+      clientUpdatedAt: new Date().toISOString(),
+      report: thread.report,
+      metadata: thread.metadata,
+    });
+    patchLocalThread(thread.id, {
+      cloud: pushed.status >= 200 && pushed.status < 300
+        ? { state: "synced", lastSyncedAt: new Date().toISOString(), revision: pushed.revision }
+        : { state: "failed" },
+    });
   }
 }

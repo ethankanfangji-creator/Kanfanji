@@ -7,11 +7,12 @@ import {
   isShareTokenFormat,
 } from "./crypto";
 import { decryptShareToken, encryptShareToken } from "./token-vault";
+import { assertChatShareExpiry } from "./chat-share-expiry";
 import { chatShareExpiresAt, consumeShareCreateRateLimit } from "./share-rate-limit.server";
-import { buildChatReportPublication } from "./publication";
 import type { ShareLinkRecord } from "./types";
 import { resolveShareLinkGate } from "./public-dto";
 import {
+  buildChatReportPublication,
   buildSharePublication,
   isPublishedShareSnapshot,
   parseMediaManifest,
@@ -176,12 +177,7 @@ export async function ensureOwnerShareLink(
 ): Promise<{ link: ShareLinkRecord; urlPath: string; needsRegenerate?: boolean }> {
   const viewing = await fetchOwnedViewing(supabase, userId, viewingId);
   if (!viewing) throw new Error("VIEWING_NOT_FOUND");
-  if (viewing.chat_state && options && Object.hasOwn(options, "expiresAt")) {
-    if (options.expiresAt == null) throw new Error("SHARE_EXPIRES_INVALID");
-    const requested = Date.parse(options.expiresAt);
-    const cap = Date.parse(chatShareExpiresAt());
-    if (!Number.isFinite(requested) || requested > cap) throw new Error("SHARE_EXPIRES_INVALID");
-  }
+  if (options) assertChatShareExpiry(viewing, options);
 
   if (options?.rotateToken) {
     const current = await getOwnerShareLink(supabase, userId, viewingId);
@@ -259,6 +255,9 @@ export async function updateOwnerShareLink(
 ): Promise<ShareLinkRecord> {
   const row = await fetchOwnedLink(supabase, userId, linkId);
   if (!row || row.status !== "active") throw new Error("LINK_NOT_FOUND");
+  const viewing = await fetchOwnedViewing(supabase, userId, row.viewing_id);
+  if (!viewing) throw new Error("LINK_NOT_FOUND");
+  assertChatShareExpiry(viewing, patch);
   const setExpires = Object.hasOwn(patch, "expiresAt");
   const setPassword = Object.hasOwn(patch, "password");
   if (!setExpires && !setPassword) return toShareLinkRecord(row);
@@ -348,24 +347,20 @@ export async function rotateOwnerShareLink(
       })
     : buildSharePublication(viewing);
   if (!(await consumeShareCreateRateLimit(userId))) throw new Error("SHARE_RATE_LIMITED");
-  await revokeOwnerShareLink(supabase, userId, linkId);
-  const { data, error } = await supabase
-    .from("share_links")
-    .insert({
-      id: nextId,
-      viewing_id: row.viewing_id,
-      token: null,
-      token_hash: hashShareToken(token),
-      token_ciphertext: tokenCiphertext,
-      token_key_id: "v1",
-      expires_at: viewing.chat_state ? chatShareExpiresAt() : null,
-      published_snapshot: publication.snapshot,
-      media_manifest: publication.mediaManifest,
-    })
-    .select(LINK_COLUMNS)
-    .single();
+  const { data, error } = await supabase.rpc("rotate_chat_share_link", {
+    p_old_id: linkId,
+    p_user_id: userId,
+    p_new_id: nextId,
+    p_token_hash: hashShareToken(token),
+    p_token_ciphertext: tokenCiphertext,
+    p_expires_at: viewing.chat_state ? chatShareExpiresAt() : null,
+    p_snapshot: publication.snapshot,
+    p_manifest: publication.mediaManifest,
+  });
   if (error) throw error;
-  return { link: toShareLinkRecord(data as ShareLinkRow), urlPath: `/s/${token}` };
+  const inserted = (Array.isArray(data) ? data[0] : data) as ShareLinkRow | null;
+  if (!inserted) throw new Error("LINK_CONFLICT");
+  return { link: toShareLinkRecord(inserted), urlPath: `/s/${token}` };
 }
 
 export async function fetchViewingByShareTokenAdmin(

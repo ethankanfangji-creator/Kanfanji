@@ -23,6 +23,8 @@ export type Messages = {
     guest: string;
     noKeys: string;
     freeQuota: string;
+    loadingTitle: string;
+    loadingBody: string;
   };
   sync: {
     savedLocal: string;
@@ -922,7 +924,6 @@ export type Messages = {
     sourceAddedOk: string;
     sourcePartial: string;
     sourceIngestFailed: string;
-    sourceSkipped: string;
     initialReportReady: string;
     externalEnriching: string;
     statusAddressReceived: string;
@@ -933,13 +934,9 @@ export type Messages = {
     statusStage: string;
     conflictTitle: string;
     conflictConfirm: string;
-    quickPasteUrl: string;
     quickUploadPhoto: string;
     quickUploadScreenshot: string;
     quickUploadHoaDoc: string;
-    quickPasteText: string;
-    quickSkip: string;
-    quickAddListingOptional: string;
     quickBiggestRisk: string;
     quickAskAgent: string;
     quickUnverified: string;
@@ -947,10 +944,7 @@ export type Messages = {
     quickPhotoCheck: string;
     quickChecklist: string;
     quickNextRoom: string;
-    promptListingUrl: string;
-    promptListingText: string;
     sourceUrlRecorded: string;
-    sourceSoftFailHint: string;
     statusUrlRecorded: string;
     summaryTitle: string;
     summaryEmpty: string;
@@ -977,10 +971,7 @@ export type Messages = {
     changeConflict: string;
     changeSkipped: string;
     changeUnknown: string;
-    actionSupplement: string;
-    actionCorrect: string;
     actionSkip: string;
-    actionSummarize: string;
     actionFinish: string;
     syncGuest: string;
     guestLocalNotice: string;

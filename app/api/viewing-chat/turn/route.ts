@@ -21,6 +21,9 @@ import type { ChatMessage } from "@/lib/viewing-chat/types";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { appendChatMessages } from "@/lib/viewing-chat/append-messages";
+import { mergeChatState } from "@/lib/viewing-chat/chat-state";
+import { classifyOwnedMediaPath, type MediaColumn } from "@/lib/viewing-chat/media-path";
+import { MEDIA_BUCKET } from "@/lib/supabase";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -44,7 +47,7 @@ async function persistAppendedMessages(
   const admin = createAdminClient();
   const current = await admin
     .from("viewings")
-    .select("messages, revision, photo_urls")
+    .select("messages, revision, photo_urls, video_urls, audio_urls, chat_state")
     .eq("id", viewingId)
     .eq("user_id", userId)
     .maybeSingle();
@@ -54,18 +57,13 @@ async function persistAppendedMessages(
     : [];
   const merged = appendChatMessages(existing, incoming);
   const revision = Number(current.data.revision ?? 1);
-  const photoUrls = Array.isArray(current.data.photo_urls)
-    ? (current.data.photo_urls as string[])
-    : [];
-  const uploaded = incoming.flatMap((message) =>
-    (message.media ?? []).map((item) => item.path).filter((path): path is string => Boolean(path)),
-  );
+  const mediaPatch = await acceptedMediaColumns(admin, userId, viewingId, incoming, current.data);
   const { error } = await admin
     .from("viewings")
     .update({
       messages: merged,
-      ...(chatState ? { chat_state: chatState } : {}),
-      ...(uploaded.length ? { photo_urls: [...new Set([...photoUrls, ...uploaded])] } : {}),
+      ...(chatState ? { chat_state: mergeChatState(current.data.chat_state, chatState) } : {}),
+      ...mediaPatch,
       revision: revision + 1,
       updated_at: new Date().toISOString(),
       client_updated_at: new Date().toISOString(),
@@ -73,6 +71,46 @@ async function persistAppendedMessages(
     .eq("id", viewingId)
     .eq("user_id", userId);
   return !error;
+}
+
+async function acceptedMediaColumns(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  viewingId: string,
+  incoming: ChatMessage[],
+  current: { photo_urls?: unknown; video_urls?: unknown; audio_urls?: unknown },
+) {
+  const grouped: Record<MediaColumn, string[]> = {
+    photo_urls: Array.isArray(current.photo_urls) ? [...(current.photo_urls as string[])] : [],
+    video_urls: Array.isArray(current.video_urls) ? [...(current.video_urls as string[])] : [],
+    audio_urls: Array.isArray(current.audio_urls) ? [...(current.audio_urls as string[])] : [],
+  };
+  const paths = incoming.flatMap((message) =>
+    (message.media ?? []).map((item) => item.path).filter((path): path is string => Boolean(path)),
+  );
+  let changed = false;
+  for (const path of paths) {
+    const column = classifyOwnedMediaPath(path, userId, viewingId);
+    if (!column) {
+      console.error("chat_media_path_rejected");
+      continue;
+    }
+    const name = path.slice(path.lastIndexOf("/") + 1);
+    const prefix = path.slice(0, path.lastIndexOf("/"));
+    const listed = await admin.storage.from(MEDIA_BUCKET).list(prefix, { search: name, limit: 20 });
+    if (listed.error || !listed.data?.some((file) => file.name === name)) {
+      console.error("chat_media_missing");
+      continue;
+    }
+    grouped[column].push(path);
+    changed = true;
+  }
+  if (!changed) return {};
+  return {
+    photo_urls: [...new Set(grouped.photo_urls)],
+    video_urls: [...new Set(grouped.video_urls)],
+    audio_urls: [...new Set(grouped.audio_urls)],
+  };
 }
 
 export async function POST(request: Request) {

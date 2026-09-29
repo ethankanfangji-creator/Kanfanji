@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 export function ChatReportShareCard({
   address,
   generatedAt,
@@ -9,7 +11,7 @@ export function ChatReportShareCard({
   labels,
 }: {
   address: string;
-  generatedAt: string;
+  generatedAt: ReactNode;
   summary: string | null;
   pros: string[];
   risks: string[];

@@ -25,6 +25,7 @@ export function ShareReportDialog({
     create: string;
     revoke: string;
     regenerate: string;
+    regenerateConfirm?: string;
     copy: string;
     copyFailed: string;
     unavailable: string;
@@ -93,7 +94,14 @@ export function ShareReportDialog({
               <button type="button" className="rounded-full border px-3 py-2 text-[12px] font-bold" onClick={onRevoke}>
                 {labels.revoke}
               </button>
-              <button type="button" className="rounded-full border px-3 py-2 text-[12px] font-bold" onClick={onRegenerate}>
+              <button
+                type="button"
+                className="rounded-full border px-3 py-2 text-[12px] font-bold"
+                onClick={() => {
+                  if (labels.regenerateConfirm && !window.confirm(labels.regenerateConfirm)) return;
+                  onRegenerate();
+                }}
+              >
                 {labels.regenerate}
               </button>
             </>

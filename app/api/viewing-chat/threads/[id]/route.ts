@@ -13,6 +13,7 @@ import {
   parseChatState,
   parseClientUpdatedAt,
 } from "@/lib/viewing-chat/thread-payload";
+import { mergeChatState } from "@/lib/viewing-chat/chat-state";
 import type { ChatMessage } from "@/lib/viewing-chat/types";
 
 export const runtime = "nodejs";
@@ -46,13 +47,16 @@ export async function PUT(
     const admin = createAdminClient();
     const current = await admin
       .from("viewings")
-      .select("id, user_id, messages, revision")
+      .select("id, user_id, messages, revision, chat_state")
       .eq("id", id)
       .maybeSingle();
     if (current.error || !current.data || current.data.user_id !== user.id) {
       return noStore({ code: "not_found" }, 404);
     }
     const revision = Number(current.data.revision ?? 1);
+    if (baseRevision === undefined) {
+      return noStore({ code: "base_revision_required" }, 400);
+    }
     if (typeof baseRevision === "number" && baseRevision !== revision) {
       return noStore({ code: "stale", serverRevision: revision }, 409);
     }
@@ -64,7 +68,7 @@ export async function PUT(
       .from("viewings")
       .update({
         ...(merged ? { messages: merged } : {}),
-        ...(chatState ? { chat_state: chatState } : {}),
+        ...(chatState ? { chat_state: mergeChatState(current.data.chat_state, chatState) } : {}),
         ...(clientUpdatedAt ? { client_updated_at: clientUpdatedAt } : {}),
         revision: revision + 1,
         updated_at: new Date().toISOString(),
@@ -113,7 +117,30 @@ export async function DELETE(
   } = await supabase.auth.getUser();
   if (!user) return noStore({ code: "UNAUTHENTICATED" }, 401);
   const admin = createAdminClient();
+  const owned = await admin
+    .from("viewings")
+    .select("id")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (owned.error || !owned.data) return noStore({ code: "not_found" }, 404);
+  await removeViewingObjects(admin, user.id, id);
   const { error } = await admin.from("viewings").delete().eq("id", id).eq("user_id", user.id);
   if (error) return noStore({ code: "unavailable" }, 503);
   return noStore({ ok: true });
+}
+
+async function removeViewingObjects(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  viewingId: string,
+) {
+  const bucket = admin.storage.from("viewing-media");
+  for (const folder of ["photos", "videos", "audios"]) {
+    const prefix = `${userId}/${viewingId}/${folder}`;
+    const listed = await bucket.list(prefix);
+    const names = (listed.data ?? []).map((item) => item.name).filter(Boolean);
+    if (names.length === 0) continue;
+    await bucket.remove(names.map((name) => `${prefix}/${name}`));
+  }
 }

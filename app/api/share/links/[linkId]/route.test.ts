@@ -71,4 +71,17 @@ describe("PATCH /api/share/links/:linkId", () => {
       { password: null },
     );
   });
+
+  it("returns 400 when a chat share expiry is rejected", async () => {
+    updateOwnerShareLink.mockRejectedValue(new Error("SHARE_EXPIRES_INVALID"));
+    const response = await PATCH(
+      new Request("http://test/api/share/links/link-1", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expiresAt: null }),
+      }),
+      { params: Promise.resolve({ linkId: "link-1" }) },
+    );
+    expect(response.status).toBe(400);
+  });
 });

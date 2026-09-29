@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { cookies, headers } from "next/headers";
 import { ArrowLeft, MapPin, ShieldAlert } from "lucide-react";
 import { ChatReportShareCard } from "@/components/share-card/ChatReportShareCard";
+import { LocalTime } from "@/components/share-card/LocalTime";
 import { DecisionSummaryCard } from "@/components/share-card/DecisionSummaryCard";
 import { ShareUnlockForm } from "@/components/share-card/ShareUnlockForm";
 import { detectLocale, htmlLang, isLocale, LOCALE_STORAGE_KEY, type Locale } from "@/lib/i18n/config";
@@ -23,10 +24,7 @@ async function requestLocale(): Promise<Locale> {
 }
 
 function formatWhen(value: string | null | undefined, locale: Locale) {
-  if (!value) return "—";
-  const parsed = Date.parse(value);
-  if (Number.isNaN(parsed)) return "—";
-  return new Date(parsed).toLocaleString(htmlLang(locale));
+  return <LocalTime iso={value} locale={htmlLang(locale)} />;
 }
 
 const READONLY_LABELS = {
@@ -129,7 +127,7 @@ function LegacyMinimalCard({
   pros: string[];
   risks: string[];
   photoUrls: string[];
-  updatedAt: string | null;
+  updatedAt: ReactNode;
   labels: { noAddress: string; updated: string; pros: string; risks: string; empty: string };
 }) {
   return (
@@ -267,9 +265,7 @@ function renderResult(token: string, result: PublicShareResult, locale: Locale) 
             <p className="text-[10px] text-center text-[#9CA3AF]">
               {share.updatedLabel}{" "}
               {formatWhen(result.meta.snapshotUpdatedAt, locale)}
-              {result.meta.expiresAt
-                ? ` · ${formatWhen(result.meta.expiresAt, locale)}`
-                : ""}
+              {result.meta.expiresAt ? <> · {formatWhen(result.meta.expiresAt, locale)}</> : null}
             </p>
           }
         />

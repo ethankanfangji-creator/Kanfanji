@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const COOLDOWN_MS = 60_000;
 const KEY_PREFIX = "kanfangji.authCooldown.";
@@ -133,6 +133,14 @@ export function useEmailCooldown(purpose: CooldownPurpose, email: string) {
   const [storageKey, setStorageKey] = useState<string | null>(null);
   const [until, setUntil] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const alive = useRef(true);
+
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -140,7 +148,11 @@ export function useEmailCooldown(purpose: CooldownPurpose, email: string) {
     void cooldownStorageKey(purpose, email).then((key) => {
       if (cancelled) return;
       setStorageKey(key);
-      setUntil(readUntil(key));
+      setUntil((current) => {
+        const stored = readUntil(key);
+        if (current != null && (stored == null || current >= stored)) return current;
+        return stored;
+      });
       setNow(Date.now());
     });
     return () => {
@@ -182,11 +194,12 @@ export function useEmailCooldown(purpose: CooldownPurpose, email: string) {
 
   function start() {
     const nextUntil = Date.now() + COOLDOWN_MS;
+    setUntil(nextUntil);
+    setNow(Date.now());
     void cooldownStorageKey(purpose, email).then((key) => {
+      if (!alive.current) return;
       writeStored(key, nextUntil);
       setStorageKey(key);
-      setUntil(nextUntil);
-      setNow(Date.now());
     });
   }
 

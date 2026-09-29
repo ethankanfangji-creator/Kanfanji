@@ -35,7 +35,10 @@ export async function GET(req: Request) {
     const admin = createAdminClient();
     const { link, viewing, urlPath, needsRegenerate } = await getOwnerShareLink(admin, user.id, viewingId);
     if (!viewing) {
-      return NextResponse.json({ error: "找不到案件" }, { status: 404 });
+      return NextResponse.json(
+        { error: "找不到案件" },
+        { status: 404, headers: { "Cache-Control": "no-store" } },
+      );
     }
     const history = await listOwnerShareLinks(admin, user.id, viewingId);
     return NextResponse.json(

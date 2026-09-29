@@ -35,8 +35,14 @@ function readStoredLocale(): Locale | null {
   return isLocale(stored) ? stored : null;
 }
 
-export function I18nProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>(DEFAULT_LOCALE);
+export function I18nProvider({
+  children,
+  initialLocale = DEFAULT_LOCALE,
+}: {
+  children: ReactNode;
+  initialLocale?: Locale;
+}) {
+  const [locale, setLocaleState] = useState<Locale>(initialLocale);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {

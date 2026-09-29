@@ -20,6 +20,7 @@ export type CreateViewingResult = {
   freeCount: number;
   limit: number;
   isPro: boolean;
+  revision?: number;
 };
 
 export async function createViewingRow(
@@ -29,7 +30,7 @@ export async function createViewingRow(
 ): Promise<CreateViewingResult> {
   const existing = await admin
     .from("viewings")
-    .select("id")
+    .select("id, revision")
     .eq("user_id", userId)
     .eq("idempotency_key", input.idempotencyKey)
     .maybeSingle();
@@ -41,6 +42,7 @@ export async function createViewingRow(
       freeCount: 0,
       limit: FREE_VIEWING_LIMIT,
       isPro: false,
+      revision: Number((existing.data as { revision?: number }).revision ?? 1),
     };
   }
 
@@ -99,5 +101,6 @@ export async function createViewingRow(
     freeCount: freeCount + 1,
     limit: FREE_VIEWING_LIMIT,
     isPro,
+    revision: 1,
   };
 }

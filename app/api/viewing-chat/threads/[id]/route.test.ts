@@ -1,10 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const storage = {
+  list: vi.fn(),
+  remove: vi.fn(),
+};
+
 const query = {
   select: vi.fn(),
   eq: vi.fn(),
   maybeSingle: vi.fn(),
   update: vi.fn(),
+  delete: vi.fn(),
 };
 
 vi.mock("@/utils/supabase/server", () => ({
@@ -16,10 +22,11 @@ vi.mock("@/utils/supabase/server", () => ({
 vi.mock("@/utils/supabase/admin", () => ({
   createAdminClient: () => ({
     from: () => query,
+    storage: { from: () => storage },
   }),
 }));
 
-import { PUT } from "./route";
+import { DELETE, PUT } from "./route";
 
 const message = {
   id: "m1",
@@ -34,6 +41,9 @@ describe("PUT /api/viewing-chat/threads/:id", () => {
     query.select.mockReturnValue(query);
     query.eq.mockReturnValue(query);
     query.update.mockReturnValue(query);
+    query.delete.mockReturnValue(query);
+    storage.list.mockResolvedValue({ data: [], error: null });
+    storage.remove.mockResolvedValue({ error: null });
     query.maybeSingle.mockResolvedValue({
       data: { id: "11111111-1111-4111-8111-111111111111", user_id: "owner-1", messages: [message], revision: 2 },
       error: null,
@@ -94,6 +104,64 @@ describe("PUT /api/viewing-chat/threads/:id", () => {
       { params: Promise.resolve({ id: "11111111-1111-4111-8111-111111111111" }) },
     );
     expect(response.status).toBe(409);
+  });
+
+  it("keeps cloud fields when the client property record is null", async () => {
+    query.maybeSingle.mockResolvedValueOnce({
+      data: {
+        id: "11111111-1111-4111-8111-111111111111",
+        user_id: "owner-1",
+        messages: [message],
+        revision: 2,
+        chat_state: { v: 1, propertyRecord: { fields: { price: { value: "1500" }, floor: { value: "5" } } } },
+      },
+      error: null,
+    });
+    const response = await PUT(
+      new Request("http://test/threads/id", {
+        method: "PUT",
+        body: JSON.stringify({
+          baseRevision: 2,
+          messages: [message],
+          chatState: { v: 1, propertyRecord: null, pinned: true },
+        }),
+      }),
+      { params: Promise.resolve({ id: "11111111-1111-4111-8111-111111111111" }) },
+    );
+    expect(response.status).toBe(200);
+    const patch = query.update.mock.calls.at(-1)?.[0] as {
+      chat_state: { pinned: boolean; propertyRecord: { fields: { price: { value: string }; floor: { value: string } } } };
+    };
+    expect(patch.chat_state.propertyRecord.fields.price.value).toBe("1500");
+    expect(patch.chat_state.propertyRecord.fields.floor.value).toBe("5");
+    expect(patch.chat_state.pinned).toBe(true);
+  });
+
+  it("requires a base revision when the row already exists", async () => {
+    const response = await PUT(
+      new Request("http://test/threads/id", {
+        method: "PUT",
+        body: JSON.stringify({ messages: [message], chatState: { v: 1 } }),
+      }),
+      { params: Promise.resolve({ id: "11111111-1111-4111-8111-111111111111" }) },
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it("deletes the owner's storage objects", async () => {
+    query.maybeSingle.mockResolvedValueOnce({
+      data: { id: "11111111-1111-4111-8111-111111111111" },
+      error: null,
+    });
+    storage.list.mockImplementation(async (prefix: string) => ({
+      data: prefix.endsWith("/photos") ? [{ name: "pic.jpg" }] : [],
+      error: null,
+    }));
+    const response = await DELETE(new Request("http://test"), {
+      params: Promise.resolve({ id: "11111111-1111-4111-8111-111111111111" }),
+    });
+    expect(response.status).toBe(200);
+    expect(storage.remove).toHaveBeenCalledWith(["owner-1/11111111-1111-4111-8111-111111111111/photos/pic.jpg"]);
   });
 
   it("returns 413 when the body is over 2MB", async () => {

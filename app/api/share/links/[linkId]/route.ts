@@ -32,7 +32,13 @@ export async function PATCH(req: Request, ctx: Ctx) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "更新失敗";
     const status =
-      message === "LINK_NOT_FOUND" ? 404 : message === "LINK_CONFLICT" ? 409 : 500;
+      message === "LINK_NOT_FOUND"
+        ? 404
+        : message === "LINK_CONFLICT"
+          ? 409
+          : message === "SHARE_EXPIRES_INVALID"
+            ? 400
+            : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }

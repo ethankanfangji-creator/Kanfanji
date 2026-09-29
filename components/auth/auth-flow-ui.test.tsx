@@ -31,9 +31,12 @@ afterEach(() => {
 });
 
 async function flushCooldown() {
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  });
+  for (let step = 0; step < 8; step += 1) {
+    await act(async () => {
+      if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(0);
+      else await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
 }
 
 function renderWithI18n(node: ReactNode) {
@@ -136,7 +139,7 @@ describe("login text links", () => {
 
 describe("ResendVerificationButton cooldown", () => {
   it("counts down after the first send and only warns if pressed again", async () => {
-    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     const onResend = vi.fn().mockResolvedValue("ok");
     renderWithI18n(
       <ResendVerificationButton email="buyer@example.com" label="signup" onResend={onResend} />,
@@ -176,7 +179,7 @@ describe("ResendVerificationButton cooldown", () => {
   });
 
   it("treats a server rate limit as the same neutral resend and starts the cooldown", async () => {
-    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     const onResend = vi.fn().mockResolvedValue("rate_limited");
     renderWithI18n(
       <ResendVerificationButton email="buyer@example.com" label="signup" onResend={onResend} />,
@@ -194,7 +197,7 @@ describe("ResendVerificationButton cooldown", () => {
   });
 
   it("keeps the remaining time for the same email after a refresh", async () => {
-    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     const onResend = vi.fn().mockResolvedValue("ok");
     const view = renderWithI18n(
       <ResendVerificationButton email="buyer@example.com" label="signup" onResend={onResend} />,
@@ -224,7 +227,7 @@ describe("ResendVerificationButton cooldown", () => {
   });
 
   it("ignores extra presses during the cooldown", async () => {
-    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     const onResend = vi.fn().mockResolvedValue("ok");
     renderWithI18n(
       <ResendVerificationButton email="buyer@example.com" label="signup" onResend={onResend} />,
@@ -241,7 +244,7 @@ describe("ResendVerificationButton cooldown", () => {
   });
 
   it("shows a generic error and does not cool down when the request throws", async () => {
-    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     const onResend = vi.fn().mockRejectedValue(new Error("buyer@example.com offline"));
     renderWithI18n(
       <ResendVerificationButton email="buyer@example.com" label="signup" onResend={onResend} />,

@@ -48,22 +48,19 @@ export async function pushViewingThread(input: {
   fetchImpl?: typeof fetch;
 }): Promise<{ status: number; revision?: number; remote?: CloudRow }> {
   const fetchImpl = input.fetchImpl ?? fetch;
-  const putBody = JSON.stringify({
-    ...(input.baseRevision ? { baseRevision: input.baseRevision } : {}),
-    messages: input.messages,
-    chatState: input.chatState,
-    clientUpdatedAt: input.clientUpdatedAt,
-  });
-  const put = () =>
+  const putOnce = (revision: number) =>
     fetchImpl(`/api/viewing-chat/threads/${input.threadId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: putBody,
+      body: JSON.stringify({
+        baseRevision: revision,
+        messages: input.messages,
+        chatState: input.chatState,
+        clientUpdatedAt: input.clientUpdatedAt,
+      }),
     });
-
-  let response = await put();
-  if (response.status === 404) {
-    const created = await fetchImpl("/api/viewing-chat/threads", {
+  const createRow = () =>
+    fetchImpl("/api/viewing-chat/threads", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -76,8 +73,29 @@ export async function pushViewingThread(input: {
         clientUpdatedAt: input.clientUpdatedAt,
       }),
     });
+
+  let revision = input.baseRevision;
+  if (revision == null) {
+    const current = await fetchImpl(`/api/viewing-chat/threads/${input.threadId}`);
+    if (current.status === 404) {
+      const created = await createRow();
+      if (!created.ok) return { status: created.status };
+      const createdBody = (await created.json()) as { revision?: number };
+      revision = createdBody.revision ?? 1;
+    } else if (!current.ok) {
+      return { status: current.status };
+    } else {
+      const body = (await current.json()) as CloudRow;
+      revision = body.revision ?? 1;
+    }
+  }
+
+  let response = await putOnce(revision);
+  if (response.status === 404) {
+    const created = await createRow();
     if (!created.ok) return { status: created.status };
-    response = await put();
+    const createdBody = (await created.json()) as { revision?: number };
+    response = await putOnce(createdBody.revision ?? 1);
   }
   if (response.status === 409) {
     const remoteResponse = await fetchImpl(`/api/viewing-chat/threads/${input.threadId}`);

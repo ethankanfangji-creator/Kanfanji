@@ -13,6 +13,7 @@ import { buildChatReport } from "@/lib/viewing-chat/integrate";
 import { FIELD_CATALOG } from "@/lib/viewing-chat/collection/field-catalog";
 import type { ChatMessage } from "@/lib/viewing-chat/types";
 import { appendChatMessages } from "@/lib/viewing-chat/append-messages";
+import { mergeChatState } from "@/lib/viewing-chat/chat-state";
 import { parseChatState } from "@/lib/viewing-chat/thread-payload";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
@@ -91,7 +92,7 @@ export async function POST(request: Request) {
         const admin = createAdminClient();
         const current = await admin
           .from("viewings")
-          .select("messages, revision")
+          .select("messages, revision, chat_state")
           .eq("id", viewingId)
           .eq("user_id", user.id)
           .maybeSingle();
@@ -106,7 +107,7 @@ export async function POST(request: Request) {
             .update({
               messages: merged,
               report,
-              ...(chatState ? { chat_state: chatState } : {}),
+              ...(chatState ? { chat_state: mergeChatState(current.data.chat_state, chatState) } : {}),
               revision: revision + 1,
               updated_at: new Date().toISOString(),
               client_updated_at: new Date().toISOString(),

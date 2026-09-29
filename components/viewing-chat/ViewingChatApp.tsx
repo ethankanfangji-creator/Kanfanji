@@ -47,7 +47,7 @@ import {
   saveLocalMessages,
   setLocalThreadPinned,
 } from "@/lib/viewing-chat/local-store";
-import { addMediaFile, removeMediaByThread } from "@/lib/viewing-chat/media-library";
+import { addMediaFile, getMediaBlob, removeMediaByThread } from "@/lib/viewing-chat/media-library";
 import { uploadViewingFile, appendViewingPath } from "@/lib/media";
 import { claimAccountThreads, pullCloudThreads } from "@/lib/viewing-chat/claim-account";
 import { buildChatStatePayload, pushViewingThread } from "@/lib/viewing-chat/cloud-push";
@@ -84,8 +84,6 @@ import {
   sourceExtractErrorMessage,
 } from "@/lib/property-source/error-messages";
 import type { PropertyChatStage } from "@/lib/viewing-chat/stage";
-import { isCollectingStage } from "@/lib/viewing-chat/stage";
-import { SourceSoftFailActions } from "@/components/viewing-chat/SourceSoftFailActions";
 import {
   countAgendaProgress,
   getActiveAgendaItem,
@@ -147,9 +145,6 @@ export function ViewingChatApp() {
   const [busy, setBusy] = useState(false);
   const [sourceBusy, setSourceBusy] = useState(false);
   const [conflicts, setConflicts] = useState<FieldConflict[]>([]);
-  const [softFailCtas, setSoftFailCtas] = useState(false);
-  /** Advanced listing intake (hidden on A main path). */
-  const [listingIntakeOpen, setListingIntakeOpen] = useState(false);
   const [guestLimitOpen, setGuestLimitOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
@@ -193,6 +188,9 @@ export function ViewingChatApp() {
   const [composerHint, setComposerHint] = useState<string | null>(null);
   const chatSearchInputRef = useRef<HTMLInputElement>(null);
   const syncTimers = useRef(new Map<string, number>());
+  const threadCreations = useRef(new Map<string, Promise<void>>());
+  const requestShareRef = useRef<() => void>(() => undefined);
+  const claimNoticeRef = useRef("");
 
   const active = useMemo(
     () => threads.find((thread) => thread.id === activeId) ?? null,
@@ -262,12 +260,12 @@ export function ViewingChatApp() {
       refreshLocal();
       if (claim.blocked > 0 && !sessionStorage.getItem("kf.claim.notice")) {
         sessionStorage.setItem("kf.claim.notice", "1");
-        setStatus(c.claimLimitNotice);
+        setStatus(claimNoticeRef.current);
       }
       if (searchParams.get("share") !== "1") return;
       const threadId = searchParams.get("thread");
       if (threadId) setActiveId(threadId);
-      window.setTimeout(() => requestShare(), 0);
+      window.setTimeout(() => requestShareRef.current(), 0);
       router.replace(threadId ? `/?thread=${threadId}` : "/");
     })();
     return () => {
@@ -443,6 +441,7 @@ export function ViewingChatApp() {
   }
 
   async function pushLocalThread(threadId: string) {
+    if (userId) await attachStoredMedia(threadId);
     const thread = getLocalThread(threadId);
     if (!thread || !userId || thread.cloud?.state === "blocked_limit") return;
     const result = await syncWithRetry({
@@ -486,18 +485,58 @@ export function ViewingChatApp() {
     refreshLocal();
   }
 
+  async function uploadChatFile(threadId: string, file: File, mediaId: string, kind: string) {
+    if (!userId || kind === "file") return null;
+    const creating = threadCreations.current.get(threadId);
+    if (creating) await creating;
+    const folder = kind === "video" ? "videos" : kind === "audio" ? "audios" : "photos";
+    const column = kind === "video" ? "video_urls" : kind === "audio" ? "audio_urls" : "photo_urls";
+    const path = await uploadViewingFile(threadId, folder, file, mediaId);
+    await appendViewingPath(threadId, column, path);
+    return path;
+  }
+
+  async function attachStoredMedia(threadId: string) {
+    const thread = getLocalThread(threadId);
+    if (!thread || !userId) return;
+    let changed = false;
+    const messages = [];
+    for (const message of thread.messages) {
+      if (!message.media?.length) {
+        messages.push(message);
+        continue;
+      }
+      const media = [];
+      for (const ref of message.media) {
+        if (ref.path || ref.kind === "file") {
+          media.push(ref);
+          continue;
+        }
+        const blob = await getMediaBlob(ref.id);
+        if (!blob) {
+          media.push(ref);
+          continue;
+        }
+        try {
+          const path = await uploadChatFile(threadId, new File([blob], ref.name, { type: ref.mime }), ref.id, ref.kind);
+          media.push({ ...ref, path });
+          changed = changed || Boolean(path);
+        } catch {
+          media.push(ref);
+        }
+      }
+      messages.push({ ...message, media });
+    }
+    if (changed) saveLocalMessages(threadId, messages);
+  }
+
   async function rememberMedia(file: File, threadId: string, address: string) {
     const saved = await addMediaFile(file, threadId, address);
     let path: string | null = null;
-    if (userId && saved.kind !== "file") {
-      try {
-        const folder = saved.kind === "video" ? "videos" : saved.kind === "audio" ? "audios" : "photos";
-        const column = saved.kind === "video" ? "video_urls" : saved.kind === "audio" ? "audio_urls" : "photo_urls";
-        path = await uploadViewingFile(threadId, folder, file, saved.id);
-        await appendViewingPath(threadId, column, path);
-      } catch {
-        path = null;
-      }
+    try {
+      path = await uploadChatFile(threadId, file, saved.id, saved.kind);
+    } catch {
+      path = null;
     }
     return {
       id: saved.id,
@@ -515,8 +554,6 @@ export function ViewingChatApp() {
     setPendingAddressConfirm(null);
     setStatus("");
     setReplyTo(null);
-    setListingIntakeOpen(false);
-    setSoftFailCtas(false);
     setFocusMoreOpen(false);
     closeChatSearch();
   }
@@ -583,13 +620,11 @@ export function ViewingChatApp() {
     setTurnError(null);
     setTurnErrorActions([]);
     setConflicts([]);
-    setListingIntakeOpen(false);
-    setSoftFailCtas(false);
 
     void enrichAddressIntel(thread.id, trimmed, seedRecord, place);
     if (userId) {
       patchLocalThread(thread.id, { cloud: { state: "syncing" }, ownerUserId: userId });
-      void fetch("/api/viewing-chat/threads", {
+      const creating = fetch("/api/viewing-chat/threads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -613,6 +648,7 @@ export function ViewingChatApp() {
         patchLocalThread(thread.id, { cloud: { state: "failed" }, ownerUserId: userId });
         refreshLocal();
       });
+      threadCreations.current.set(thread.id, creating);
     }
   }
 
@@ -837,50 +873,6 @@ export function ViewingChatApp() {
     });
   }
 
-  function handleCollectionAction(id: "skip" | "summarize" | "finish" | "supplement" | "correct") {
-    if (!active) return;
-    if (id === "skip") {
-      skipActiveAgendaItem();
-      return;
-    }
-    if (id === "summarize") {
-      void submitTurn({
-        text: locale.startsWith("en") ? "summarize" : "整理一下",
-        audio: null,
-        image: null,
-        file: null,
-      });
-      return;
-    }
-    if (id === "finish") {
-      openReviewCard();
-      return;
-    }
-    if (id === "supplement") {
-      setComposerHint(c.composerSupplementHint);
-      document.getElementById("viewing-chat-composer")?.focus();
-      return;
-    }
-    if (id === "correct") {
-      setComposerHint(c.composerCorrectHint);
-      document.getElementById("viewing-chat-composer")?.focus();
-    }
-  }
-
-  function openListingIntake() {
-    if (!active) return;
-    setListingIntakeOpen(true);
-    const guidance = createAiMessage({
-      type: "follow_up",
-      text: c.sourceGuidance,
-    });
-    patchLocalThread(active.id, {
-      messages: [...active.messages, guidance],
-      stage: "awaiting_property_source",
-    });
-    refreshLocal();
-  }
-
   async function ingestSource(opts: {
     sourceType: "listing_url" | "user_text" | "image" | "pdf" | "chat_message";
     text?: string;
@@ -998,7 +990,6 @@ export function ViewingChatApp() {
         initialReport: data.report ?? active.initialReport,
       });
       setConflicts(data.conflicts ?? []);
-      setSoftFailCtas(softFail);
       refreshLocal();
       setStatus("");
     } catch (error) {
@@ -1015,34 +1006,6 @@ export function ViewingChatApp() {
     } finally {
       setSourceBusy(false);
     }
-  }
-
-  function skipSources() {
-    if (!active) return;
-    const msg = createAiMessage({
-      type: "follow_up",
-      text: c.sourceSkipped,
-    });
-    patchLocalThread(active.id, {
-      messages: [...active.messages, msg],
-      stage: "viewing_preparation",
-      skippedSources: true,
-    });
-    setListingIntakeOpen(false);
-    setSoftFailCtas(false);
-    refreshLocal();
-  }
-
-  function promptPasteUrl() {
-    const url = window.prompt(c.promptListingUrl, "https://");
-    if (!url?.trim()) return;
-    void ingestSource({ sourceType: "listing_url", url: url.trim() });
-  }
-
-  function promptPasteText() {
-    const text = window.prompt(c.promptListingText, "");
-    if (!text?.trim()) return;
-    void ingestSource({ sourceType: "user_text", text: text.trim() });
   }
 
   function onSelectSuggestion(
@@ -1479,6 +1442,8 @@ export function ViewingChatApp() {
       setShareUrl(data.url ? `${window.location.origin}${data.url}` : null);
     });
   }
+  requestShareRef.current = requestShare;
+  claimNoticeRef.current = c.claimLimitNotice;
 
   function selectThread(id: string) {
     setActiveId(id);
@@ -1631,6 +1596,7 @@ export function ViewingChatApp() {
           create: c.shareCreate,
           revoke: c.shareRevoke,
           regenerate: c.shareRegenerate,
+          regenerateConfirm: c.shareRegenerateConfirm,
           copy: c.shareCopy,
           copyFailed: c.shareCopyFailed,
           unavailable: c.shareUnavailable,
@@ -1691,7 +1657,6 @@ export function ViewingChatApp() {
         }}
         onRegenerate={() => {
           if (!shareLinkId) return;
-          if (!window.confirm(c.shareRegenerateConfirm)) return;
           void fetch(`/api/share/links/${shareLinkId}/rotate`, { method: "POST" }).then(async (response) => {
             const data = (await response.json()) as {
               urlPath?: string;
@@ -1973,13 +1938,7 @@ export function ViewingChatApp() {
               </div>
               <ChatMessageList
                 messages={active.messages}
-                emptyHint={
-                  sourceBusy
-                    ? c.sourceExtracting
-                    : listingIntakeOpen
-                      ? c.emptyChatCollect
-                      : c.emptyChatCapture
-                }
+                emptyHint={sourceBusy ? c.sourceExtracting : c.emptyChatCapture}
                 onShareReport={requestShare}
                 shareLabel={c.shareReport}
                 replyLabel={c.reply}
@@ -2051,25 +2010,9 @@ export function ViewingChatApp() {
                     blocked: c.syncBlocked,
                   }}
                   loginHref={`/login?next=${encodeURIComponent(`/?thread=${active.id}`)}`}
-                  onRetry={() => void syncWithRetry({
-                    put: async () => {
-                      const response = await fetch(`/api/viewing-chat/threads/${active.id}`, {
-                        method: "PUT",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                          clientUpdatedAt: active.updatedAt,
-                          messages: active.messages,
-                        }),
-                      });
-                      if (response.status === 402) {
-                        patchLocalThread(active.id, { cloud: { state: "blocked_limit" } });
-                      }
-                      return { status: response.status };
-                    },
-                  }).then((state) => {
-                    patchLocalThread(active.id, { cloud: { state } });
-                    refreshLocal();
-                  })}
+                  onRetry={() => {
+                    void pushLocalThread(active.id);
+                  }}
                   onUpgrade={() => router.push("/pricing")}
                 />
                 <QuickActionChip
@@ -2135,19 +2078,6 @@ export function ViewingChatApp() {
                   retry: c.turnRetry,
                 }}
                 onSubmit={async (payload) => {
-                  // A default: all composer input is on-site capture via chat turn.
-                  // Listing ingest stays behind CollectionQuickActions (optional).
-                  if (
-                    listingIntakeOpen &&
-                    (payload.text.trim().startsWith("http://") ||
-                      payload.text.trim().startsWith("https://"))
-                  ) {
-                    await ingestSource({
-                      sourceType: "listing_url",
-                      url: payload.text.trim(),
-                    });
-                    return;
-                  }
                   await submitTurn(payload);
                 }}
               />

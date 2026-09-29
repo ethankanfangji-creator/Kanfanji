@@ -1,5 +1,9 @@
+"use client";
+
 import { LoadingState } from "@/components/ui/PageState";
+import { useI18n } from "@/components/I18nProvider";
 
 export default function Loading() {
-  return <LoadingState title="載入中" description="正在準備頁面內容，請稍候。" />;
+  const { messages } = useI18n();
+  return <LoadingState title={messages.status.loadingTitle} description={messages.status.loadingBody} />;
 }

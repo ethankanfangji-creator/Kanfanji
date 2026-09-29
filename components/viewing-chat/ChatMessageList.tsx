@@ -18,7 +18,11 @@ import { InitialReportCard } from "@/components/viewing-chat/InitialReportCard";
 import type { ChatMediaRef } from "@/lib/viewing-chat/types";
 
 function MediaRefView({ item, missing }: { item: ChatMediaRef; missing: string }) {
-  const url = useChatMediaUrl(item);
+  const media = useChatMediaUrl(item);
+  if (media.status === "loading") {
+    return <div className="h-28 w-28 animate-pulse rounded-xl bg-black/5" role="status" aria-busy="true" />;
+  }
+  const url = media.url;
   if (!url) return <p className="text-[12px] opacity-70">{missing}</p>;
   if (item.kind === "image") {
     return (
@@ -343,7 +347,11 @@ export function ChatMessageList({
                   pros={message.report.pros}
                   risks={message.report.risks}
                   checklist={message.report.checklist}
-                  generatedAt={message.report.generatedAt}
+                  generatedAt={
+                    message.report.generatedAt && !Number.isNaN(Date.parse(message.report.generatedAt))
+                      ? new Date(message.report.generatedAt).toLocaleString()
+                      : undefined
+                  }
                   labels={{
                     title: c.reportTitle,
                     pros: c.reportPros,

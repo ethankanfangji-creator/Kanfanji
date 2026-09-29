@@ -2,7 +2,12 @@
 
 import type { PostHogConfig } from "posthog-js";
 import type { AnalyticsEvent } from "./events";
-import { captureAllowed, hasGlobalPrivacyControl, readAnalyticsConsent } from "./consent";
+import {
+  captureAllowed,
+  disarmAnalyticsCapture,
+  hasGlobalPrivacyControl,
+  readAnalyticsConsent,
+} from "./consent";
 import { sanitizeEvent } from "./sanitize";
 
 const URL_PROP =
@@ -243,6 +248,7 @@ export function __resetAnalyticsForTests() {
   client = null;
   loading = null;
   ready = false;
+  disarmAnalyticsCapture();
 }
 
 export function analyticsConsentSnapshot() {

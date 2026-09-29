@@ -314,11 +314,20 @@ describe("one-shot Metro Vancouver suggest", () => {
     } as Response);
   }
 
-  it("keeps only BC for 2143 clarke and does not text-geocode or Nominatim", async () => {
+  it("keeps the Port Moody house point for 2143 clarke and drops US lookalikes", async () => {
     process.env.GOOGLE_MAPS_API_KEY = "test-google-key";
     const details: Record<
       string,
-      { formattedAddress: string; lat: number; lng: number; province: string; country: string }
+      {
+        formattedAddress: string;
+        lat: number;
+        lng: number;
+        province: string;
+        country: string;
+        city?: string;
+        houseNumber?: string;
+        street?: string;
+      }
     > = {
       il: {
         formattedAddress: "2143 Clarke St, Illinois, USA",
@@ -347,10 +356,16 @@ describe("one-shot Metro Vancouver suggest", () => {
         lng: -122.862,
         province: "BC",
         country: "Canada",
+        city: "Port Moody",
+        houseNumber: "2143",
+        street: "Clarke Street",
       },
     };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.includes("photon.komoot.io")) {
+        return jsonResponse({ features: [] });
+      }
       if (url.includes("places:autocomplete")) {
         const body = JSON.parse(String(init?.body)) as {
           includedRegionCodes: string[];
@@ -376,6 +391,15 @@ describe("one-shot Metro Vancouver suggest", () => {
           formattedAddress: row.formattedAddress,
           location: { latitude: row.lat, longitude: row.lng },
           addressComponents: [
+            ...(row.houseNumber
+              ? [{ longText: row.houseNumber, shortText: row.houseNumber, types: ["street_number"] }]
+              : []),
+            ...(row.street
+              ? [{ longText: row.street, shortText: row.street, types: ["route"] }]
+              : []),
+            ...(row.city
+              ? [{ longText: row.city, shortText: row.city, types: ["locality"] }]
+              : []),
             {
               shortText: row.province,
               longText: row.province,
@@ -400,12 +424,188 @@ describe("one-shot Metro Vancouver suggest", () => {
         formatted: "2143 Clarke Street, Port Moody, BC, Canada",
         lat: 49.277,
         lng: -122.862,
+        houseNumber: "2143",
         source: "google",
       }),
     );
-    expect(results.some((r) => /Illinois|California|Kentucky/i.test(r.label))).toBe(
+    expect(results[0]?.houseNumberRetained).toBeFalsy();
+    expect(results.some((r) => /Illinois|California|Kentucky|Ontario/i.test(r.label))).toBe(
       false,
     );
+  });
+
+  it("prefers a house-number point for 2143 spring street near Metro Vancouver and hides Ontario", async () => {
+    process.env.GOOGLE_MAPS_API_KEY = "test-google-key";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("places:autocomplete")) {
+        return jsonResponse({
+          suggestions: [
+            {
+              placePrediction: {
+                placeId: "spring-point",
+                text: { text: "2143 Spring Street, Port Moody, BC, Canada" },
+              },
+            },
+          ],
+        });
+      }
+      if (url.includes("/v1/places/")) {
+        return jsonResponse({
+          id: "spring-point",
+          formattedAddress: "2143 Spring Street, Port Moody, BC, Canada",
+          location: { latitude: 49.281, longitude: -122.855 },
+          addressComponents: [
+            { longText: "2143", shortText: "2143", types: ["street_number"] },
+            { longText: "Spring Street", shortText: "Spring St", types: ["route"] },
+            { longText: "Port Moody", shortText: "Port Moody", types: ["locality"] },
+            { longText: "British Columbia", shortText: "BC", types: ["administrative_area_level_1"] },
+            { longText: "Canada", shortText: "CA", types: ["country"] },
+          ],
+        });
+      }
+      if (url.includes("photon.komoot.io")) {
+        return jsonResponse({
+          features: [
+            {
+              geometry: { coordinates: [-77.9, 44.0] },
+              properties: {
+                osm_id: 1,
+                street: "Spring Street",
+                city: "Cramahe",
+                state: "Ontario",
+                country: "Canada",
+                countrycode: "ca",
+              },
+            },
+          ],
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const results = await suggestAddresses("2143 spring street", {
+      bias: { latitude: 49.28, longitude: -122.91 },
+    });
+    expect(results).toHaveLength(1);
+    expect(results[0]).toEqual(
+      expect.objectContaining({
+        houseNumber: "2143",
+        lat: 49.281,
+        lng: -122.855,
+        source: "google",
+      }),
+    );
+    expect(results[0]?.houseNumberRetained).toBeUndefined();
+    expect(results.some((row) => /Ontario|Cramahe/i.test(row.label))).toBe(false);
+  });
+
+  it("keeps the typed house number on the nearest street when no source has that point", async () => {
+    process.env.GOOGLE_MAPS_API_KEY = "test-google-key";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("places:autocomplete")) return jsonResponse({ suggestions: [] });
+      if (url.includes("photon.komoot.io")) {
+        return jsonResponse({
+          features: [
+            {
+              geometry: { coordinates: [-77.9, 44.0] },
+              properties: {
+                osm_id: 9,
+                street: "Spring Street",
+                city: "Cramahe",
+                state: "Ontario",
+                country: "Canada",
+                countrycode: "ca",
+              },
+            },
+            {
+              geometry: { coordinates: [-122.86, 49.28] },
+              properties: {
+                osm_id: 8,
+                street: "Spring Street",
+                city: "Port Moody",
+                state: "British Columbia",
+                country: "Canada",
+                countrycode: "ca",
+              },
+            },
+          ],
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const results = await suggestAddresses("2143 spring street");
+    expect(results).toHaveLength(1);
+    expect(results[0]).toEqual(
+      expect.objectContaining({
+        houseNumberRetained: true,
+        houseNumber: "2143",
+        lat: 49.28,
+        lng: -122.86,
+        source: "photon",
+      }),
+    );
+    expect(results[0]?.label.toLowerCase()).toContain("2143");
+    expect(results[0]?.label).not.toMatch(/Ontario/i);
+  });
+
+  it("returns the Ontario house point when the query names Ontario or Cramahe", async () => {
+    process.env.GOOGLE_MAPS_API_KEY = "test-google-key";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("places:autocomplete")) {
+        const body = JSON.parse(String(init?.body)) as { locationBias?: unknown };
+        expect(body.locationBias).toBeUndefined();
+        return jsonResponse({ suggestions: [] });
+      }
+      if (url.includes("photon.komoot.io")) {
+        expect(url).not.toContain("lat=49.28");
+        return jsonResponse({
+          features: [
+            {
+              geometry: { coordinates: [-122.86, 49.28] },
+              properties: {
+                osm_id: 3,
+                housenumber: "2143",
+                street: "Spring Street",
+                city: "Port Moody",
+                state: "British Columbia",
+                country: "Canada",
+                countrycode: "ca",
+              },
+            },
+            {
+              geometry: { coordinates: [-77.9, 44.0] },
+              properties: {
+                osm_id: 4,
+                housenumber: "2143",
+                street: "Spring Street",
+                city: "Cramahe",
+                state: "Ontario",
+                country: "Canada",
+                countrycode: "ca",
+              },
+            },
+          ],
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    for (const query of ["2143 Spring Street, Cramahe", "2143 Spring Street, Ontario"]) {
+      const results = await suggestAddresses(query);
+      expect(results).toHaveLength(1);
+      expect(results[0]).toEqual(
+        expect.objectContaining({
+          houseNumber: "2143",
+          city: "Cramahe",
+          lat: 44.0,
+          lng: -77.9,
+        }),
+      );
+    }
   });
 
   it("does not call upstream when the request is already aborted", async () => {

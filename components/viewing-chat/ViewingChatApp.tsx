@@ -1,13 +1,12 @@
 "use client";
 
-import { ChevronDown, ChevronLeft, ChevronUp, Clipboard, MoreHorizontal, Search, Sparkles, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronUp, Clipboard, Search, X } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AddressAutocomplete } from "@/components/viewing-wizard/AddressAutocomplete";
 import { AddressConfirmationCard } from "@/components/viewing-wizard/AddressConfirmationCard";
 import { useI18n } from "@/components/I18nProvider";
 import { ChatMessageList } from "@/components/viewing-chat/ChatMessageList";
-import { HistorySearchPanel } from "@/components/viewing-chat/HistorySearchPanel";
 import { IconRail } from "@/components/viewing-chat/IconRail";
 import {
   MobileAccountSheet,
@@ -35,7 +34,6 @@ import {
   type AddressConfirmationCandidate,
   type AddressLookupPayloadLike,
 } from "@/lib/address-confirmation";
-import { COMPARE_LITE_MAX } from "@/lib/comparison/from-thread";
 import { shortenAddressLabel } from "@/lib/shorten-address";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 import {
@@ -50,6 +48,9 @@ import {
 import { addMediaFile, getMediaBlob, removeMediaByThread } from "@/lib/viewing-chat/media-library";
 import { uploadViewingFile, appendViewingPath } from "@/lib/media";
 import { claimAccountThreads, pullCloudThreads } from "@/lib/viewing-chat/claim-account";
+import { deleteViewingThread } from "@/lib/viewing-chat/delete-thread";
+import { sameViewingAddress } from "@/lib/viewing-chat/same-address";
+import { FREE_VIEWING_LIMIT } from "@/lib/viewing-wizard/free-tier";
 import { buildChatStatePayload, pushViewingThread } from "@/lib/viewing-chat/cloud-push";
 import { appendChatMessages } from "@/lib/viewing-chat/append-messages";
 import { GuestLimitDialog } from "@/components/viewing-chat/GuestLimitDialog";
@@ -68,8 +69,6 @@ import {
 } from "@/lib/viewing-chat/types";
 import { agendaIdToFieldId } from "@/lib/viewing-chat/collection/field-map";
 import { resolveAgendaId } from "@/lib/viewing-chat/agenda-catalog";
-import { SyncStatusPill } from "@/components/viewing-chat/SyncStatusPill";
-import { QuickActionChip } from "@/components/viewing-chat/QuickActionChip";
 import { ConflictingDataAlert } from "@/components/viewing-chat/ConflictingDataAlert";
 import type {
   PropertySource,
@@ -146,6 +145,9 @@ export function ViewingChatApp() {
   const [sourceBusy, setSourceBusy] = useState(false);
   const [conflicts, setConflicts] = useState<FieldConflict[]>([]);
   const [guestLimitOpen, setGuestLimitOpen] = useState(false);
+  const [proLimitOpen, setProLimitOpen] = useState(false);
+  const [addressCue, setAddressCue] = useState(false);
+  const [turnMode, setTurnMode] = useState<"supplement" | "correct" | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [shareLinkId, setShareLinkId] = useState<string | null>(null);
@@ -166,7 +168,6 @@ export function ViewingChatApp() {
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [mobileNavTab, setMobileNavTab] = useState<MobileNavTabId | null>(null);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
-  const [focusMoreOpen, setFocusMoreOpen] = useState(false);
   const [replyTo, setReplyTo] = useState<ChatReplyRef | null>(null);
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState("");
@@ -373,7 +374,7 @@ export function ViewingChatApp() {
 
   /** Close a deep panel first; otherwise leave the thread for the empty start state. */
   function exitChatFocus() {
-    setFocusMoreOpen(false);
+    setReplyTo(null);
     if (
       accountOpen ||
       searchOpen ||
@@ -389,7 +390,7 @@ export function ViewingChatApp() {
   }
 
   function handleMobileNav(tab: MobileNavTabId) {
-    setFocusMoreOpen(false);
+    setReplyTo(null);
     setMobileNavTab(tab);
     if (tab === "new") {
       closeMobileOverlays();
@@ -560,7 +561,8 @@ export function ViewingChatApp() {
     setPendingAddressConfirm(null);
     setStatus("");
     setReplyTo(null);
-    setFocusMoreOpen(false);
+    setAddressCue(true);
+    setTurnMode(null);
     closeChatSearch();
   }
 
@@ -573,6 +575,33 @@ export function ViewingChatApp() {
     if (!trimmed) {
       setStatus(c.needAddress);
       return;
+    }
+    const pool = listLocalThreads().filter((thread) =>
+      userId ? thread.ownerUserId === userId || !thread.ownerUserId : !thread.ownerUserId,
+    );
+    const duplicate = pool.find(
+      (thread) =>
+        sameViewingAddress(thread.address, trimmed) ||
+        sameViewingAddress(thread.normalizedAddress ?? "", trimmed),
+    );
+    if (duplicate) {
+      setActiveId(duplicate.id);
+      setAddressDraft(duplicate.address);
+      setPendingAddressConfirm(null);
+      setAddressCue(false);
+      return;
+    }
+    if (userId) {
+      const gate = await fetch("/api/viewing-chat/threads");
+      if (!gate.ok) {
+        setStatus(c.syncRetry);
+        return;
+      }
+      const quota = (await gate.json()) as { viewingCount?: number; isPro?: boolean };
+      if (!quota.isPro && (quota.viewingCount ?? 0) >= FREE_VIEWING_LIMIT) {
+        setProLimitOpen(true);
+        return;
+      }
     }
     if (!userId) {
       const existingGuest = listLocalThreads().some((thread) => !thread.ownerUserId);
@@ -777,11 +806,10 @@ export function ViewingChatApp() {
 
   function skipActiveAgendaItem() {
     if (!active) return;
+    const focus = (active.collectionFocusFieldIds ?? [])[0];
     const current = getActiveAgendaItem(agenda);
-    const skipId =
-      current?.id ||
-      active.agendaActiveId ||
-      "area";
+    const skipId = focus || current?.id || active.agendaActiveId;
+    if (!skipId) return;
     const beforeFields = { ...(active.propertyRecord?.fields ?? {}) };
     const skipped = applyCollectionSkip({
       record:
@@ -1089,7 +1117,14 @@ export function ViewingChatApp() {
         ? `[Uploaded file: ${payload.file.name}]`
         : `【已上傳檔案：${payload.file.name}】`
       : "";
-    const textForAi = [payload.text, fileNote].filter(Boolean).join("\n");
+    const steered =
+      turnMode === "supplement" && payload.text && !/^補充/.test(payload.text)
+        ? `補充 ${payload.text}`
+        : turnMode === "correct" && payload.text && !/^更正/.test(payload.text)
+          ? `更正 ${payload.text}`
+          : payload.text;
+    setTurnMode(null);
+    const textForAi = [steered, fileNote].filter(Boolean).join("\n");
     const media: ChatMediaRef[] = [];
     const remember = async (blob: Blob, name: string) => {
       const file = blob instanceof File ? blob : new File([blob], name, { type: blob.type || "application/octet-stream" });
@@ -1424,7 +1459,7 @@ export function ViewingChatApp() {
     }
   }
 
-  function requestShare() {
+  async function requestShare() {
     const queryThread = searchParams.get("thread");
     const target = active ?? (queryThread ? listLocalThreads().find((item) => item.id === queryThread) ?? null : null);
     if (!target) return;
@@ -1432,13 +1467,13 @@ export function ViewingChatApp() {
       router.push(`/login?next=${encodeURIComponent(`/?thread=${target.id}&share=1`)}`);
       return;
     }
-    if (target.cloud?.state === "blocked_limit") {
-      setStatus(c.shareBlockedLimit);
-      return;
-    }
     if (target.cloud?.state && target.cloud.state !== "synced") {
-      setStatus(c.shareSyncing);
-      return;
+      await pushLocalThread(target.id);
+      const refreshed = getLocalThread(target.id);
+      if (!refreshed || refreshed.cloud?.state !== "synced") {
+        setStatus(refreshed?.cloud?.state === "blocked_limit" ? c.shareBlockedLimit : c.syncRetry);
+        return;
+      }
     }
     setShareError(null);
     setShareOpen(true);
@@ -1548,9 +1583,13 @@ export function ViewingChatApp() {
     leaveCompareMode();
   }
 
-  function deleteThread(id: string) {
+  async function deleteThread(id: string) {
     if (!window.confirm(c.deleteHistoryConfirm)) return;
-    deleteLocalThread(id);
+    const result = await deleteViewingThread({ id, userId });
+    if (result === "failed") {
+      setStatus(c.deleteFailed);
+      return;
+    }
     void removeMediaByThread(id);
     refreshLocal();
     if (activeId === id) {
@@ -1580,18 +1619,36 @@ export function ViewingChatApp() {
           signInLabel={c.guestLimitSignIn}
           cancelLabel={c.guestLimitCancel}
           signInHref="/login?next=/"
-          deleteLabel={c.guestLimitDelete}
-          onDelete={() => {
-            if (!window.confirm(c.guestLimitDeleteConfirm)) return;
-            const guest = listLocalThreads().find((thread) => !thread.ownerUserId);
-            if (guest) {
-              deleteLocalThread(guest.id);
-              void removeMediaByThread(guest.id);
-            }
-            setGuestLimitOpen(false);
-            refreshLocal();
-          }}
           onCancel={() => setGuestLimitOpen(false)}
+        />
+      ) : null}
+      {proLimitOpen ? (
+        <GuestLimitDialog
+          title={c.proLimitTitle}
+          body={c.proLimitBody}
+          signInLabel={c.proLimitUpgrade}
+          cancelLabel={c.guestLimitCancel}
+          onCancel={() => setProLimitOpen(false)}
+          onConfirm={() => {
+            setProLimitOpen(false);
+            void (async () => {
+              try {
+                const response = await fetch("/api/create-checkout-session", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ trigger: "paywall" }),
+                });
+                const payload = (await response.json()) as { url?: string; error?: string };
+                if (payload.url) {
+                  window.location.href = payload.url;
+                  return;
+                }
+                setStatus(payload.error || t.paywall.syncFailed);
+              } catch {
+                setStatus(t.paywall.syncFailed);
+              }
+            })();
+          }}
         />
       ) : null}
       <ShareReportDialog
@@ -1776,75 +1833,6 @@ export function ViewingChatApp() {
               >
                 <Search className="h-4 w-4" />
               </button>
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setFocusMoreOpen((v) => !v)}
-                  className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${
-                    focusMoreOpen
-                      ? "bg-black text-white"
-                      : "text-[#4B5563] hover:bg-black/5"
-                  }`}
-                  aria-label={c.chatFocusMore}
-                  title={c.chatFocusMore}
-                  aria-expanded={focusMoreOpen}
-                  aria-haspopup="menu"
-                >
-                  <MoreHorizontal className="h-5 w-5" />
-                </button>
-                {focusMoreOpen ? (
-                  <>
-                    <button
-                      type="button"
-                      className="fixed inset-0 z-40 cursor-default"
-                      aria-label={c.searchClose}
-                      onClick={() => setFocusMoreOpen(false)}
-                    />
-                    <div
-                      role="menu"
-                      className="absolute right-0 top-[calc(100%+6px)] z-50 min-w-[11rem] overflow-hidden rounded-2xl border border-black/8 bg-white py-1 shadow-[0_8px_28px_rgba(0,0,0,0.12)]"
-                    >
-                      <button
-                        type="button"
-                        role="menuitem"
-                        disabled={busy || active.messages.length === 0}
-                        className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-[13px] font-bold text-[#2563EB] active:bg-black/5 disabled:opacity-40"
-                        onClick={() => {
-                          setFocusMoreOpen(false);
-                          openReviewCard();
-                        }}
-                      >
-                        <Sparkles className="h-3.5 w-3.5" />
-                        {c.actionFinish}
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className="flex w-full px-3.5 py-2.5 text-left text-[13px] font-bold text-[#1A1A1A] active:bg-black/5 md:hidden"
-                        onClick={() => handleMobileNav("new")}
-                      >
-                        {c.newThread}
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className="flex w-full px-3.5 py-2.5 text-left text-[13px] font-bold text-[#1A1A1A] active:bg-black/5 md:hidden"
-                        onClick={() => handleMobileNav("history")}
-                      >
-                        {c.openHistory}
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className="flex w-full px-3.5 py-2.5 text-left text-[13px] font-bold text-[#1A1A1A] active:bg-black/5 md:hidden"
-                        onClick={() => handleMobileNav("media")}
-                      >
-                        {c.mediaLibrary}
-                      </button>
-                    </div>
-                  </>
-                ) : null}
-              </div>
               </div>
             </header>
             <div className="relative flex min-h-0 flex-1">
@@ -1962,6 +1950,20 @@ export function ViewingChatApp() {
                   setReplyTo(target);
                   document.getElementById("viewing-chat-composer")?.focus();
                 }}
+                turnActions={{
+                  supplement: c.bubbleSupplement,
+                  correct: c.bubbleCorrect,
+                  skip: c.actionSkip,
+                  onSupplement: () => {
+                    setTurnMode("supplement");
+                    document.getElementById("viewing-chat-composer")?.focus();
+                  },
+                  onCorrect: () => {
+                    setTurnMode("correct");
+                    document.getElementById("viewing-chat-composer")?.focus();
+                  },
+                  onSkip: skipActiveAgendaItem,
+                }}
               />
             </div>
             <div className="shrink-0 border-t border-black/8 bg-[#FAF6F1]">
@@ -2006,36 +2008,6 @@ export function ViewingChatApp() {
                   });
                 }}
               />
-              <div className="flex flex-wrap items-center gap-1.5 px-3 py-2">
-                <QuickActionChip
-                  disabled={busy || sourceBusy}
-                  onClick={skipActiveAgendaItem}
-                >
-                  {c.actionSkip}
-                </QuickActionChip>
-                <SyncStatusPill
-                  state={!userId ? "local_only" : active.cloud?.state ?? "syncing"}
-                  labels={{
-                    local: c.syncGuest,
-                    synced: c.syncSynced,
-                    syncing: c.syncSyncing,
-                    retry: c.syncRetry,
-                    blocked: c.syncBlocked,
-                  }}
-                  loginHref={`/login?next=${encodeURIComponent(`/?thread=${active.id}`)}`}
-                  onRetry={() => {
-                    void pushLocalThread(active.id);
-                  }}
-                  onUpgrade={() => router.push("/pricing")}
-                />
-                <QuickActionChip
-                  accent
-                  disabled={busy || sourceBusy || active.messages.length === 0}
-                  onClick={openReviewCard}
-                >
-                  {c.actionFinish}
-                </QuickActionChip>
-              </div>
               {composerHint ? (
                 <p className="px-3 pb-1 text-[11px] font-semibold text-[#1D4ED8]">
                   {composerHint}
@@ -2100,20 +2072,30 @@ export function ViewingChatApp() {
               {/* Desktop: right-side summary — chat stays usable */}
               {summaryOpen ? (
                 <aside className="hidden min-h-0 w-[340px] shrink-0 flex-col border-l border-black/8 bg-white lg:flex">
-                  <div className="flex shrink-0 items-center justify-between border-b border-black/8 px-3 py-2">
+                  <div className="flex shrink-0 items-center justify-between gap-2 border-b border-black/8 px-3 py-2">
                     <p className="text-[13px] font-bold">
                       {active.conversationStatus === "reviewing"
                         ? c.reviewTitle
                         : c.summaryTitle}
                     </p>
-                    <button
-                      type="button"
-                      onClick={() => setSummaryOpen(false)}
-                      className="rounded-full p-1.5 text-[#4B5563] hover:bg-black/5"
-                      aria-label={c.summaryClose}
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        disabled={busy || active.messages.length === 0}
+                        onClick={openReviewCard}
+                        className="rounded-full px-2.5 py-1 text-[12px] font-bold text-[#2563EB] hover:bg-black/5 disabled:opacity-40"
+                      >
+                        {c.actionFinish}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSummaryOpen(false)}
+                        className="rounded-full p-1.5 text-[#4B5563] hover:bg-black/5"
+                        aria-label={c.summaryClose}
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
                   <div className="min-h-0 flex-1 overflow-hidden">
                     {active.conversationStatus === "reviewing" ? (
@@ -2210,20 +2192,30 @@ export function ViewingChatApp() {
                 }`}
                 aria-hidden={!summaryOpen}
               >
-                <div className="flex shrink-0 items-center justify-between border-b border-black/8 px-3 py-2">
+                <div className="flex shrink-0 items-center justify-between gap-2 border-b border-black/8 px-3 py-2">
                   <p className="text-[13px] font-bold">
                     {active.conversationStatus === "reviewing"
                       ? c.reviewTitle
                       : c.summaryTitle}
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => setSummaryOpen(false)}
-                    className="rounded-full p-1.5 text-[#4B5563] hover:bg-black/5"
-                    aria-label={c.summaryClose}
-                  >
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      disabled={busy || active.messages.length === 0}
+                      onClick={openReviewCard}
+                      className="rounded-full px-2.5 py-1 text-[12px] font-bold text-[#2563EB] hover:bg-black/5 disabled:opacity-40"
+                    >
+                      {c.actionFinish}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSummaryOpen(false)}
+                      className="rounded-full p-1.5 text-[#4B5563] hover:bg-black/5"
+                      aria-label={c.summaryClose}
+                    >
                     <X className="h-4 w-4" />
-                  </button>
+                    </button>
+                  </div>
                 </div>
                 <div className="min-h-0 flex-1 overflow-hidden">
                   {active.conversationStatus === "reviewing" ? (
@@ -2327,7 +2319,7 @@ export function ViewingChatApp() {
                 <h1 className="text-[22px] font-black tracking-tight sm:text-[26px]">
                   {t.brand.name}
                 </h1>
-                <p className="mt-1 text-[10px] font-bold tracking-[0.16em] text-[#6B7280]">
+                <p className="mt-2 text-[15px] font-bold tracking-wide text-[#111111]">
                   {t.brand.subtitle}
                 </p>
               </div>
@@ -2354,7 +2346,9 @@ export function ViewingChatApp() {
                   onChange={(value) => {
                     setPendingAddressConfirm(null);
                     setAddressDraft(value);
+                    if (value.trim()) setAddressCue(false);
                   }}
+                  emphasize={addressCue}
                   onSelect={onSelectSuggestion}
                   onCommit={onCommitAddressDraft}
                   copy={{
@@ -2443,6 +2437,8 @@ export function ViewingChatApp() {
           compareOpen: t.compareLite.compareOpen,
           compareTooManyFree: t.compare.gateTooManyFree,
           compareTooManyPro: t.compare.gateTooManyPro,
+          searchPlaceholder: c.searchPlaceholder,
+          syncFailed: c.syncRetry,
         }}
       />
 
@@ -2453,26 +2449,6 @@ export function ViewingChatApp() {
           setMobileNavTab(null);
         }}
       />
-
-      {searchOpen ? (
-        <HistorySearchPanel
-          threads={threads}
-          activeId={activeId}
-          onSelect={selectThread}
-          onClose={() => {
-            setSearchOpen(false);
-            setMobileNavTab(null);
-          }}
-          railExpanded={historyOpen}
-          labels={{
-            title: c.searchRecords,
-            placeholder: c.searchPlaceholder,
-            empty: c.emptyHistory,
-            noResults: c.searchNoResults,
-            close: c.searchClose,
-          }}
-        />
-      ) : null}
 
       {mediaOpen ? (
         <MediaLibraryPanel

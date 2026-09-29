@@ -73,6 +73,16 @@ describe("analytics client", () => {
     expect(capture).not.toHaveBeenCalled();
   });
 
+  it("does not send from a leftover local grant", async () => {
+    process.env.NEXT_PUBLIC_POSTHOG_KEY = "phc_test";
+    localStorage.setItem("kanfangji.analytics.consent.v1", "granted");
+    const analytics = await import("./client");
+    analytics.track({ name: "paywall_shown", props: { trigger: "ai_quota" } });
+    await Promise.resolve();
+    expect(init).not.toHaveBeenCalled();
+    expect(capture).not.toHaveBeenCalled();
+  });
+
   it("does not send before consent", async () => {
     process.env.NEXT_PUBLIC_POSTHOG_KEY = "phc_test";
     const analytics = await import("./client");
@@ -83,11 +93,12 @@ describe("analytics client", () => {
 
   it("does not send when Global Privacy Control is on", async () => {
     process.env.NEXT_PUBLIC_POSTHOG_KEY = "phc_test";
-    localStorage.setItem("kanfangji.analytics.consent.v1", "granted");
     Object.defineProperty(navigator, "globalPrivacyControl", {
       configurable: true,
       value: true,
     });
+    const { writeAnalyticsConsent } = await import("./consent");
+    writeAnalyticsConsent("granted");
     const analytics = await import("./client");
     analytics.track({ name: "paywall_shown", props: { trigger: "ai_quota" } });
     await Promise.resolve();
@@ -96,7 +107,8 @@ describe("analytics client", () => {
 
   it("resets on logout when the client was loaded", async () => {
     process.env.NEXT_PUBLIC_POSTHOG_KEY = "phc_test";
-    localStorage.setItem("kanfangji.analytics.consent.v1", "granted");
+    const { writeAnalyticsConsent } = await import("./consent");
+    writeAnalyticsConsent("granted");
     const analytics = await import("./client");
     analytics.identify("user-1");
     await vi.waitFor(() => expect(init).toHaveBeenCalled());
@@ -106,7 +118,8 @@ describe("analytics client", () => {
 
   it("initializes with remote extras off and no deprecated sanitize_properties", async () => {
     process.env.NEXT_PUBLIC_POSTHOG_KEY = "phc_test";
-    localStorage.setItem("kanfangji.analytics.consent.v1", "granted");
+    const { writeAnalyticsConsent } = await import("./consent");
+    writeAnalyticsConsent("granted");
     const analytics = await import("./client");
     analytics.identify("user-1");
     await vi.waitFor(() => expect(init).toHaveBeenCalled());
@@ -124,7 +137,8 @@ describe("analytics client", () => {
   it("opts out of the user-agent filter only outside production", async () => {
     process.env.NEXT_PUBLIC_POSTHOG_KEY = "phc_test";
     process.env.NEXT_PUBLIC_ANALYTICS_ALLOW_AUTOMATION = "1";
-    localStorage.setItem("kanfangji.analytics.consent.v1", "granted");
+    const { writeAnalyticsConsent } = await import("./consent");
+    writeAnalyticsConsent("granted");
     const analytics = await import("./client");
     analytics.identify("user-1");
     await vi.waitFor(() => expect(init).toHaveBeenCalled());
@@ -133,6 +147,8 @@ describe("analytics client", () => {
     vi.resetModules();
     init.mockClear();
     process.env.NEXT_PUBLIC_VERCEL_ENV = "production";
+    const { writeAnalyticsConsent: grantAgain } = await import("./consent");
+    grantAgain("granted");
     const production = await import("./client");
     production.identify("user-1");
     await vi.waitFor(() => expect(init).toHaveBeenCalled());
@@ -142,7 +158,8 @@ describe("analytics client", () => {
   it("exposes the debug instance only outside production", async () => {
     process.env.NEXT_PUBLIC_POSTHOG_KEY = "phc_test";
     process.env.NEXT_PUBLIC_ANALYTICS_DEBUG = "1";
-    localStorage.setItem("kanfangji.analytics.consent.v1", "granted");
+    const { writeAnalyticsConsent } = await import("./consent");
+    writeAnalyticsConsent("granted");
     const analytics = await import("./client");
     analytics.identify("user-1");
     await vi.waitFor(() => expect(init).toHaveBeenCalled());
@@ -153,6 +170,8 @@ describe("analytics client", () => {
     init.mockClear();
     delete (window as Window & { __kfPosthog?: unknown }).__kfPosthog;
     process.env.NEXT_PUBLIC_VERCEL_ENV = "production";
+    const { writeAnalyticsConsent: grantAgain } = await import("./consent");
+    grantAgain("granted");
     const production = await import("./client");
     production.identify("user-1");
     await vi.waitFor(() => expect(init).toHaveBeenCalled());
@@ -162,7 +181,8 @@ describe("analytics client", () => {
 
   it("strips first-touch URLs from $set_once after identify", async () => {
     process.env.NEXT_PUBLIC_POSTHOG_KEY = "phc_test";
-    localStorage.setItem("kanfangji.analytics.consent.v1", "granted");
+    const { writeAnalyticsConsent } = await import("./consent");
+    writeAnalyticsConsent("granted");
     const analytics = await import("./client");
     analytics.identify("user-1");
     await vi.waitFor(() => expect(init).toHaveBeenCalled());
@@ -248,7 +268,8 @@ describe("analytics client", () => {
 
   it("opts in at most once and skips the $opt_in event", async () => {
     process.env.NEXT_PUBLIC_POSTHOG_KEY = "phc_test";
-    localStorage.setItem("kanfangji.analytics.consent.v1", "granted");
+    const { writeAnalyticsConsent } = await import("./consent");
+    writeAnalyticsConsent("granted");
     has_opted_in_capturing.mockImplementation(() => opt_in_capturing.mock.calls.length > 0);
     const analytics = await import("./client");
     analytics.identify("user-1");

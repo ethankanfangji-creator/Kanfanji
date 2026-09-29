@@ -4,11 +4,11 @@ PostHog 只記錄動作。沒有地址、座標、筆記、聊天、檔名、ema
 
 ## 同意
 
-未選擇、按拒絕、或瀏覽器開了 Global Privacy Control：不載入 `posthog-js`、不 `init`。會清掉 `ph_` 與 `__ph_` 開頭的 cookie、localStorage、sessionStorage（包含 `ph_*_posthog`、`__ph_opt_in_out_*`，以及 session 裡的 window id）。只保留我們自己的 `kanfangji.analytics.consent.v1`。登入後的拒絕也會寫進 `user_metadata.analytics_consent`，伺服器的 `serverTrack` 依此決定要不要送。
+未登入不載入 `posthog-js`、不送事件，也不再出現全螢幕同意對話框。註冊表單有一個預設未勾的選項，文案連到 `/privacy`。只有註冊時勾了，`user_metadata.analytics_consent` 才是 `granted`，之後這個帳號才初始化 PostHog。
+
+已登入以帳號上的 `analytics_consent` 為準。本機舊的 `kanfangji.analytics.consent.v1` 不能單獨開追蹤。帳號選單仍可改這個欄位。瀏覽器開了 Global Privacy Control 時不送。
 
 同意之後才用 `localStorage+cookie`，並且不送 `$opt_in`。`save_referrer` 與 `save_campaign_params` 都是 false。
-
-Esc 或點遮罩不算同意，下次進入非 `/privacy` 的頁面仍會再問。
 
 ## 機器人過濾
 

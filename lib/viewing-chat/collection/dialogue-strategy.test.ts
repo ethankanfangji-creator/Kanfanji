@@ -185,7 +185,7 @@ describe("dialogue strategies", () => {
     expect(q).toMatch(/水壓|漏水/);
   });
 
-  it("招2: getNextQuestions can emit composite kind", () => {
+  it("asks one open question and does not compose several at once", () => {
     const record = createEmptyPropertyRecord({ address: "x", mode: "collecting" });
     const qs = getNextQuestions({
       record,
@@ -194,9 +194,8 @@ describe("dialogue strategies", () => {
       locale: "zh-Hant",
       userTurnCount: 2,
     });
-    expect(qs.some((q) => q.kind === "composite" || q.kind === "open")).toBe(
-      true,
-    );
+    expect(qs).toHaveLength(1);
+    expect(qs[0]?.kind).not.toBe("composite");
   });
 
   it("招4: depth bands progress by turn", () => {

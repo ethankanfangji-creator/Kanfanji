@@ -57,6 +57,7 @@ export function ChatMessageList({
   cancelLabel,
   highlightMessageId,
   matchQuery,
+  turnActions,
 }: {
   messages: ChatMessage[];
   emptyHint: string;
@@ -69,6 +70,14 @@ export function ChatMessageList({
   highlightMessageId?: string | null;
   /** When set, soft-mark all messages that contain this query */
   matchQuery?: string;
+  turnActions?: {
+    supplement: string;
+    correct: string;
+    skip: string;
+    onSupplement: () => void;
+    onCorrect: () => void;
+    onSkip: () => void;
+  };
 }) {
   const { messages: t } = useI18n();
   const c = t.chat;
@@ -145,6 +154,8 @@ export function ChatMessageList({
       }, LONG_PRESS_MS),
     };
   }
+
+  const actionMessageId = [...messages].reverse().find((message) => message.role === "ai")?.id;
 
   if (messages.length === 0) {
     return (
@@ -367,6 +378,19 @@ export function ChatMessageList({
                 {new Date(message.timestamp).toLocaleTimeString()}
               </p>
             </div>
+            {turnActions && message.id === actionMessageId && !isUser ? (
+              <div className="ml-1.5 flex shrink-0 flex-col justify-center gap-1">
+                <button type="button" onClick={turnActions.onSupplement} className="rounded-full border border-black/10 bg-white px-2 py-1 text-[11px] font-bold">
+                  {turnActions.supplement}
+                </button>
+                <button type="button" onClick={turnActions.onCorrect} className="rounded-full border border-black/10 bg-white px-2 py-1 text-[11px] font-bold">
+                  {turnActions.correct}
+                </button>
+                <button type="button" onClick={turnActions.onSkip} className="rounded-full border border-black/10 bg-white px-2 py-1 text-[11px] font-bold">
+                  {turnActions.skip}
+                </button>
+              </div>
+            ) : null}
             {replyable ? (
               <button
                 type="button"

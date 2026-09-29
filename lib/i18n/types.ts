@@ -971,6 +971,8 @@ export type Messages = {
     changeUnknown: string;
     actionSkip: string;
     actionFinish: string;
+    bubbleSupplement: string;
+    bubbleCorrect: string;
     syncGuest: string;
     guestLocalNotice: string;
     guestLocalSave: string;
@@ -987,6 +989,10 @@ export type Messages = {
     guestLimitCancel: string;
     guestLimitDelete: string;
     guestLimitDeleteConfirm: string;
+    proLimitTitle: string;
+    proLimitBody: string;
+    proLimitUpgrade: string;
+    deleteFailed: string;
     claimLimitNotice: string;
     viewingNotFound: string;
     syncNewer: string;

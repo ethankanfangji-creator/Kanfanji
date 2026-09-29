@@ -30,12 +30,20 @@ export async function createViewingRow(
 ): Promise<CreateViewingResult> {
   const existing = await admin
     .from("viewings")
-    .select("id, revision")
+    .select("id, revision, chat_state")
     .eq("user_id", userId)
     .eq("idempotency_key", input.idempotencyKey)
     .maybeSingle();
   if (existing.error) throw existing.error;
   if (existing.data?.id) {
+    const row = existing.data as { id: string; chat_state?: unknown };
+    if ("chat_state" in row && row.chat_state == null && input.chatState) {
+      await admin
+        .from("viewings")
+        .update({ chat_state: input.chatState, address: input.address })
+        .eq("user_id", userId)
+        .eq("id", row.id);
+    }
     return {
       outcome: "exists",
       id: String(existing.data.id),

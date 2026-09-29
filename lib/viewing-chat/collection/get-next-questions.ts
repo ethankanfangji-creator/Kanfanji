@@ -1,9 +1,7 @@
 import { FIELD_CATALOG, questionForField } from "./field-catalog";
 import {
-  COMPOSITE_GROUPS,
   allowedFieldsForDepth,
   clarifyQuestionForField,
-  compositeQuestion,
   confirmQuestion,
   pickPendingConfirmFromRecord,
   preferredFieldsForDepth,
@@ -18,7 +16,7 @@ import type {
 } from "./types";
 import type { SuggestedQuestion } from "./orchestrator-types";
 
-const MAX_QUESTIONS = 3;
+const MAX_QUESTIONS = 1;
 
 /** Fields that often pair — used to pick “worth reminding” after a turn, not a fixed agenda. */
 export const RELATED: Partial<Record<PropertyFieldId, PropertyFieldId[]>> = {
@@ -198,25 +196,6 @@ export function getNextQuestions(
     }
     return priority;
   };
-
-  // 招2 — try one composite from a group with ≥2 gaps
-  if (results.length < MAX_QUESTIONS) {
-    for (const group of COMPOSITE_GROUPS) {
-      const open = group.filter((id) => gapIds.includes(id));
-      if (open.length < 2) continue;
-      if (open.some((id) => results.some((r) => r.fieldId === id))) continue;
-      const primary = open.slice().sort((a, b) => score(b) - score(a))[0]!;
-      results.push({
-        fieldId: primary,
-        fieldIds: open,
-        question: compositeQuestion(open, loc),
-        priority: 160 + open.length,
-        skippable: true,
-        kind: "composite",
-      });
-      break;
-    }
-  }
 
   const openCandidates = gapIds
     .filter((id) => !results.some((r) => r.fieldId === id || r.fieldIds?.includes(id)))

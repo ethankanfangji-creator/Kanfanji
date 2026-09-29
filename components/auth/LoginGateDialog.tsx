@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
 import { Eye, EyeOff, X } from "lucide-react";
 import { Dialog } from "@/components/ui/Dialog";
+import { useI18n } from "@/components/I18nProvider";
 import { authPrimaryButton, authTextLink } from "./auth-styles";
 
 export type LoginGateCopy = {
@@ -46,6 +47,8 @@ export function LoginAuthFields({
   busy,
   emailInputRef,
   showClose,
+  analyticsConsent = false,
+  onAnalyticsConsentChange,
   onEmailChange,
   onPasswordChange,
   onModeChange,
@@ -60,12 +63,15 @@ export function LoginAuthFields({
   busy: boolean;
   emailInputRef?: RefObject<HTMLInputElement | null>;
   showClose?: boolean;
+  analyticsConsent?: boolean;
+  onAnalyticsConsentChange?: (value: boolean) => void;
   onEmailChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
   onModeChange: (mode: "signin" | "signup") => void;
   onSubmit: (event: FormEvent) => void;
   onClose?: () => void;
 }) {
+  const { messages } = useI18n();
   const [showPassword, setShowPassword] = useState(false);
   const [emailTouched, setEmailTouched] = useState(false);
   const [passwordTouched, setPasswordTouched] = useState(false);
@@ -181,6 +187,15 @@ export function LoginAuthFields({
           ) : null}
         </div>
 
+        {mode === "signup" ? (
+          <SignupAnalyticsConsent
+            checked={analyticsConsent}
+            onChange={(value) => onAnalyticsConsentChange?.(value)}
+            body={messages.analytics.consentBody}
+            privacyLink={messages.analytics.privacyLink}
+          />
+        ) : null}
+
         <button type="submit" disabled={busy} className={authPrimaryButton}>
           {busy
             ? copy.processing
@@ -216,6 +231,37 @@ export function LoginAuthFields({
   );
 }
 
+function SignupAnalyticsConsent({
+  checked,
+  onChange,
+  body,
+  privacyLink,
+}: {
+  checked: boolean;
+  onChange: (value: boolean) => void;
+  body: string;
+  privacyLink: string;
+}) {
+  const [before, after = ""] = body.split("{privacyLink}");
+  return (
+    <label className="flex items-start gap-2 text-[13px] font-medium leading-5 text-[#374151]">
+      <input
+        type="checkbox"
+        className="mt-0.5 h-4 w-4 shrink-0"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      <span>
+        {before}
+        <Link href="/privacy" className="font-semibold underline underline-offset-2">
+          {privacyLink}
+        </Link>
+        {after}
+      </span>
+    </label>
+  );
+}
+
 export function LoginGateDialog({
   open,
   copy,
@@ -225,6 +271,8 @@ export function LoginGateDialog({
   error,
   busy,
   pendingSignup,
+  analyticsConsent = false,
+  onAnalyticsConsentChange,
   onEmailChange,
   onPasswordChange,
   onModeChange,
@@ -239,6 +287,8 @@ export function LoginGateDialog({
   error: ReactNode;
   busy: boolean;
   pendingSignup?: ReactNode;
+  analyticsConsent?: boolean;
+  onAnalyticsConsentChange?: (value: boolean) => void;
   onEmailChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
   onModeChange: (mode: "signin" | "signup") => void;
@@ -280,6 +330,8 @@ export function LoginGateDialog({
           busy={busy}
           emailInputRef={emailInputRef}
           showClose
+          analyticsConsent={analyticsConsent}
+          onAnalyticsConsentChange={onAnalyticsConsentChange}
           onEmailChange={onEmailChange}
           onPasswordChange={onPasswordChange}
           onModeChange={onModeChange}

@@ -155,8 +155,9 @@ export function buildChatReportPublication(viewing: {
   chat_state: unknown;
   updated_at: string;
 }): { snapshot: ChatReportShareSnapshot; mediaManifest: [] } {
-  if (!viewing.report || typeof viewing.report !== "object") throw new ReportNotReadyError();
-  const report = viewing.report as {
+  const report = (
+    viewing.report && typeof viewing.report === "object" ? viewing.report : {}
+  ) as {
     summary?: string;
     pros?: string[];
     risks?: string[];

@@ -197,7 +197,7 @@ describe("getNextQuestions", () => {
     const record = createEmptyPropertyRecord();
     const qs = getNextQuestions(record, [], []);
     expect(qs.length).toBeGreaterThan(0);
-    expect(qs.length).toBeLessThanOrEqual(3);
+    expect(qs.length).toBeLessThanOrEqual(1);
     expect(qs.every((q) => q.skippable)).toBe(true);
     // 招4: early turns prefer condition-band fields (not address/price yet)
     expect(
@@ -205,7 +205,7 @@ describe("getNextQuestions", () => {
         qs[0]!.fieldId,
       ),
     ).toBe(true);
-    expect(qs[1]?.priority).toBeLessThanOrEqual(qs[0]!.priority);
+    expect(qs.every((q) => q.kind !== "composite")).toBe(true);
   });
 
   it("omits skipped area and still returns other gaps", () => {
@@ -234,7 +234,7 @@ describe("getNextQuestions", () => {
 
     const qs = getNextQuestions(record, [], ["area"]);
     expect(qs.every((q) => q.fieldId !== "area")).toBe(true);
-    expect(qs.length).toBeLessThanOrEqual(3);
+    expect(qs.length).toBeLessThanOrEqual(1);
   });
 
   it("returns empty array when the record is already confirming", () => {
@@ -291,7 +291,7 @@ describe("getNextQuestions", () => {
     const qs = getNextQuestions(merged.record, merged.evidence, []);
     expect(qs.every((q) => q.fieldId !== "noise")).toBe(true);
     expect(merged.record.fields.noise?.status).toBe("confirmed");
-    expect(qs.length).toBeLessThanOrEqual(3);
+    expect(qs.length).toBeLessThanOrEqual(1);
   });
 });
 

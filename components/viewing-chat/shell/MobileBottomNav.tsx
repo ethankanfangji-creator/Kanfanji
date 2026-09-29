@@ -4,7 +4,6 @@ import type { ReactNode } from "react";
 import {
   Database,
   History,
-  Search,
   UserRound,
 } from "lucide-react";
 
@@ -51,11 +50,6 @@ export function MobileBottomNav({
       id: "history",
       label: labels.history,
       icon: <History className="h-[1.15rem] w-[1.15rem]" strokeWidth={2} aria-hidden />,
-    },
-    {
-      id: "search",
-      label: labels.search,
-      icon: <Search className="h-[1.15rem] w-[1.15rem]" strokeWidth={2} aria-hidden />,
     },
     {
       id: "media",

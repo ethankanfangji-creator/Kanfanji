@@ -64,7 +64,12 @@ export async function claimAccountThreads(userId: string): Promise<{ blocked: nu
         });
         return "limit_reached";
       }
-      if (!response.ok) return "network";
+      if (!response.ok) {
+        patchLocalThread(full.id, {
+          cloud: { state: "failed", error: "claim_failed" },
+        });
+        return "network";
+      }
       const body = (await response.json()) as { revision?: number };
       patchLocalThread(full.id, {
         ownerUserId: userId,
@@ -98,6 +103,8 @@ export async function pullCloudThreads(userId: string) {
   };
   const remoteIds = new Set((list.threads ?? []).map((thread) => thread.id));
   for (const id of syncedThreadIdsMissingFromCloud(listLocalThreads(), remoteIds, userId)) {
+    const detail = await fetch(`/api/viewing-chat/threads/${id}`);
+    if (detail.status !== 404) continue;
     deleteLocalThread(id);
     void removeMediaByThread(id);
   }

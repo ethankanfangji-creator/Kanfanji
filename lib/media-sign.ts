@@ -37,6 +37,17 @@ export function assertSharePhotoPath(
   }
 }
 
+/** Storage sign APIs sometimes return a full URL and sometimes a path. */
+export function absoluteStorageSignedUrl(url: string | null | undefined): string {
+  if (!url) return "";
+  if (url.startsWith("http://") || url.startsWith("https://")) return url;
+  const base = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/, "");
+  if (!base) return "";
+  if (url.startsWith("/object/")) return `${base}/storage/v1${url}`;
+  if (url.startsWith("/storage/")) return `${base}${url}`;
+  return "";
+}
+
 /** True when a signed URL looks expired (best-effort client hint). */
 export function isLikelyExpiredSignedUrl(url: string, nowMs = Date.now()): boolean {
   try {

@@ -4,7 +4,14 @@ import { ListingAnalyze } from "@/components/house/ListingAnalyze";
 import { TemplateWallet } from "@/components/house/TemplateWallet";
 import { requireUser } from "@/lib/auth";
 import type { CardTemplate } from "@/lib/viewing-card-templates";
+import { MEDIA_BUCKET } from "@/lib/supabase";
+import { MEDIA_SIGNED_TTL_SECONDS, absoluteStorageSignedUrl, assertOwnerMediaPath } from "@/lib/media-sign";
 import { isBlankListing, parseListingExtract, type ListingExtract } from "@/lib/listing-fields";
+import {
+  cardScore,
+  type CardPhoto,
+  type ViewingCardState,
+} from "@/lib/viewing-card-record";
 import { createAdminClient } from "@/utils/supabase/admin";
 
 const VIEWING_ID =
@@ -38,6 +45,53 @@ async function savedListing(viewingId: string, userId: string): Promise<ListingE
       : null;
   const fromViewing = parseListingExtract(snapshot);
   return isBlankListing(fromViewing) ? null : fromViewing;
+}
+
+async function savedCards(
+  supabase: Awaited<ReturnType<typeof requireUser>>["supabase"],
+  userId: string,
+  viewingId: string,
+): Promise<ViewingCardState[]> {
+  const { data, error } = await supabase
+    .from("viewing_cards")
+    .select("template_id, status, notes, photos")
+    .eq("viewing_id", viewingId);
+  if (error) throw new Error(error.message);
+
+  const paths = (data ?? []).flatMap((row) =>
+    Array.isArray(row.photos) ? row.photos.filter((item): item is string => typeof item === "string") : [],
+  );
+  const signed = new Map<string, string>();
+  const safePaths = paths.filter((path) => {
+    try {
+      assertOwnerMediaPath(path, userId);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  if (safePaths.length > 0) {
+    const admin = createAdminClient();
+    const result = await admin.storage.from(MEDIA_BUCKET).createSignedUrls(safePaths, MEDIA_SIGNED_TTL_SECONDS);
+    result.data?.forEach((row, index) => {
+      const raw = row.signedUrl || ("signedURL" in row ? String(row.signedURL) : "");
+      const url = absoluteStorageSignedUrl(raw);
+      if (url) signed.set(safePaths[index], url);
+    });
+  }
+
+  return (data ?? []).map((row) => {
+    const photos: CardPhoto[] = (Array.isArray(row.photos) ? row.photos : [])
+      .filter((item): item is string => typeof item === "string")
+      .map((path) => ({ path, url: signed.get(path) ?? "" }))
+      .filter((photo) => photo.url);
+    return {
+      templateId: row.template_id,
+      status: cardScore(String(row.status)),
+      notes: row.notes ?? "",
+      photos,
+    };
+  });
 }
 
 export default async function HousePage({
@@ -75,11 +129,12 @@ export default async function HousePage({
     }))
     .sort((a, b) => Number(b.isSystem) - Number(a.isSystem) || a.sortOrder - b.sortOrder);
   const listing = await savedListing(viewing.id, user.id);
+  const records = await savedCards(supabase, user.id, viewing.id);
 
   return (
     <HouseReadout address={viewing.address}>
       <ListingAnalyze viewingId={viewing.id} initial={listing} />
-      <TemplateWallet viewingId={viewing.id} templates={templates} />
+      <TemplateWallet viewingId={viewing.id} templates={templates} records={records} />
     </HouseReadout>
   );
 }

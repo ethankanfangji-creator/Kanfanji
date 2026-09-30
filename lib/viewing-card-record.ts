@@ -14,6 +14,7 @@ export type ViewingCardState = {
   status: CardScore | null;
   notes: string;
   photos: CardPhoto[];
+  voiceTranscript: string;
 };
 
 const NOTES_MAX = 2000;
@@ -41,6 +42,32 @@ export function cardPhotoStoragePath(input: {
     throw new Error("INVALID_MEDIA_PATH");
   }
   return path;
+}
+
+export function cardVoiceStoragePath(input: {
+  ownerId: string;
+  viewingId: string;
+  cardId: string;
+  file: Blob;
+}): string {
+  const extension = extensionFor(input.file, "webm");
+  const filename = `${crypto.randomUUID()}.${extension}`;
+  const path = `${input.ownerId}/${input.viewingId}/audios/${input.cardId}/${filename}`;
+  if (!isStoredCardVoicePath(path, input.ownerId, input.viewingId, input.cardId)) {
+    throw new Error("INVALID_MEDIA_PATH");
+  }
+  return path;
+}
+
+export function isStoredCardVoicePath(
+  path: string,
+  ownerId: string,
+  viewingId: string,
+  cardId: string,
+): boolean {
+  if (path.startsWith("http://") || path.startsWith("https://")) return false;
+  const prefix = `${ownerId}/${viewingId}/audios/${cardId}/`;
+  return path.startsWith(prefix) && isViewingMediaPath(path);
 }
 
 export function isStoredCardPhotoPath(

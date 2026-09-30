@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { cardNotes, cardPhotoStoragePath, isStoredCardPhotoPath } from "./viewing-card-record";
+import {
+  cardNotes,
+  cardPhotoStoragePath,
+  cardVoiceStoragePath,
+  isStoredCardPhotoPath,
+} from "./viewing-card-record";
 
 describe("viewing card photos", () => {
   it("stores a private path that includes the viewing and the card", () => {
@@ -24,6 +29,20 @@ describe("viewing card photos", () => {
         "c",
       ),
     ).toBe(false);
+  });
+});
+
+describe("viewing card voice", () => {
+  it("stores a private audio path that includes the viewing and the card", () => {
+    const path = cardVoiceStoragePath({
+      ownerId: "owner-1",
+      viewingId: "view-1",
+      cardId: "card-1",
+      file: new Blob(["x"], { type: "audio/webm" }),
+    });
+    expect(path.startsWith("owner-1/view-1/audios/card-1/")).toBe(true);
+    expect(path.endsWith(".webm")).toBe(true);
+    expect(path).not.toMatch(/^https?:/);
   });
 });
 

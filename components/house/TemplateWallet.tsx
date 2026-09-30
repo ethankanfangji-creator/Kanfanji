@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 import { addCardPhoto, saveCardNotes, saveCardScore } from "@/app/house/card-actions";
 import { addOwnCardTemplate } from "@/app/house/template-actions";
 import type { CardTemplate } from "@/lib/viewing-card-templates";
@@ -65,7 +65,15 @@ export function TemplateWallet({
             viewingId={viewingId}
             card={card}
             index={index}
-            record={saved.get(card.id) ?? { templateId: card.id, status: null, notes: "", photos: [] }}
+            record={
+              saved.get(card.id) ?? {
+                templateId: card.id,
+                status: null,
+                notes: "",
+                photos: [],
+                voiceTranscript: "",
+              }
+            }
             onChange={(next) => {
               setSaved((current) => new Map(current).set(card.id, next));
             }}
@@ -116,8 +124,12 @@ function ScoreCard({
   onChange: (next: ViewingCardState) => void;
 }) {
   const [notes, setNotes] = useState(record.notes);
+  const [transcript, setTranscript] = useState(record.voiceTranscript);
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const recorderRef = useRef<MediaRecorder | null>(null);
 
   async function chooseScore(status: CardScore) {
     const previous = record.status;
@@ -139,6 +151,59 @@ function ScoreCard({
       return;
     }
     onChange({ ...record, notes: result.notes });
+  }
+
+  async function toggleRecording() {
+    setError("");
+    if (recording && recorderRef.current) {
+      recorderRef.current.stop();
+      setRecording(false);
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError("這個瀏覽器不能錄音。");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunks.push(event.data);
+      };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+        void sendRecording(blob);
+      };
+      recorderRef.current = recorder;
+      recorder.start();
+      setRecording(true);
+    } catch {
+      setError("沒有麥克風權限。");
+    }
+  }
+
+  async function sendRecording(blob: Blob) {
+    setTranscribing(true);
+    const body = new FormData();
+    body.set("viewingId", viewingId);
+    body.set("templateId", card.id);
+    body.set("audio", new File([blob], "voice.webm", { type: blob.type || "audio/webm" }));
+    try {
+      const response = await fetch("/api/transcribe", { method: "POST", body });
+      const payload = (await response.json()) as { error?: string; transcript?: string };
+      if (!response.ok || !payload.transcript) {
+        setError(response.status === 429 ? "已達 AI 使用上限，請稍後再試。" : payload.error || "語音轉文字失敗");
+        return;
+      }
+      setTranscript(payload.transcript);
+      onChange({ ...record, notes, voiceTranscript: payload.transcript });
+    } catch {
+      setError("語音轉文字失敗");
+    } finally {
+      setTranscribing(false);
+    }
   }
 
   async function uploadPhoto(file: File) {
@@ -188,6 +253,18 @@ function ScoreCard({
           className="rounded-xl border border-black/10 px-3 py-2 text-[14px] text-[#1A1A1A]"
         />
       </label>
+      {transcript ? (
+        <p className="mt-2 text-[14px] leading-relaxed text-[#1A1A1A]">{transcript}</p>
+      ) : null}
+      <button
+        type="button"
+        onClick={() => void toggleRecording()}
+        disabled={transcribing}
+        aria-pressed={recording}
+        className="mt-2 h-9 rounded-full bg-[#F3EDE6] px-3 text-[13px] font-bold disabled:opacity-40"
+      >
+        {transcribing ? "轉文字中" : recording ? "停止" : "麥克風"}
+      </button>
       {record.photos.length > 0 ? (
         <ul className="mt-2 flex gap-2">
           {record.photos.map((photo) => (

@@ -54,7 +54,7 @@ async function savedCards(
 ): Promise<ViewingCardState[]> {
   const { data, error } = await supabase
     .from("viewing_cards")
-    .select("template_id, status, notes, photos")
+    .select("template_id, status, notes, photos, voice_transcript")
     .eq("viewing_id", viewingId);
   if (error) throw new Error(error.message);
 
@@ -90,6 +90,7 @@ async function savedCards(
       status: cardScore(String(row.status)),
       notes: row.notes ?? "",
       photos,
+      voiceTranscript: row.voice_transcript ?? "",
     };
   });
 }

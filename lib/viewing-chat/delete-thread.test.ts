@@ -42,4 +42,24 @@ describe("deleteViewingThread", () => {
     expect(result).toBe("failed");
     expect(getLocalThread(thread.id)?.address).toContain("11 Oak");
   });
+
+  it("removes a local-only signed-in row when the server has nothing to delete", async () => {
+    const thread = createLocalThread("12 Oak St, Vancouver, BC", [], null);
+    patchLocalThread(thread.id, { ownerUserId: "user-1", cloud: { state: "failed", error: "claim_failed" } });
+    const fetchMock = vi.fn(async () => new Response("missing", { status: 404 }));
+    const result = await deleteViewingThread({ id: thread.id, userId: "user-1", fetchImpl: fetchMock });
+    expect(result).toBe("removed");
+    expect(getLocalThread(thread.id)).toBeNull();
+  });
+
+  it("keeps the local row when DELETE cannot reach the server", async () => {
+    const thread = createLocalThread("13 Oak St, Vancouver, BC", [], null);
+    patchLocalThread(thread.id, { ownerUserId: "user-1", cloud: { state: "synced" } });
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError("network");
+    });
+    const result = await deleteViewingThread({ id: thread.id, userId: "user-1", fetchImpl: fetchMock });
+    expect(result).toBe("failed");
+    expect(getLocalThread(thread.id)?.address).toContain("13 Oak");
+  });
 });

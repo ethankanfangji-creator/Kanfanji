@@ -2,6 +2,7 @@
  * User-initiated listing URL fetch → plain text (untrusted).
  */
 
+import { collectListingPhotoUrls } from "@/lib/listing-fields";
 import { sanitizeUntrustedHtml } from "@/lib/security/untrusted-content";
 import { safeFetchUserUrl } from "@/lib/security/ssrf";
 
@@ -12,6 +13,7 @@ export type ListingUrlExtractResult =
       extractedText: string;
       publisher: string | null;
       contentType: string | null;
+      photoUrls: string[];
     }
   | {
       ok: false;
@@ -87,5 +89,6 @@ export async function fetchAndExtractListingUrl(
     extractedText: text,
     publisher,
     contentType: fetched.contentType,
+    photoUrls: collectListingPhotoUrls(fetched.bodyText, fetched.finalUrl),
   };
 }

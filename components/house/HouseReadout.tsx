@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 const CARD_STATUS_LABEL = {
   good: "不錯",
   bad: "不行",
@@ -25,9 +27,11 @@ export function cardStatusLabel(status: string) {
 export function HouseReadout({
   address,
   cards,
+  children,
 }: {
   address: string;
   cards: HouseCard[];
+  children?: ReactNode;
 }) {
   const statusText = cards.length === 0 ? "尚未記錄" : `已記錄 ${cards.length} 張看點卡`;
 
@@ -41,6 +45,7 @@ export function HouseReadout({
           <h2 className="text-[12px] font-medium text-[#6B7280]">狀態</h2>
           <p className="mt-1 text-[15px] font-semibold">{statusText}</p>
         </section>
+        {children}
         <section className="flex flex-col gap-2" aria-labelledby="house-cards-heading">
           <h2 id="house-cards-heading" className="px-1 text-[12px] font-medium text-[#6B7280]">
             看點卡

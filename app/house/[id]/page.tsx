@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { startViewingSession } from "@/app/house/session-actions";
 import { HouseReadout } from "@/components/house/HouseReadout";
 import { ListingAnalyze } from "@/components/house/ListingAnalyze";
 import { TemplateWallet } from "@/components/house/TemplateWallet";
@@ -134,6 +135,15 @@ export default async function HousePage({
 
   return (
     <HouseReadout address={viewing.address}>
+      <form action={startViewingSession}>
+        <input type="hidden" name="viewingId" value={viewing.id} />
+        <button
+          type="submit"
+          className="h-11 w-full rounded-full bg-black text-[14px] font-bold text-white"
+        >
+          開始看房
+        </button>
+      </form>
       <ListingAnalyze viewingId={viewing.id} initial={listing} />
       <TemplateWallet viewingId={viewing.id} templates={templates} records={records} />
     </HouseReadout>

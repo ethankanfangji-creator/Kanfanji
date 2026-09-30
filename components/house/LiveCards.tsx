@@ -16,6 +16,8 @@ export type LiveCard = {
   status: string | null;
   notes: string | null;
   voiceTranscript: string | null;
+  photoCount?: number;
+  photoUrls?: string[];
 };
 
 export function LiveCards({
@@ -50,6 +52,18 @@ export function LiveCards({
                 {card.notes ? <p className="mt-1 text-[14px] leading-relaxed">{card.notes}</p> : null}
                 {card.voiceTranscript ? (
                   <p className="mt-1 text-[14px] leading-relaxed">{card.voiceTranscript}</p>
+                ) : null}
+                {card.photoUrls && card.photoUrls.length > 0 ? (
+                  <ul className="mt-2 flex gap-2">
+                    {card.photoUrls.map((url) => (
+                      <li key={url}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={url} alt="" className="h-16 w-16 rounded-xl object-cover" />
+                      </li>
+                    ))}
+                  </ul>
+                ) : card.photoCount ? (
+                  <p className="mt-1 text-[13px] text-[#6B7280]">照片 {card.photoCount}</p>
                 ) : null}
               </li>
             );

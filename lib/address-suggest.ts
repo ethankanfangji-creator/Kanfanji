@@ -19,6 +19,8 @@ export type AddressSuggestion = {
   street?: string;
   /** Street-segment coordinates; the label keeps the number the user typed. */
   houseNumberRetained?: boolean;
+  /** Civic/rooftop points can be stored. Street midpoints are hints only. */
+  locationPrecision?: "civic" | "street";
   score?: number;
   source: "bc_geocoder" | "nominatim" | "google" | "photon";
 };
@@ -29,9 +31,6 @@ export const METRO_VANCOUVER_BIAS = {
   longitude: -122.91,
   radiusMeters: 45_000,
 } as const;
-
-/** Drop Canadian hits this far from the bias when the query names no city. */
-const CA_NEARBY_METERS = 80_000;
 
 const NAMED_CA_PLACE =
   /\b(port moody|north vancouver|west vancouver|new westminster|port coquitlam|british columbia|b\.c\.|ontario|cramahe|toronto|ottawa|montreal|québec|quebec|calgary|edmonton|alberta|victoria|kelowna|nanaimo|vancouver|burnaby|richmond|surrey|coquitlam|bc)\b/i;
@@ -65,6 +64,21 @@ export type SuggestBias = {
 };
 
 /** City or region already typed. IP and Metro Vancouver must not override it. */
+export function isPreciseHousePoint(row: {
+  houseNumber?: string;
+  houseNumberRetained?: boolean;
+  locationPrecision?: "civic" | "street";
+  lat?: number;
+  lng?: number;
+}): boolean {
+  if (row.locationPrecision === "street" || row.houseNumberRetained) return false;
+  return (
+    Boolean(row.houseNumber) &&
+    typeof row.lat === "number" &&
+    typeof row.lng === "number"
+  );
+}
+
 export function queryNamesPlace(query: string): string | null {
   const match = query.match(NAMED_CA_PLACE);
   return match ? match[0].toLowerCase() : null;
@@ -125,6 +139,7 @@ function retainHouseNumber(row: AddressSuggestion, houseNumber: string): Address
     ...row,
     houseNumber,
     houseNumberRetained: true,
+    locationPrecision: "street",
     title: line,
     label,
     formatted: label,
@@ -138,11 +153,16 @@ export function rankCanadianSuggestions(
   limit: number,
 ): AddressSuggestion[] {
   const houseNumber = parseHouseNumber(query);
-  const wantedStreet = streetKey(query);
+  const namedForStreet = queryNamesPlace(query);
+  const streetQuery = namedForStreet
+    ? query.replace(new RegExp(namedForStreet.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "ig"), " ")
+    : query;
+  const wantedStreet = streetKey(streetQuery);
   const named = queryNamesPlace(query);
   let pool = rows.filter((row) => {
     if (bias && typeof row.lat === "number" && typeof row.lng === "number") {
-      if (distanceMeters(bias.latitude, bias.longitude, row.lat, row.lng) > CA_NEARBY_METERS) {
+      const radius = bias.radiusMeters ?? METRO_VANCOUVER_BIAS.radiusMeters;
+      if (distanceMeters(bias.latitude, bias.longitude, row.lat, row.lng) > radius) {
         return false;
       }
     }
@@ -166,7 +186,10 @@ export function rankCanadianSuggestions(
       (row) => row.houseNumber?.toLowerCase() === houseNumber && !row.houseNumberRetained,
     );
     if (points.length > 0) {
-      return [...points].sort(sortByDistance).slice(0, limit);
+      return [...points]
+        .sort(sortByDistance)
+        .slice(0, limit)
+        .map((row) => ({ ...row, locationPrecision: "civic" as const, houseNumberRetained: undefined }));
     }
     const streets = pool.filter((row) => {
       if (row.houseNumber) return false;
@@ -524,11 +547,90 @@ export async function suggestAddresses(
       ? undefined
       : (options?.bias ?? METRO_VANCOUVER_BIAS);
   const upstreamLimit = Math.max(limit, 8);
-  const [places, photon] = await Promise.all([
-    suggestViaPlacesNewCa(trimmed, upstreamLimit, signal, bias),
-    suggestViaPhotonCa(trimmed, upstreamLimit, signal, bias),
-  ]);
-  return rankCanadianSuggestions(trimmed, [...places, ...photon], bias, limit);
+  const places = await suggestViaPlacesNewCa(trimmed, upstreamLimit, signal, bias);
+  const photon = await suggestViaPhotonCa(trimmed, upstreamLimit, signal, bias);
+  const ranked = rankCanadianSuggestions(trimmed, [...places, ...photon], bias, limit);
+  if (ranked.some((row) => row.locationPrecision === "civic")) return ranked;
+  const civic = await suggestViaDataBcCivic(trimmed, signal, bias ?? METRO_VANCOUVER_BIAS);
+  if (civic.length > 0) {
+    const withCivic = rankCanadianSuggestions(trimmed, [...places, ...photon, ...civic], bias, limit);
+    if (withCivic.some((row) => row.locationPrecision === "civic")) return withCivic;
+  }
+  return ranked;
+}
+
+type DataBcFeature = {
+  geometry?: { coordinates?: [number, number] };
+  properties?: {
+    fullAddress?: string;
+    civicNumber?: string;
+    streetName?: string;
+    localityName?: string;
+    provinceCode?: string;
+    matchPrecision?: string;
+    score?: number;
+  };
+};
+
+/**
+ * DataBC civic-address points only. A miss, a street match, or a down API
+ * returns [] — callers then keep the street as a map hint, not a saved site.
+ */
+async function suggestViaDataBcCivic(
+  query: string,
+  signal: AbortSignal | undefined,
+  bias: SuggestBias,
+): Promise<AddressSuggestion[]> {
+  const houseNumber = parseHouseNumber(query);
+  if (!houseNumber) return [];
+  try {
+    const url = new URL("https://geocoder.api.gov.bc.ca/addresses.json");
+    url.searchParams.set("addressString", query);
+    url.searchParams.set("maxResults", "5");
+    url.searchParams.set("minScore", "50");
+    url.searchParams.set("outputSRS", "4326");
+    url.searchParams.set("interpolation", "none");
+    url.searchParams.set("location", `${bias.latitude},${bias.longitude}`);
+    const res = await fetch(url, {
+      signal,
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as { features?: DataBcFeature[] };
+    const out: AddressSuggestion[] = [];
+    for (const feature of data.features ?? []) {
+      const props = feature.properties;
+      if ((props?.matchPrecision ?? "").toUpperCase() !== "CIVIC_NUMBER") continue;
+      const civic = (props?.civicNumber ?? "").trim().toLowerCase();
+      if (civic !== houseNumber) continue;
+      const [lng, lat] = feature.geometry?.coordinates ?? [];
+      if (typeof lat !== "number" || typeof lng !== "number") continue;
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      const street = props?.streetName?.trim();
+      const city = props?.localityName?.trim();
+      const label = props?.fullAddress?.trim() || [civic, street, city, "BC"].filter(Boolean).join(", ");
+      out.push({
+        id: `bc:${label}`,
+        label,
+        formatted: label,
+        title: [props?.civicNumber, street].filter(Boolean).join(" ") || label,
+        secondary: [city, props?.provinceCode].filter(Boolean).join(", ") || undefined,
+        lat,
+        lng,
+        city,
+        province: props?.provinceCode || "BC",
+        country: "Canada",
+        houseNumber: props?.civicNumber,
+        street,
+        locationPrecision: "civic",
+        score: props?.score,
+        source: "bc_geocoder",
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
 }
 
 async function suggestViaNominatim(

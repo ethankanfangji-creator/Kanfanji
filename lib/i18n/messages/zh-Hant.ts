@@ -181,6 +181,7 @@ const zhHant: Messages = {
     noCoordinates: "無法取得",
     adminMismatchWarning:
       "注意：此結果的縣市與你輸入的不一致（例如台北 vs 新北）— 確認前請仔細核對。",
+    mapPinHint: "這只是這條路的提示。點一下地圖上那棟房子，那個位置才會被記住。",
   },
   propertyBasics: {
     title: "房源基本資訊（AI）",

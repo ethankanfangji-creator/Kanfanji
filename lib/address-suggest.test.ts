@@ -500,6 +500,137 @@ describe("one-shot Metro Vancouver suggest", () => {
     expect(results.some((row) => /Ontario|Cramahe/i.test(row.label))).toBe(false);
   });
 
+  it("uses a DataBC civic point for 2143 Spring Port Moody instead of the street midpoint", async () => {
+    process.env.GOOGLE_MAPS_API_KEY = "test-google-key";
+    const streetMid = { lat: 49.278, lng: -122.87 };
+    const building = { lat: 49.2815, lng: -122.8512 };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("places:autocomplete")) {
+        return jsonResponse({
+          suggestions: [
+            {
+              placePrediction: {
+                placeId: "spring-street",
+                text: { text: "Spring Street, Port Moody, BC, Canada" },
+              },
+            },
+          ],
+        });
+      }
+      if (url.includes("/v1/places/")) {
+        return jsonResponse({
+          id: "spring-street",
+          formattedAddress: "Spring Street, Port Moody, BC, Canada",
+          location: { latitude: streetMid.lat, longitude: streetMid.lng },
+          addressComponents: [
+            { longText: "Spring Street", shortText: "Spring St", types: ["route"] },
+            { longText: "Port Moody", shortText: "Port Moody", types: ["locality"] },
+            { longText: "British Columbia", shortText: "BC", types: ["administrative_area_level_1"] },
+            { longText: "Canada", shortText: "CA", types: ["country"] },
+          ],
+        });
+      }
+      if (url.includes("photon.komoot.io")) {
+        return jsonResponse({
+          features: [
+            {
+              geometry: { coordinates: [streetMid.lng, streetMid.lat] },
+              properties: {
+                osm_id: 21,
+                street: "Spring Street",
+                city: "Port Moody",
+                state: "British Columbia",
+                country: "Canada",
+                countrycode: "ca",
+              },
+            },
+          ],
+        });
+      }
+      if (url.includes("geocoder.api.gov.bc.ca")) {
+        expect(url).toContain("interpolation=none");
+        expect(url).toContain("location=");
+        return jsonResponse({
+          features: [
+            {
+              geometry: { coordinates: [building.lng, building.lat] },
+              properties: {
+                fullAddress: "2143 SPRING ST, PORT MOODY, BC",
+                civicNumber: "2143",
+                streetName: "SPRING ST",
+                localityName: "PORT MOODY",
+                provinceCode: "BC",
+                matchPrecision: "CIVIC_NUMBER",
+                score: 100,
+              },
+            },
+            {
+              geometry: { coordinates: [streetMid.lng, streetMid.lat] },
+              properties: {
+                fullAddress: "SPRING ST, PORT MOODY, BC",
+                streetName: "SPRING ST",
+                localityName: "PORT MOODY",
+                provinceCode: "BC",
+                matchPrecision: "STREET",
+                score: 80,
+              },
+            },
+          ],
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const results = await suggestAddresses("2143 Spring Port Moody");
+    expect(results).toHaveLength(1);
+    expect(results[0]).toEqual(
+      expect.objectContaining({
+        source: "bc_geocoder",
+        locationPrecision: "civic",
+        houseNumber: "2143",
+        lat: building.lat,
+        lng: building.lng,
+      }),
+    );
+    expect(results[0]?.houseNumberRetained).toBeUndefined();
+    expect(results[0]?.lat).not.toBe(streetMid.lat);
+  });
+
+  it("still offers a street hint when DataBC is down", async () => {
+    process.env.GOOGLE_MAPS_API_KEY = "test-google-key";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("places:autocomplete")) return jsonResponse({ suggestions: [] });
+      if (url.includes("photon.komoot.io")) {
+        return jsonResponse({
+          features: [
+            {
+              geometry: { coordinates: [-122.86, 49.28] },
+              properties: {
+                osm_id: 8,
+                street: "Spring Street",
+                city: "Port Moody",
+                state: "British Columbia",
+                country: "Canada",
+                countrycode: "ca",
+              },
+            },
+          ],
+        });
+      }
+      if (url.includes("geocoder.api.gov.bc.ca")) {
+        return Promise.resolve({ ok: false, json: async () => ({}) } as Response);
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const results = await suggestAddresses("2143 Spring Port Moody");
+    expect(results).toHaveLength(1);
+    expect(results[0]?.locationPrecision).toBe("street");
+    expect(results[0]?.houseNumberRetained).toBe(true);
+  });
+
   it("keeps the typed house number on the nearest street when no source has that point", async () => {
     process.env.GOOGLE_MAPS_API_KEY = "test-google-key";
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -533,6 +664,7 @@ describe("one-shot Metro Vancouver suggest", () => {
           ],
         });
       }
+      if (url.includes("geocoder.api.gov.bc.ca")) return jsonResponse({ features: [] });
       throw new Error(`unexpected fetch: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -541,6 +673,7 @@ describe("one-shot Metro Vancouver suggest", () => {
     expect(results[0]).toEqual(
       expect.objectContaining({
         houseNumberRetained: true,
+        locationPrecision: "street",
         houseNumber: "2143",
         lat: 49.28,
         lng: -122.86,

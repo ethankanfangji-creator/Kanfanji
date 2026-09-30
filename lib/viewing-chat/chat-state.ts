@@ -12,6 +12,7 @@ const STATE_KEYS = [
   "conversationStatus",
   "pendingConfirm",
   "pinned",
+  "sitePin",
 ] as const;
 
 type StateKey = (typeof STATE_KEYS)[number];

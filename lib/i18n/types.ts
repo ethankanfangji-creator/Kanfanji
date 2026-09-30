@@ -174,6 +174,7 @@ export type Messages = {
     openMap: string;
     noCoordinates: string;
     adminMismatchWarning: string;
+    mapPinHint: string;
   };
   propertyBasics: {
     title: string;

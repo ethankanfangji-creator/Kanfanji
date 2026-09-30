@@ -183,6 +183,7 @@ const en: Messages = {
     noCoordinates: "Not available",
     adminMismatchWarning:
       "Warning: the city/county in this result does not match what you typed — check carefully before confirming.",
+    mapPinHint: "This is only the street. Tap the building on the map. That point is the one we keep.",
   },
   propertyBasics: {
     title: "Property basics (AI)",

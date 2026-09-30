@@ -570,6 +570,7 @@ export function ViewingChatApp() {
   async function bindConfirmedAddress(
     label: string,
     place?: { placeId: string | null; placeSource: string | null },
+    sitePin?: { lat: number; lng: number; source: "civic" | "map" },
   ) {
     const trimmed = label.trim();
     if (!trimmed) {
@@ -642,6 +643,7 @@ export function ViewingChatApp() {
       lastTurnChanges: [],
       conversationStatus: "collecting",
       turnWarnings: [],
+      ...(sitePin ? { sitePin } : {}),
     });
     refreshLocal();
     track({
@@ -673,6 +675,7 @@ export function ViewingChatApp() {
             stage: "viewing_preparation",
             conversationStatus: "collecting",
             propertyRecord: seedRecord,
+            ...(sitePin ? { sitePin } : {}),
           },
         }),
       }).then(async (response) => {
@@ -716,16 +719,24 @@ export function ViewingChatApp() {
     }
   }
 
-  function acceptPendingAddress() {
+  function acceptPendingAddress(pin: { lat: number; lng: number } | null) {
     if (!pendingAddressConfirm) return;
-    const { candidate, source, region } = pendingAddressConfirm;
+    const { candidate, source, region, queryAddress } = pendingAddressConfirm;
+    if (candidate.needsMapPin && !pin) return;
     if (source && region) {
       track({ name: "address_confirmed", props: { source, region } });
     }
-    void bindConfirmedAddress(candidate.displayAddress, {
-      placeId: candidate.propertyId,
+    const sitePin = candidate.needsMapPin
+      ? pin
+        ? { lat: pin.lat, lng: pin.lng, source: "map" as const }
+        : undefined
+      : candidate.lat != null && candidate.lng != null
+        ? { lat: candidate.lat, lng: candidate.lng, source: "civic" as const }
+        : undefined;
+    void bindConfirmedAddress(candidate.needsMapPin ? queryAddress : candidate.displayAddress, {
+      placeId: candidate.needsMapPin ? null : candidate.propertyId,
       placeSource: candidate.source,
-    });
+    }, sitePin);
   }
 
   function rejectPendingAddress() {
@@ -2335,6 +2346,7 @@ export function ViewingChatApp() {
                     openMap: t.address.openMap,
                     noCoordinates: t.address.noCoordinates,
                     adminMismatchWarning: t.address.adminMismatchWarning,
+                    mapPinHint: t.address.mapPinHint,
                   }}
                   busy={false}
                   onConfirm={acceptPendingAddress}

@@ -1,7 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import { MapPin } from "lucide-react";
 import type { AddressConfirmationCandidate } from "@/lib/address-confirmation";
+import { COQUITLAM_PORT_MOODY_CENTER } from "@/lib/map-pin";
+import { PinDropMap } from "@/components/viewing-wizard/PinDropMap";
 
 export type AddressConfirmationCopy = {
   pendingTitle: string;
@@ -12,6 +15,7 @@ export type AddressConfirmationCopy = {
   openMap: string;
   noCoordinates: string;
   adminMismatchWarning: string;
+  mapPinHint: string;
 };
 
 export function AddressConfirmationCard({
@@ -24,12 +28,16 @@ export function AddressConfirmationCard({
   candidate: AddressConfirmationCandidate;
   copy: AddressConfirmationCopy;
   busy?: boolean;
-  onConfirm: () => void;
+  onConfirm: (pin: { lat: number; lng: number } | null) => void;
   onReject: () => void;
 }) {
+  const [picked, setPicked] = useState<{ lat: number; lng: number } | null>(null);
+  const hintLat = candidate.lat ?? COQUITLAM_PORT_MOODY_CENTER.latitude;
+  const hintLng = candidate.lng ?? COQUITLAM_PORT_MOODY_CENTER.longitude;
+  const shown = picked ?? (candidate.needsMapPin ? null : { lat: candidate.lat, lng: candidate.lng });
   const coords =
-    candidate.lat != null && candidate.lng != null
-      ? `${candidate.lat.toFixed(5)}, ${candidate.lng.toFixed(5)}`
+    shown?.lat != null && shown.lng != null
+      ? `${shown.lat.toFixed(5)}, ${shown.lng.toFixed(5)}`
       : null;
 
   return (
@@ -65,7 +73,18 @@ export function AddressConfirmationCard({
         </div>
       </dl>
 
-      {candidate.mapEmbedUrl ? (
+      {candidate.needsMapPin ? (
+        <>
+          <p className="mt-3 text-[13px] font-semibold leading-snug text-[#1E3A8A]">{copy.mapPinHint}</p>
+          <PinDropMap
+            centerLat={hintLat}
+            centerLng={hintLng}
+            label={copy.mapPinHint}
+            picked={picked}
+            onPick={setPicked}
+          />
+        </>
+      ) : candidate.mapEmbedUrl ? (
         <div className="mt-3 overflow-hidden rounded-[12px] border border-[#BFDBFE] bg-white">
           <iframe
             title={copy.pendingTitle}
@@ -105,8 +124,8 @@ export function AddressConfirmationCard({
         <button
           type="button"
           className="ui-button ui-button--primary min-h-11 flex-1"
-          disabled={busy}
-          onClick={onConfirm}
+          disabled={busy || (candidate.needsMapPin && !picked)}
+          onClick={() => onConfirm(candidate.needsMapPin ? picked : null)}
         >
           {copy.confirmUse}
         </button>

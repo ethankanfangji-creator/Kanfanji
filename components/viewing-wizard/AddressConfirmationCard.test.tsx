@@ -21,6 +21,7 @@ const candidate: AddressConfirmationCandidate = {
   mapEmbedUrl: "https://www.openstreetmap.org/export/embed.html?marker=1",
   openMapUrl: "https://www.openstreetmap.org/?mlat=49.28",
   adminDistrictMismatch: false,
+  needsMapPin: false,
 };
 
 const copy = {
@@ -32,6 +33,7 @@ const copy = {
   openMap: "Open map",
   noCoordinates: "Not available",
   adminMismatchWarning: "City/county mismatch — check carefully",
+  mapPinHint: "This is only the street. Tap the building.",
 };
 
 describe("AddressConfirmationCard", () => {
@@ -88,5 +90,28 @@ describe("AddressConfirmationCard", () => {
 
     expect(screen.getByRole("alert")).toBeTruthy();
     expect(screen.getByText(copy.adminMismatchWarning)).toBeTruthy();
+  });
+
+  it("does not confirm a street midpoint until the map is tapped", async () => {
+    const user = userEvent.setup();
+    const onConfirm = vi.fn();
+    render(
+      <AddressConfirmationCard
+        candidate={{ ...candidate, needsMapPin: true, mapEmbedUrl: null }}
+        copy={copy}
+        onConfirm={onConfirm}
+        onReject={vi.fn()}
+      />,
+    );
+    const confirm = screen.getByRole("button", { name: copy.confirmUse });
+    expect(confirm).toHaveProperty("disabled", true);
+    await user.click(screen.getByRole("application", { name: copy.mapPinHint }));
+    expect(confirm).toHaveProperty("disabled", false);
+    await user.click(confirm);
+    expect(onConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({ lat: expect.any(Number), lng: expect.any(Number) }),
+    );
+    const pin = onConfirm.mock.calls[0][0] as { lat: number; lng: number };
+    expect(pin.lat).not.toBe(0);
   });
 });

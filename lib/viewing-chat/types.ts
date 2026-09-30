@@ -110,6 +110,8 @@ export type ViewingChatThread = {
   address: string;
   /** Normalized display address (original input stays in `address`) */
   normalizedAddress?: string | null;
+  /** Building coordinate. A street midpoint is never stored here. */
+  sitePin?: { lat: number; lng: number; source: "civic" | "map" } | null;
   createdAt: string;
   updatedAt: string;
   messages: ChatMessage[];

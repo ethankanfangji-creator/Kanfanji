@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 const cardClass = "rounded-2xl bg-white px-4 py-3 shadow-[0_8px_24px_rgba(0,0,0,0.08)]";
@@ -90,7 +91,12 @@ export function DiscussionBoard({
   return (
     <main className="min-h-screen bg-[#FAF6F1] text-[#1A1A1A]">
       <div className="mx-auto w-full max-w-5xl px-4 py-6">
-        <h1 className="text-[20px] font-bold">比較討論</h1>
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-[20px] font-bold">比較討論</h1>
+          <Link href="/viewings" className="text-[13px] font-bold underline">
+            回看房列表
+          </Link>
+        </div>
         {commentsFailed ? (
           <p className="mt-3 text-[15px] font-semibold">留言讀取失敗，請再試一次。</p>
         ) : comments.length === 0 ? (

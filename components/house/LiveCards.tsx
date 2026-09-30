@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { applyViewingCardChange, type ViewingCardChange } from "@/lib/live-card-sync";
 import { createClient } from "@/utils/supabase/client";
@@ -93,6 +94,11 @@ export function LiveCards({
           <p className="text-[12px] font-medium text-[#6B7280]">看房代碼</p>
           <h1 className="mt-1 text-[28px] font-bold tracking-[0.2em]">{code}</h1>
           <p className="mt-2 text-[15px] font-semibold">{address}</p>
+          {viewingId ? (
+            <Link href={`/house/${viewingId}`} className="mt-2 inline-block text-[13px] font-bold underline">
+              回這間房
+            </Link>
+          ) : null}
         </section>
         <ul className="flex flex-col">
           {liveCards.map((card, index) => {

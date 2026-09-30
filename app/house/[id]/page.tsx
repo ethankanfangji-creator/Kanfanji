@@ -119,7 +119,7 @@ export default async function HousePage({
     .from("viewing_card_templates")
     .select("id, name, icon, sort_order, is_system")
     .order("sort_order", { ascending: true });
-  if (templateError) return <HouseReadout address={viewing.address} loadFailed />;
+  if (templateError) return <HouseReadout address={viewing.address} viewingId={viewing.id} loadFailed />;
 
   const templates: CardTemplate[] = (templateRows ?? [])
     .map((row) => ({
@@ -136,11 +136,11 @@ export default async function HousePage({
     listing = await savedListing(viewing.id, user.id);
     records = await savedCards(supabase, user.id, viewing.id);
   } catch {
-    return <HouseReadout address={viewing.address} loadFailed />;
+    return <HouseReadout address={viewing.address} viewingId={viewing.id} loadFailed />;
   }
 
   return (
-    <HouseReadout address={viewing.address} hasRecords={records.length > 0}>
+    <HouseReadout address={viewing.address} viewingId={viewing.id} hasRecords={records.length > 0}>
       <form action={startViewingSession}>
         <input type="hidden" name="viewingId" value={viewing.id} />
         <button

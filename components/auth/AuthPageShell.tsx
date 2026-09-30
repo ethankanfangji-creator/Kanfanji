@@ -29,6 +29,9 @@ export function AuthPageShell({
           <Link href="/" className={authTextLink}>
             {messages.loginPage.backHome}
           </Link>
+          <Link href="/landing" className={authTextLink}>
+            看產品說明
+          </Link>
           <Link href="/privacy" className={authTextLink}>
             {messages.nav.privacy}
           </Link>

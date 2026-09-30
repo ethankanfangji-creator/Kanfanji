@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { ReactNode } from "react";
 
 const cardClass =
@@ -5,11 +6,13 @@ const cardClass =
 
 export function HouseReadout({
   address,
+  viewingId,
   hasRecords = false,
   loadFailed = false,
   children,
 }: {
   address: string;
+  viewingId?: string;
   hasRecords?: boolean;
   loadFailed?: boolean;
   children?: ReactNode;
@@ -19,6 +22,16 @@ export function HouseReadout({
       <div className="mx-auto flex w-full max-w-[420px] flex-col gap-3 px-4 py-6">
         <section className={cardClass}>
           <h1 className="text-[18px] font-bold leading-snug">{address}</h1>
+          {viewingId ? (
+            <p className="mt-2 flex gap-4 text-[13px] font-bold">
+              <Link href="/viewings" className="underline">
+                看房列表
+              </Link>
+              <Link href={`/viewings/${viewingId}`} className="underline">
+                這筆看房
+              </Link>
+            </p>
+          ) : null}
         </section>
         {loadFailed ? (
           <section className={cardClass}>

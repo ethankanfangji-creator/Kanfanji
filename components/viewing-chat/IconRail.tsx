@@ -7,6 +7,7 @@ import {
   Database,
   GitCompare,
   LifeBuoy,
+  List,
   LogIn,
   LogOut,
   Check,
@@ -236,6 +237,9 @@ export function IconRail({
           onClick={onToggleCompareMode}
         >
           <GitCompare className="h-5 w-5" strokeWidth={2} />
+        </RailButton>
+        <RailButton label="看房列表" href="/viewings" expanded={expanded}>
+          <List className="h-5 w-5" strokeWidth={2} />
         </RailButton>
       </div>
 

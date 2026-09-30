@@ -4,11 +4,9 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useI18n } from "@/components/I18nProvider";
 import { analyticsKey } from "@/lib/analytics/client";
-import {
-  hasGlobalPrivacyControl,
-  readAnalyticsConsent,
-} from "@/lib/analytics/consent";
+import { hasGlobalPrivacyControl } from "@/lib/analytics/consent";
 import { applyAnalyticsConsent } from "@/lib/analytics/preferences";
+import { getSupabase } from "@/lib/supabase";
 
 export function AnalyticsToggle() {
   const { messages } = useI18n();
@@ -16,8 +14,14 @@ export function AnalyticsToggle() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    setEnabled(readAnalyticsConsent() === "granted" && !hasGlobalPrivacyControl());
-    setReady(Boolean(analyticsKey()));
+    const supabase = getSupabase();
+    if (!analyticsKey() || !supabase) return;
+    void supabase.auth.getUser().then(({ data }) => {
+      const user = data.user;
+      const consent = user?.user_metadata?.analytics_consent;
+      setEnabled(consent === "granted" && !hasGlobalPrivacyControl());
+      setReady(Boolean(user));
+    });
   }, []);
 
   if (!ready) return null;

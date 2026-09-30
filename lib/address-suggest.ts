@@ -13,6 +13,12 @@ export type AddressSuggestion = {
   city?: string;
   province?: string;
   country?: string;
+  /** Street number from the source, when the row is a house point. */
+  houseNumber?: string;
+  /** Road name without the house number. */
+  street?: string;
+  /** Street-segment coordinates; the label keeps the number the user typed. */
+  houseNumberRetained?: boolean;
   score?: number;
   source: "bc_geocoder" | "nominatim" | "google" | "photon";
 };
@@ -23,6 +29,159 @@ export const METRO_VANCOUVER_BIAS = {
   longitude: -122.91,
   radiusMeters: 45_000,
 } as const;
+
+/** Drop Canadian hits this far from the bias when the query names no city. */
+const CA_NEARBY_METERS = 80_000;
+
+const NAMED_CA_PLACE =
+  /\b(port moody|north vancouver|west vancouver|new westminster|port coquitlam|british columbia|b\.c\.|ontario|cramahe|toronto|ottawa|montreal|québec|quebec|calgary|edmonton|alberta|victoria|kelowna|nanaimo|vancouver|burnaby|richmond|surrey|coquitlam|bc)\b/i;
+
+const STREET_SUFFIX: Record<string, string> = {
+  street: "st",
+  st: "st",
+  avenue: "ave",
+  ave: "ave",
+  road: "rd",
+  rd: "rd",
+  drive: "dr",
+  dr: "dr",
+  boulevard: "blvd",
+  blvd: "blvd",
+  lane: "ln",
+  ln: "ln",
+  way: "way",
+  court: "ct",
+  ct: "ct",
+  place: "pl",
+  pl: "pl",
+  crescent: "cres",
+  cres: "cres",
+};
+
+export type SuggestBias = {
+  latitude: number;
+  longitude: number;
+  radiusMeters?: number;
+};
+
+/** City or region already typed. IP and Metro Vancouver must not override it. */
+export function queryNamesPlace(query: string): string | null {
+  const match = query.match(NAMED_CA_PLACE);
+  return match ? match[0].toLowerCase() : null;
+}
+
+export function parseHouseNumber(query: string): string | null {
+  const match = query.trim().match(/^(\d+[a-z]?)\b/i);
+  return match ? match[1].toLowerCase() : null;
+}
+
+export function streetKey(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/^\d+[a-z]?\s+/, "")
+    .replace(/[.,]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => STREET_SUFFIX[word] ?? word)
+    .join(" ")
+    .trim();
+}
+
+function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const toRad = (value: number) => (value * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6_371_000 * Math.asin(Math.sqrt(a));
+}
+
+function isCanadianAddress(parts: { country?: string; countryCode?: string }): boolean {
+  const code = (parts.countryCode ?? "").trim().toLowerCase();
+  const country = (parts.country ?? "").trim();
+  if (code === "ca" || /^canada$/i.test(country)) return true;
+  if (code === "us" || /\b(USA|United States)\b/i.test(country)) return false;
+  return false;
+}
+
+function placeHay(row: AddressSuggestion): string {
+  return [row.city, row.province, row.formatted, row.label, row.secondary, row.street]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function matchesNamedPlace(row: AddressSuggestion, named: string): boolean {
+  const escaped = named.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|\\b)${escaped}(?:\\b|$)`, "i").test(placeHay(row));
+}
+
+function retainHouseNumber(row: AddressSuggestion, houseNumber: string): AddressSuggestion {
+  const street = row.street || row.title || "";
+  const line = `${houseNumber} ${street}`.trim();
+  const rest = [row.city, row.province, row.country].filter(Boolean).join(", ");
+  const label = rest ? `${line}, ${rest}` : line;
+  return {
+    ...row,
+    houseNumber,
+    houseNumberRetained: true,
+    title: line,
+    label,
+    formatted: label,
+  };
+}
+
+export function rankCanadianSuggestions(
+  query: string,
+  rows: AddressSuggestion[],
+  bias: SuggestBias | undefined,
+  limit: number,
+): AddressSuggestion[] {
+  const houseNumber = parseHouseNumber(query);
+  const wantedStreet = streetKey(query);
+  const named = queryNamesPlace(query);
+  let pool = rows.filter((row) => {
+    if (bias && typeof row.lat === "number" && typeof row.lng === "number") {
+      if (distanceMeters(bias.latitude, bias.longitude, row.lat, row.lng) > CA_NEARBY_METERS) {
+        return false;
+      }
+    }
+    if (named && !matchesNamedPlace(row, named)) return false;
+    return true;
+  });
+  const sortByDistance = (left: AddressSuggestion, right: AddressSuggestion) => {
+    if (!bias) return 0;
+    const leftDistance =
+      typeof left.lat === "number" && typeof left.lng === "number"
+        ? distanceMeters(bias.latitude, bias.longitude, left.lat, left.lng)
+        : Number.POSITIVE_INFINITY;
+    const rightDistance =
+      typeof right.lat === "number" && typeof right.lng === "number"
+        ? distanceMeters(bias.latitude, bias.longitude, right.lat, right.lng)
+        : Number.POSITIVE_INFINITY;
+    return leftDistance - rightDistance;
+  };
+  if (houseNumber) {
+    const points = pool.filter(
+      (row) => row.houseNumber?.toLowerCase() === houseNumber && !row.houseNumberRetained,
+    );
+    if (points.length > 0) {
+      return [...points].sort(sortByDistance).slice(0, limit);
+    }
+    const streets = pool.filter((row) => {
+      if (row.houseNumber) return false;
+      const street = streetKey(row.street || row.title || "");
+      return (
+        street.length > 0 &&
+        (street === wantedStreet || wantedStreet.includes(street) || street.includes(wantedStreet))
+      );
+    });
+    const nearest = [...streets].sort(sortByDistance)[0];
+    return nearest ? [retainHouseNumber(nearest, houseNumber)] : [];
+  }
+  pool = [...pool].sort(sortByDistance);
+  return pool.slice(0, limit);
+}
 
 /**
  * Keep British Columbia rows. Drops US lookalikes (Illinois, California, Kentucky).
@@ -311,7 +470,13 @@ export function isReasonableGoogleAutocomplete(
  */
 export async function suggestAddresses(
   query: string,
-  options?: { limit?: number; signal?: AbortSignal; locale?: string },
+  options?: {
+    limit?: number;
+    signal?: AbortSignal;
+    locale?: string;
+    /** Null skips IP / Metro Vancouver bias. Omit to use Metro Vancouver for unnamed Canadian queries. */
+    bias?: SuggestBias | null;
+  },
 ): Promise<AddressSuggestion[]> {
   const trimmed = query.trim();
   if (trimmed.length < 3) return [];
@@ -350,12 +515,20 @@ export async function suggestAddresses(
     return suggestViaGoogleGeocode(trimmed, limit, region, signal);
   }
 
-  // CA and untagged open-house queries: one-shot Metro Vancouver list.
-  // Selecting a row is the object — never a follow-up label geocode.
-  const places = await suggestViaPlacesNewCa(trimmed, limit, signal);
-  if (places.length > 0) return places;
-
-  return suggestViaPhotonCa(trimmed, limit, signal);
+  // CA and untagged open-house queries. Both sources always run.
+  // A typed city wins over IP. Otherwise bias toward the request, or Metro Vancouver.
+  const namedPlace = queryNamesPlace(trimmed);
+  const bias = namedPlace
+    ? undefined
+    : options?.bias === null
+      ? undefined
+      : (options?.bias ?? METRO_VANCOUVER_BIAS);
+  const upstreamLimit = Math.max(limit, 8);
+  const [places, photon] = await Promise.all([
+    suggestViaPlacesNewCa(trimmed, upstreamLimit, signal, bias),
+    suggestViaPhotonCa(trimmed, upstreamLimit, signal, bias),
+  ]);
+  return rankCanadianSuggestions(trimmed, [...places, ...photon], bias, limit);
 }
 
 async function suggestViaNominatim(
@@ -564,6 +737,7 @@ async function suggestViaPlacesNewCa(
   query: string,
   limit: number,
   signal?: AbortSignal,
+  bias?: SuggestBias,
 ): Promise<AddressSuggestion[]> {
   const key = googleKey();
   if (!key) return [];
@@ -581,15 +755,19 @@ async function suggestViaPlacesNewCa(
       body: JSON.stringify({
         input: query,
         includedRegionCodes: ["ca"],
-        locationBias: {
-          circle: {
-            center: {
-              latitude: METRO_VANCOUVER_BIAS.latitude,
-              longitude: METRO_VANCOUVER_BIAS.longitude,
-            },
-            radius: METRO_VANCOUVER_BIAS.radiusMeters,
-          },
-        },
+        ...(bias
+          ? {
+              locationBias: {
+                circle: {
+                  center: {
+                    latitude: bias.latitude,
+                    longitude: bias.longitude,
+                  },
+                  radius: bias.radiusMeters ?? METRO_VANCOUVER_BIAS.radiusMeters,
+                },
+              },
+            }
+          : {}),
       }),
     });
     if (!res.ok) return [];
@@ -652,6 +830,10 @@ async function placeDetailsSuggestion(
     const province = pick("administrative_area_level_1", true);
     const city = pick("locality") || pick("postal_town") || pick("sublocality");
     const country = pick("country");
+    const countryCode = pick("country", true);
+    const houseNumber = pick("street_number");
+    const street = pick("route");
+    if (!isCanadianAddress({ country, countryCode })) return null;
     const main = prediction.structuredFormat?.mainText?.text?.trim();
     const secondary = prediction.structuredFormat?.secondaryText?.text?.trim();
     const row: AddressSuggestion = {
@@ -665,9 +847,10 @@ async function placeDetailsSuggestion(
       city: city || undefined,
       province: province || undefined,
       country: country || undefined,
+      houseNumber: houseNumber || undefined,
+      street: street || undefined,
       source: "google",
     };
-    if (!isBritishColumbiaAddress(row)) return null;
     return row;
   } catch {
     return null;
@@ -693,12 +876,15 @@ async function suggestViaPhotonCa(
   query: string,
   limit: number,
   signal?: AbortSignal,
+  bias?: SuggestBias,
 ): Promise<AddressSuggestion[]> {
   try {
     const url = new URL("https://photon.komoot.io/api/");
     url.searchParams.set("q", query);
-    url.searchParams.set("lat", String(METRO_VANCOUVER_BIAS.latitude));
-    url.searchParams.set("lon", String(METRO_VANCOUVER_BIAS.longitude));
+    if (bias) {
+      url.searchParams.set("lat", String(bias.latitude));
+      url.searchParams.set("lon", String(bias.longitude));
+    }
     url.searchParams.set("limit", String(Math.min(limit + 4, 10)));
     const res = await fetch(url, {
       signal,
@@ -712,6 +898,9 @@ async function suggestViaPhotonCa(
       const [lng, lat] = feature.geometry?.coordinates ?? [];
       if (typeof lat !== "number" || typeof lng !== "number") continue;
       if ((props?.countrycode ?? "").toLowerCase() !== "ca") continue;
+      if (!isCanadianAddress({ country: props?.country, countryCode: props?.countrycode })) {
+        continue;
+      }
       const title =
         [props?.housenumber, props?.street].filter(Boolean).join(" ") ||
         props?.name ||
@@ -731,9 +920,10 @@ async function suggestViaPhotonCa(
         city: props?.city,
         province: props?.state,
         country: props?.country,
+        houseNumber: props?.housenumber,
+        street: props?.street || props?.name,
         source: "photon",
       };
-      if (!isBritishColumbiaAddress(row)) continue;
       out.push(row);
       if (out.length >= limit) break;
     }

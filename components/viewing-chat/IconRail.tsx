@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Database,
+  GitCompare,
   LifeBuoy,
   LogIn,
   LogOut,
@@ -25,6 +26,7 @@ import { signOutAndClearLocal } from "@/lib/auth/sign-out-client";
 import { setPersistenceAccountScope } from "@/lib/idb/draft-store";
 import type { ViewingChatThread } from "@/lib/viewing-chat/types";
 import { shortenAddressLabel } from "@/lib/shorten-address";
+import { filterHistoryThreads } from "@/lib/viewing-chat/history-filter";
 import { formatMessage } from "@/lib/i18n";
 import { COMPARE_LITE_MAX } from "@/lib/comparison/from-thread";
 import { CompareSelectionBar } from "@/components/viewing-chat/shell/CompareSelectionBar";
@@ -150,7 +152,8 @@ export function IconRail({
   }
   const profileRef = useRef<HTMLDivElement>(null);
   const expanded = sidebarOpen;
-  const recent = threads.slice(0, 20);
+  const [historyQuery, setHistoryQuery] = useState("");
+  const recent = filterHistoryThreads(threads, searchOpen ? historyQuery : "").slice(0, 20);
 
   useEffect(() => {
     const supabase = getSupabase();
@@ -226,6 +229,14 @@ export function IconRail({
         >
           <Database className="h-5 w-5" strokeWidth={2} />
         </RailButton>
+        <RailButton
+          label={messages.compareLite.compareToggle}
+          active={compareMode}
+          expanded={expanded}
+          onClick={onToggleCompareMode}
+        >
+          <GitCompare className="h-5 w-5" strokeWidth={2} />
+        </RailButton>
       </div>
 
       {expanded ? (
@@ -234,18 +245,15 @@ export function IconRail({
             <p className="text-[12px] font-bold text-[#6B7280]">
               {messages.chat.historyTitle}
             </p>
-            {threads.length >= 2 ? (
-              <button
-                type="button"
-                onClick={onToggleCompareMode}
-                className="inline-flex min-h-[var(--touch-target)] items-center rounded-full border border-black/10 px-2.5 text-[12px] font-bold"
-              >
-                {compareMode
-                  ? messages.compareLite.compareCancel
-                  : messages.compareLite.compareToggle}
-              </button>
-            ) : null}
           </div>
+          {searchOpen ? (
+            <input
+              value={historyQuery}
+              onChange={(event) => setHistoryQuery(event.target.value)}
+              placeholder={messages.chat.searchPlaceholder}
+              className="mx-3 mb-2 h-9 rounded-full border border-black/10 px-3 text-[13px]"
+            />
+          ) : null}
           {compareMode && maxHintShown ? (
             <p className="px-3 pb-1 text-[12px] font-semibold text-[#92400E]" role="status">
               {maxItems <= 2 ? messages.compare.gateTooManyFree : messages.compare.gateTooManyPro}
@@ -324,6 +332,11 @@ export function IconRail({
                       <p className="mt-1 text-[10px] text-[#9CA3AF]">
                         {new Date(thread.updatedAt).toLocaleString()}
                       </p>
+                      {thread.cloud?.state === "failed" ? (
+                        <p className="mt-0.5 text-[10px] font-bold text-[#991B1B]">
+                          {messages.chat.syncRetry}
+                        </p>
+                      ) : null}
                       </span>
                     </button>
                     {compareMode ? null : (

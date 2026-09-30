@@ -32,6 +32,7 @@ export function AddressAutocomplete({
   disabled,
   copy,
   confirmed,
+  emphasize,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -41,6 +42,7 @@ export function AddressAutocomplete({
   disabled?: boolean;
   copy: AddressAutocompleteCopy;
   confirmed?: boolean;
+  emphasize?: boolean;
 }) {
   const listId = useId();
   const locale = useLocale();
@@ -51,6 +53,11 @@ export function AddressAutocomplete({
   const requestIdRef = useRef(0);
   const searchTrackedRef = useRef(false);
   const regionRef = useRef<AnalyticsRegion>("OTHER");
+
+  useEffect(() => {
+    if (!emphasize) return;
+    inputRef.current?.focus();
+  }, [emphasize]);
 
   useEffect(() => {
     const q = value.trim();
@@ -211,7 +218,11 @@ export function AddressAutocomplete({
           placeholder={copy.placeholder}
           autoComplete="off"
           maxLength={200}
-          className="w-full min-w-0 max-w-full min-h-[var(--touch-target)] box-border rounded-full border border-[var(--color-border)] bg-[var(--color-surface-muted)] pl-9 pr-12 text-[16px] font-medium text-[var(--color-text)] outline-none focus:ring-2 focus:ring-[var(--color-focus)]/20 sm:text-[var(--font-size-sm)] disabled:opacity-60"
+          className={`w-full min-w-0 max-w-full min-h-[var(--touch-target)] box-border rounded-full border bg-[var(--color-surface-muted)] pl-9 pr-12 text-[16px] font-medium text-[var(--color-text)] outline-none focus:ring-2 focus:ring-[var(--color-focus)]/20 sm:text-[var(--font-size-sm)] disabled:opacity-60 ${
+            emphasize
+              ? "border-[#2563EB] ring-2 ring-[#2563EB]/40"
+              : "border-[var(--color-border)]"
+          }`}
         />
         <button
           type="button"

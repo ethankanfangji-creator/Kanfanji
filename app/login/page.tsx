@@ -23,6 +23,7 @@ export default function LoginPage() {
   const next = searchParams.get("next");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [analyticsConsent, setAnalyticsConsent] = useState(false);
   const [mode, setMode] = useState<"signin" | "signup">(
     searchParams.get("mode") === "signup" ? "signup" : "signin",
   );
@@ -87,6 +88,9 @@ export default function LoginPage() {
           password,
           options: {
             emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(safeInternalNextPath(next))}`,
+            data: {
+              analytics_consent: analyticsConsent ? "granted" : "denied",
+            },
           },
         });
         const outcome = signupUiOutcome(error, Boolean(data?.session));
@@ -141,10 +145,13 @@ export default function LoginPage() {
           emailInputRef={emailInputRef}
           onEmailChange={setEmail}
           onPasswordChange={setPassword}
-          onModeChange={(next) => {
-            setMode(next);
+          onModeChange={(nextMode) => {
+            setMode(nextMode);
+            setAnalyticsConsent(false);
             setNotice(null);
           }}
+          analyticsConsent={analyticsConsent}
+          onAnalyticsConsentChange={setAnalyticsConsent}
           onSubmit={(event) => void onSubmit(event)}
         />
       )}

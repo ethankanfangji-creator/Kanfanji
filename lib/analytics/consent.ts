@@ -20,11 +20,19 @@ export function readAnalyticsConsent(): AnalyticsConsent | null {
   }
 }
 
+/** Page-session arm. A leftover local "granted" does not send until this is set. */
+let captureArmed = false;
+
 export function writeAnalyticsConsent(value: AnalyticsConsent) {
+  captureArmed = value === "granted";
   if (typeof window === "undefined") return;
   window.localStorage.setItem(ANALYTICS_CONSENT_KEY, value);
 }
 
+export function disarmAnalyticsCapture() {
+  captureArmed = false;
+}
+
 export function captureAllowed(): boolean {
-  return readAnalyticsConsent() === "granted" && !hasGlobalPrivacyControl();
+  return captureArmed && readAnalyticsConsent() === "granted" && !hasGlobalPrivacyControl();
 }

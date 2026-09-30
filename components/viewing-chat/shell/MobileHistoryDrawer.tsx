@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Pin, Trash2 } from "lucide-react";
+import { Check, GitCompare, Pin, Search, Trash2 } from "lucide-react";
 import type { ViewingChatThread } from "@/lib/viewing-chat/types";
 import { shortenAddressLabel } from "@/lib/shorten-address";
+import { filterHistoryThreads } from "@/lib/viewing-chat/history-filter";
 import { formatMessage } from "@/lib/i18n";
 import { COMPARE_LITE_MAX } from "@/lib/comparison/from-thread";
 import { CompareSelectionBar } from "@/components/viewing-chat/shell/CompareSelectionBar";
@@ -58,9 +59,13 @@ export function MobileHistoryDrawer({
     compareOpen: string;
     compareTooManyFree: string;
     compareTooManyPro: string;
+    searchPlaceholder?: string;
+    syncFailed?: string;
   };
 }) {
-  const recent = threads.slice(0, 40);
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [filterOpen, setFilterOpen] = useState(false);
+  const recent = filterHistoryThreads(threads, filterOpen ? historyQuery : "").slice(0, 40);
   const [maxHintShown, setMaxHintShown] = useState(false);
   const [seenCompareMode, setSeenCompareMode] = useState(compareMode);
   if (compareMode !== seenCompareMode) {
@@ -76,17 +81,36 @@ export function MobileHistoryDrawer({
       closeLabel={labels.close}
       tall
       headerExtra={
-        threads.length >= 2 ? (
+        <div className="flex items-center gap-1">
           <button
             type="button"
+            aria-label={labels.compareToggle}
             onClick={onToggleCompareMode}
-            className="inline-flex min-h-[var(--touch-target)] items-center rounded-full border border-black/10 px-3 text-[12px] font-bold"
+            className={`inline-flex h-9 w-9 items-center justify-center rounded-full ${
+              compareMode ? "bg-black text-white" : "text-[#111]"
+            }`}
           >
-            {compareMode ? labels.compareCancel : labels.compareToggle}
+            <GitCompare className="h-4 w-4" />
           </button>
-        ) : null
+          <button
+            type="button"
+            aria-label={labels.searchPlaceholder ?? labels.title}
+            onClick={() => setFilterOpen((open) => !open)}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full text-[#111]"
+          >
+            <Search className="h-4 w-4" />
+          </button>
+        </div>
       }
     >
+      {filterOpen ? (
+        <input
+          value={historyQuery}
+          onChange={(event) => setHistoryQuery(event.target.value)}
+          placeholder={labels.searchPlaceholder ?? ""}
+          className="mx-4 mb-2 h-10 w-[calc(100%-2rem)] rounded-full border border-black/10 px-3 text-[14px]"
+        />
+      ) : null}
       <ul className="pb-2">
         {recent.length === 0 ? (
           <li className="px-4 py-10 text-center">
@@ -174,6 +198,9 @@ export function MobileHistoryDrawer({
                     <p className="mt-1 text-[10px] text-[#9CA3AF]">
                       {new Date(thread.updatedAt).toLocaleString()}
                     </p>
+                    {thread.cloud?.state === "failed" && labels.syncFailed ? (
+                      <p className="mt-0.5 text-[10px] font-bold text-[#991B1B]">{labels.syncFailed}</p>
+                    ) : null}
                     </span>
                   </button>
                   {compareMode ? null : (

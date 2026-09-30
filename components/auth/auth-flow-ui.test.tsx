@@ -130,8 +130,12 @@ describe("login text links", () => {
     expect(screen.queryByRole("combobox")).toBeNull();
   });
 
-  it("shows only the sign-in switch while signing up", () => {
+  it("shows an unchecked analytics checkbox and a privacy link while signing up", () => {
     renderWithI18n(<Fields mode="signup" />);
+    const box = screen.getByRole("checkbox");
+    expect(box).not.toBeChecked();
+    expect(screen.getByRole("link", { name: "隱私權說明" })).toHaveAttribute("href", "/privacy");
+    expect(screen.getByText(/幫助我們提升用戶體驗/)).toBeVisible();
     expect(screen.queryByRole("link", { name: "忘記密碼" })).toBeNull();
     expect(screen.getByRole("button", { name: "已有帳號？登入" })).toBeVisible();
   });

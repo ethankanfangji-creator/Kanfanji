@@ -31,17 +31,17 @@ describe("buildChatReportPublication", () => {
     expect(snapshot.fields.map((field) => field.fieldId)).toEqual(["price"]);
   });
 
-  it("rejects a missing report", () => {
-    expect(() =>
-      buildChatReportPublication({
-        id: "v",
-        user_id: "u",
-        address: "1 Main",
-        report: null,
-        chat_state: {},
-        updated_at: "2026-09-28T00:00:00.000Z",
-      }),
-    ).toThrow(/REPORT_NOT_READY/);
+  it("publishes an address when the viewing has no report yet", () => {
+    const snapshot = buildChatReportPublication({
+        id: "viewing-no-report",
+        user_id: "user-no-report",
+      address: "1 Main",
+      report: null,
+      chat_state: {},
+      updated_at: "2026-09-28T00:00:00.000Z",
+    }).snapshot;
+    expect(snapshot.address).toBe("1 Main");
+    expect(snapshot.summary).toBeNull();
   });
 
   it("rejects unknown snapshot keys", () => {

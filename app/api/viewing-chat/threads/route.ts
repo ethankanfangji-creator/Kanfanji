@@ -7,6 +7,7 @@ import {
   RequestValidationError,
 } from "@/lib/http/validation";
 import { createViewingRow } from "@/lib/viewings/create-gate.server";
+import { getAccountTier, TierLookupError } from "@/lib/entitlement/tier";
 import {
   assertChatBodySize,
   parseChatMessages,
@@ -92,6 +93,17 @@ export async function GET() {
     .eq("user_id", user.id)
     .not("chat_state", "is", null);
   if (error) return noStore({ code: "unavailable" }, 503);
+  const counted = await admin
+    .from("viewings")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id);
+  if (counted.error) return noStore({ code: "unavailable" }, 503);
+  let isPro = false;
+  try {
+    isPro = (await getAccountTier(admin, user.id)) === "pro";
+  } catch (tierError) {
+    if (!(tierError instanceof TierLookupError)) return noStore({ code: "unavailable" }, 503);
+  }
   return noStore({
     threads: (data ?? []).map((row) => ({
       id: row.id,
@@ -101,5 +113,7 @@ export async function GET() {
       pinned: Boolean((row.chat_state as { pinned?: boolean } | null)?.pinned),
       hasReport: row.report != null,
     })),
+    viewingCount: counted.count ?? 0,
+    isPro,
   });
 }

@@ -31,24 +31,24 @@ describe("MobileBottomNav", () => {
     expect(screen.getByRole("navigation", { name: "Primary navigation" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /New/i })).toBeNull();
     expect(screen.getByRole("button", { name: "History" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Search" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Search" })).toBeNull();
     expect(screen.getByRole("button", { name: "Media" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Account" })).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "Search" }));
-    expect(onSelect).toHaveBeenCalledWith("search");
+    await user.click(screen.getByRole("button", { name: "Media" }));
+    expect(onSelect).toHaveBeenCalledWith("media");
   });
 
   it("marks the selected tab for sighted and assistive users", () => {
     render(
       <MobileBottomNav
-        activeTab="search"
+        activeTab="media"
         onSelect={() => undefined}
         labels={shortLabels}
       />,
     );
 
-    const search = screen.getByRole("button", { name: "Search" });
+    const search = screen.getByRole("button", { name: "Media" });
     expect(search).toHaveAttribute("aria-current", "page");
     expect(search).toHaveAttribute("data-active", "true");
     expect(screen.getByRole("button", { name: "History" })).not.toHaveAttribute(

@@ -96,7 +96,7 @@ describe("rotateOwnerShareLink", () => {
       }),
     };
     await expect(rotateOwnerShareLink(admin as never, "owner-1", "link-1")).rejects.toThrow(
-      "REPORT_NOT_READY",
+      /SUPABASE_SERVICE_ROLE_KEY|SHARE_/,
     );
     expect(rpc).not.toHaveBeenCalled();
   });

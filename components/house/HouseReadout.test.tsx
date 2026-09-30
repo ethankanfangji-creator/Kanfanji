@@ -10,26 +10,12 @@ afterEach(() => {
 });
 
 describe("HouseReadout", () => {
-  it("shows the address, an unrecorded status, and an empty card list", () => {
-    render(<HouseReadout address="台北市松山區一號" cards={[]} />);
+  it("shows the address and an unrecorded status", () => {
+    const { container } = render(<HouseReadout address="台北市松山區一號" />);
 
     expect(screen.getByRole("heading", { name: "台北市松山區一號" })).toBeInTheDocument();
     expect(screen.getByText("尚未記錄")).toBeInTheDocument();
-    expect(screen.getByText("還沒有看點卡")).toBeInTheDocument();
+    expect(container.firstElementChild).toHaveClass("bg-[#FAF6F1]");
     expect(screen.queryByRole("button")).toBeNull();
-  });
-
-  it("shows a recorded status and each card status", () => {
-    render(
-      <HouseReadout
-        address="台北市松山區一號"
-        cards={[{ id: "card-1", status: "good", notes: "採光夠" }]}
-      />,
-    );
-
-    expect(screen.getByText("已記錄 1 張看點卡")).toBeInTheDocument();
-    expect(screen.getByText("不錯")).toBeInTheDocument();
-    expect(screen.getByText("採光夠")).toBeInTheDocument();
-    expect(screen.queryByText("還沒有看點卡")).toBeNull();
   });
 });

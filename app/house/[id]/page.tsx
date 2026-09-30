@@ -1,7 +1,9 @@
 import { notFound } from "next/navigation";
-import { HouseReadout, type HouseCard } from "@/components/house/HouseReadout";
+import { HouseReadout } from "@/components/house/HouseReadout";
 import { ListingAnalyze } from "@/components/house/ListingAnalyze";
+import { TemplateWallet } from "@/components/house/TemplateWallet";
 import { requireUser } from "@/lib/auth";
+import type { CardTemplate } from "@/lib/viewing-card-templates";
 import { isBlankListing, parseListingExtract, type ListingExtract } from "@/lib/listing-fields";
 import { createAdminClient } from "@/utils/supabase/admin";
 
@@ -57,18 +59,27 @@ export default async function HousePage({
   if (error) throw new Error(error.message);
   if (!viewing) notFound();
 
-  const { data: cards, error: cardsError } = await supabase
-    .from("viewing_cards")
-    .select("id, status, notes")
-    .eq("viewing_id", viewing.id)
-    .order("updated_at", { ascending: true });
+  const { data: templateRows, error: templateError } = await supabase
+    .from("viewing_card_templates")
+    .select("id, name, icon, sort_order, is_system")
+    .order("sort_order", { ascending: true });
+  if (templateError) throw new Error(templateError.message);
 
-  if (cardsError) throw new Error(cardsError.message);
+  const templates: CardTemplate[] = (templateRows ?? [])
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      icon: row.icon,
+      sortOrder: row.sort_order,
+      isSystem: row.is_system,
+    }))
+    .sort((a, b) => Number(b.isSystem) - Number(a.isSystem) || a.sortOrder - b.sortOrder);
   const listing = await savedListing(viewing.id, user.id);
 
   return (
-    <HouseReadout address={viewing.address} cards={(cards ?? []) as HouseCard[]}>
+    <HouseReadout address={viewing.address}>
       <ListingAnalyze viewingId={viewing.id} initial={listing} />
+      <TemplateWallet viewingId={viewing.id} templates={templates} />
     </HouseReadout>
   );
 }

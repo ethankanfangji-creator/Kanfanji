@@ -7,7 +7,8 @@ import {
 import { AI_LIMITS } from "@/lib/ai-boundary/config";
 import { consumeAiQuota } from "@/lib/ai-boundary/quota";
 import { getAccountTier } from "@/lib/entitlement/tier";
-import { requestListingExtract, type ListingExtract } from "@/lib/listing-extract";
+import { requestListingExtract } from "@/lib/listing-extract";
+import type { ListingExtract } from "@/lib/listing-fields";
 import { ListingSaveError, saveListingOnProperty } from "@/lib/listing-extract-save";
 import { extractTextFromPdfBase64 } from "@/lib/property-source/extract-pdf";
 import { fetchAndExtractListingUrl } from "@/lib/property-source/fetch-listing-url";

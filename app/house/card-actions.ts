@@ -37,7 +37,7 @@ async function touchCard(
   },
 ) {
   const template = await ownedTemplate(supabase, input.templateId);
-  if (!template) return { error: "找不到這張卡。" as const };
+  if (!template) return { ok: false as const, error: "找不到這張卡。" };
 
   const row: Record<string, unknown> = {
     viewing_id: input.viewingId,
@@ -53,8 +53,11 @@ async function touchCard(
     .upsert(row, { onConflict: "viewing_id,template_id" })
     .select("id, status, notes, photos")
     .single();
-  if (error || !data) return { error: "儲存失敗，請再試一次。" as const };
-  return { card: data };
+  if (error || !data) return { ok: false as const, error: "儲存失敗，請再試一次。" };
+  return {
+    ok: true as const,
+    card: data as { id: string; status: string; notes: string | null; photos: string[] | null },
+  };
 }
 
 export async function saveCardScore(input: {
@@ -71,8 +74,8 @@ export async function saveCardScore(input: {
     userId: user.id,
     status,
   });
-  if ("error" in saved) return saved;
-  return { status: saved.card.status as CardScore };
+  if (!saved.ok) return { error: saved.error };
+  return { status: cardScore(saved.card.status) ?? "unsure" };
 }
 
 export async function saveCardNotes(input: {
@@ -89,7 +92,7 @@ export async function saveCardNotes(input: {
     userId: user.id,
     notes,
   });
-  if ("error" in saved) return saved;
+  if (!saved.ok) return { error: saved.error };
   return { notes: saved.card.notes ?? "" };
 }
 
@@ -108,7 +111,7 @@ export async function addCardPhoto(formData: FormData): Promise<{ photo: CardPho
     templateId,
     userId: user.id,
   });
-  if ("error" in saved) return saved;
+  if (!saved.ok) return { error: saved.error };
 
   const path = cardPhotoStoragePath({
     ownerId: user.id,

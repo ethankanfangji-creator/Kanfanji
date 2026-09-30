@@ -13,7 +13,7 @@ afterEach(() => {
 
 describe("ListingAnalyze", () => {
   it("shows extracted fields after a link analysis succeeds", async () => {
-    const fetchMock = vi.fn(async () =>
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       Response.json({
         propertyId: "property-1",
         listing: {
@@ -39,9 +39,9 @@ describe("ListingAnalyze", () => {
     expect(await screen.findByText("88 Main St")).toBeInTheDocument();
     expect(screen.getByText("$900,000")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "照片" })).toHaveAttribute("href", "https://cdn.example/a.jpg");
-    const body = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect(body.body).toBeInstanceOf(FormData);
-    expect((body.body as FormData).get("listing_url")).toBe("https://listings.example/88");
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect(init?.body).toBeInstanceOf(FormData);
+    expect((init?.body as FormData).get("listing_url")).toBe("https://listings.example/88");
   });
 
   it("does not call the API when both a link and a file are set", async () => {

@@ -43,7 +43,9 @@ export default async function DiscussionPage({
   if (error) throw new Error(error.message);
   if (!room) notFound();
 
-  const viewingIds = (room.viewing_ids ?? []).filter((id): id is string => typeof id === "string");
+  const viewingIds = ((room.viewing_ids ?? []) as unknown[]).filter(
+    (id): id is string => typeof id === "string",
+  );
   const [{ data: viewings }, { data: templates }, { data: saved }, { data: comments }] = await Promise.all([
     admin.from("viewings").select("id, address, user_id").in("id", viewingIds),
     admin.from("viewing_card_templates").select("id, name, icon, sort_order, is_system, owner_user_id"),
@@ -51,11 +53,16 @@ export default async function DiscussionPage({
     admin.from("discussion_comments").select("id, card_id, nickname, content, vote, created_at").eq("room_id", room.id).order("created_at", { ascending: true }),
   ]);
 
+  const houseRows = (viewings ?? []) as Array<{ id: string; address: string; user_id: string | null }>;
   const houses: DiscussionHouse[] = viewingIds
-    .map((id) => viewings?.find((viewing) => viewing.id === id))
-    .filter((viewing): viewing is NonNullable<typeof viewing> => Boolean(viewing))
+    .map((id) => houseRows.find((viewing) => viewing.id === id))
+    .filter((viewing): viewing is { id: string; address: string; user_id: string | null } => Boolean(viewing))
     .map((viewing) => ({ id: viewing.id, address: viewing.address }));
-  const ownerIds = new Set(houses.map((house) => viewings?.find((viewing) => viewing.id === house.id)?.user_id).filter(Boolean));
+  const ownerIds = new Set(
+    houses
+      .map((house) => houseRows.find((viewing) => viewing.id === house.id)?.user_id)
+      .filter((id): id is string => typeof id === "string"),
+  );
   const templateRows = (templates ?? [])
     .filter((template) => template.is_system || ownerIds.has(template.owner_user_id))
     .sort((a, b) => Number(b.is_system) - Number(a.is_system) || a.sort_order - b.sort_order);

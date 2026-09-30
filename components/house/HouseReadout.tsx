@@ -5,9 +5,13 @@ const cardClass =
 
 export function HouseReadout({
   address,
+  hasRecords = false,
+  loadFailed = false,
   children,
 }: {
   address: string;
+  hasRecords?: boolean;
+  loadFailed?: boolean;
   children?: ReactNode;
 }) {
   return (
@@ -16,10 +20,15 @@ export function HouseReadout({
         <section className={cardClass}>
           <h1 className="text-[18px] font-bold leading-snug">{address}</h1>
         </section>
-        <section className={cardClass}>
-          <h2 className="text-[12px] font-medium text-[#6B7280]">狀態</h2>
-          <p className="mt-1 text-[15px] font-semibold">尚未記錄</p>
-        </section>
+        {loadFailed ? (
+          <section className={cardClass}>
+            <p className="text-[15px] font-semibold">這間房子讀取失敗，請再試一次。</p>
+          </section>
+        ) : hasRecords ? null : (
+          <section className={cardClass}>
+            <p className="text-[15px] font-semibold">這間還沒有看點紀錄。</p>
+          </section>
+        )}
         {children}
       </div>
     </div>

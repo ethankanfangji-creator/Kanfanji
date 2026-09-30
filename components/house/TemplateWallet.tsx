@@ -192,9 +192,13 @@ function ScoreCard({
     body.set("audio", new File([blob], "voice.webm", { type: blob.type || "audio/webm" }));
     try {
       const response = await fetch("/api/transcribe", { method: "POST", body });
-      const payload = (await response.json()) as { error?: string; transcript?: string };
+      const payload = (await response.json()) as { error?: string; code?: string; transcript?: string };
+      if (response.status === 429 && payload.code === "ai_quota_exceeded") {
+        setError("已達 AI 使用上限，請稍後再試。");
+        return;
+      }
       if (!response.ok || !payload.transcript) {
-        setError(response.status === 429 ? "已達 AI 使用上限，請稍後再試。" : payload.error || "語音轉文字失敗");
+        setError("語音轉文字失敗");
         return;
       }
       setTranscript(payload.transcript);
@@ -255,7 +259,9 @@ function ScoreCard({
       </label>
       {transcript ? (
         <p className="mt-2 text-[14px] leading-relaxed text-[#1A1A1A]">{transcript}</p>
-      ) : null}
+      ) : (
+        <p className="mt-2 text-[13px] text-[#6B7280]">這張卡還沒有語音文字。</p>
+      )}
       <button
         type="button"
         onClick={() => void toggleRecording()}

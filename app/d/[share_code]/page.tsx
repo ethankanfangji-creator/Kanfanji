@@ -5,7 +5,7 @@ import {
   type DiscussionHouse,
   type DiscussionRow,
 } from "@/components/discussion/DiscussionBoard";
-import { MEDIA_SIGNED_TTL_SECONDS, absoluteStorageSignedUrl } from "@/lib/media-sign";
+import { MEDIA_SIGNED_TTL_SECONDS, absoluteStorageSignedUrl, assertOwnerMediaPath } from "@/lib/media-sign";
 import { MEDIA_BUCKET } from "@/lib/supabase";
 import { isLiveCode } from "@/lib/viewing-session-code";
 import { createAdminClient } from "@/utils/supabase/admin";
@@ -40,18 +40,19 @@ export default async function DiscussionPage({
     .select("id, owner_user_id, viewing_ids, share_code")
     .eq("share_code", shareCode)
     .maybeSingle();
-  if (error) throw new Error(error.message);
+  if (error) throw new Error("discussion_unavailable");
   if (!room) notFound();
 
   const viewingIds = ((room.viewing_ids ?? []) as unknown[]).filter(
     (id): id is string => typeof id === "string",
   );
-  const [{ data: viewings }, { data: templates }, { data: saved }, { data: comments }] = await Promise.all([
+  const [{ data: viewings }, { data: templates }, { data: saved }, commentsResult] = await Promise.all([
     admin.from("viewings").select("id, address, user_id").in("id", viewingIds),
     admin.from("viewing_card_templates").select("id, name, icon, sort_order, is_system, owner_user_id"),
     admin.from("viewing_cards").select("id, viewing_id, template_id, status, notes, voice_transcript, photos").in("viewing_id", viewingIds),
     admin.from("discussion_comments").select("id, card_id, nickname, content, vote, created_at").eq("room_id", room.id).order("created_at", { ascending: true }),
   ]);
+  const comments = commentsResult.error ? [] : commentsResult.data;
 
   const houseRows = (viewings ?? []) as Array<{ id: string; address: string; user_id: string | null }>;
   const houses: DiscussionHouse[] = viewingIds
@@ -67,7 +68,17 @@ export default async function DiscussionPage({
     .filter((template) => template.is_system || ownerIds.has(template.owner_user_id))
     .sort((a, b) => Number(b.is_system) - Number(a.is_system) || a.sort_order - b.sort_order);
   const paths = (saved ?? []).flatMap((card) => (Array.isArray(card.photos) ? card.photos.slice(0, 4) : []));
-  const signed = await signPhotos(paths.filter((path): path is string => typeof path === "string"));
+  const signed = await signPhotos(
+    paths.filter((path): path is string => {
+      if (typeof path !== "string" || !ownerIds.has(path.split("/")[0] ?? "")) return false;
+      try {
+        assertOwnerMediaPath(path, path.split("/")[0] ?? "");
+        return true;
+      } catch {
+        return false;
+      }
+    }),
+  );
 
   const rows: DiscussionRow[] = templateRows.map((template) => ({
     templateId: template.id,
@@ -102,6 +113,12 @@ export default async function DiscussionPage({
   }));
 
   return (
-    <DiscussionBoard shareCode={room.share_code} houses={houses} rows={rows} comments={visibleComments} />
+    <DiscussionBoard
+      shareCode={room.share_code}
+      houses={houses}
+      rows={rows}
+      comments={visibleComments}
+      commentsFailed={Boolean(commentsResult.error)}
+    />
   );
 }

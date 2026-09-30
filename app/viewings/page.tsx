@@ -78,7 +78,7 @@ export default function ViewingsPage() {
     setError("");
     setCompareBusy(true);
     try {
-      const response = await fetch("/api/discussion-rooms", {
+      const response = await fetch("/api/discussion_rooms", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ viewingIds: selected }),
@@ -304,13 +304,19 @@ export default function ViewingsPage() {
             }
 
             return (
-              <Link
+              <div
                 key={viewing.id}
-                href={`/viewings/${viewing.id}`}
-                className="block bg-white rounded-[22px] border border-black/[0.05] shadow-[0_4px_20px_rgba(0,0,0,0.04)] overflow-hidden"
+                className="bg-white rounded-[22px] border border-black/[0.05] shadow-[0_4px_20px_rgba(0,0,0,0.04)] overflow-hidden"
               >
-                {body}
-              </Link>
+                <Link href={`/viewings/${viewing.id}`} className="block">
+                  {body}
+                </Link>
+                <div className="px-3 pb-3">
+                  <Link href={`/house/${viewing.id}`} className="text-[12px] font-bold underline">
+                    看房卡片
+                  </Link>
+                </div>
+              </div>
             );
           })}
         </div>

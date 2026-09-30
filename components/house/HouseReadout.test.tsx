@@ -14,7 +14,7 @@ describe("HouseReadout", () => {
     const { container } = render(<HouseReadout address="台北市松山區一號" />);
 
     expect(screen.getByRole("heading", { name: "台北市松山區一號" })).toBeInTheDocument();
-    expect(screen.getByText("尚未記錄")).toBeInTheDocument();
+    expect(screen.getByText("這間還沒有看點紀錄。")).toBeInTheDocument();
     expect(container.firstElementChild).toHaveClass("bg-[#FAF6F1]");
     expect(screen.queryByRole("button")).toBeNull();
   });

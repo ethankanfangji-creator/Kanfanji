@@ -1,3 +1,10 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { applyViewingCardChange, type ViewingCardChange } from "@/lib/live-card-sync";
+import { createClient } from "@/utils/supabase/client";
+
 const cardClass =
   "rounded-2xl bg-white px-4 py-3 shadow-[0_8px_24px_rgba(0,0,0,0.08)]";
 
@@ -24,11 +31,61 @@ export function LiveCards({
   address,
   code,
   cards,
+  viewingId,
 }: {
   address: string;
   code: string;
   cards: LiveCard[];
+  viewingId?: string;
 }) {
+  const router = useRouter();
+  const [liveCards, setLiveCards] = useState(cards);
+
+  useEffect(() => {
+    setLiveCards(cards);
+  }, [cards]);
+
+  useEffect(() => {
+    if (!viewingId) return;
+    const supabase = createClient();
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let cancelled = false;
+
+    async function subscribe() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (cancelled || !viewingId) return;
+      if (session?.access_token) {
+        await supabase.realtime.setAuth(session.access_token);
+      }
+      if (cancelled) return;
+      channel = supabase
+        .channel(`viewing-cards:${viewingId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "viewing_cards",
+            filter: `viewing_id=eq.${viewingId}`,
+          },
+          (payload) => {
+            const row = (payload.new ?? {}) as ViewingCardChange;
+            setLiveCards((current) => applyViewingCardChange(current, row));
+            router.refresh();
+          },
+        )
+        .subscribe();
+    }
+
+    void subscribe();
+    return () => {
+      cancelled = true;
+      if (channel) void supabase.removeChannel(channel);
+    };
+  }, [router, viewingId]);
+
   return (
     <main className="min-h-screen bg-[#FAF6F1] text-[#1A1A1A]">
       <div className="mx-auto flex w-full max-w-[420px] flex-col gap-3 px-4 py-6">
@@ -38,7 +95,7 @@ export function LiveCards({
           <p className="mt-2 text-[15px] font-semibold">{address}</p>
         </section>
         <ul className="flex flex-col">
-          {cards.map((card, index) => {
+          {liveCards.map((card, index) => {
             const status = card.status === "good" || card.status === "bad" || card.status === "unsure"
               ? STATUS_LABEL[card.status]
               : null;
@@ -48,7 +105,7 @@ export function LiveCards({
                   {card.icon ? <span className="mr-2">{card.icon}</span> : null}
                   {card.name}
                 </p>
-                {status ? <p className="mt-1 text-[13px]">{status}</p> : null}
+                {status ? <p className="mt-1 text-[13px]" data-testid="live-card-status">{status}</p> : null}
                 {card.notes ? <p className="mt-1 text-[14px] leading-relaxed">{card.notes}</p> : null}
                 {card.voiceTranscript ? (
                   <p className="mt-1 text-[14px] leading-relaxed">{card.voiceTranscript}</p>

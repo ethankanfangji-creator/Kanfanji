@@ -49,13 +49,17 @@ export function ListingAnalyze({
     setBusy(true);
     try {
       const response = await fetch("/api/extract-listing", { method: "POST", body });
-      const payload = (await response.json()) as { error?: string; listing?: ListingExtract };
+      const payload = (await response.json()) as {
+        error?: string;
+        code?: string;
+        listing?: ListingExtract;
+      };
+      if (response.status === 429 && payload.code === "ai_quota_exceeded") {
+        setError("已達 AI 使用上限，請稍後再試。");
+        return;
+      }
       if (!response.ok || !payload.listing) {
-        setError(
-          response.status === 429
-            ? "已達 AI 使用上限，請稍後再試。"
-            : payload.error || "分析失敗",
-        );
+        setError("分析失敗");
         return;
       }
       setListing(payload.listing);
@@ -97,6 +101,9 @@ export function ListingAnalyze({
         </button>
         {error ? <p className="text-[13px] text-[#991B1B]">{error}</p> : null}
       </form>
+      {!listing || isBlankListing(listing) ? (
+        <p className={`${cardClass} text-[15px] font-semibold`}>還沒有抽出欄位。</p>
+      ) : null}
       {listing && !isBlankListing(listing) ? (
         <section className={cardClass} aria-label="抽出的欄位">
           <h2 className="text-[12px] font-medium text-[#6B7280]">抽出的欄位</h2>

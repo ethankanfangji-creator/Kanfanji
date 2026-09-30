@@ -112,14 +112,14 @@ export default async function HousePage({
     .eq("user_id", user.id)
     .maybeSingle();
 
-  if (error) throw new Error(error.message);
+  if (error) return <HouseReadout address="" hasRecords={false} loadFailed />;
   if (!viewing) notFound();
 
   const { data: templateRows, error: templateError } = await supabase
     .from("viewing_card_templates")
     .select("id, name, icon, sort_order, is_system")
     .order("sort_order", { ascending: true });
-  if (templateError) throw new Error(templateError.message);
+  if (templateError) return <HouseReadout address={viewing.address} loadFailed />;
 
   const templates: CardTemplate[] = (templateRows ?? [])
     .map((row) => ({
@@ -130,11 +130,17 @@ export default async function HousePage({
       isSystem: row.is_system,
     }))
     .sort((a, b) => Number(b.isSystem) - Number(a.isSystem) || a.sortOrder - b.sortOrder);
-  const listing = await savedListing(viewing.id, user.id);
-  const records = await savedCards(supabase, user.id, viewing.id);
+  let listing: ListingExtract | null = null;
+  let records: ViewingCardState[] = [];
+  try {
+    listing = await savedListing(viewing.id, user.id);
+    records = await savedCards(supabase, user.id, viewing.id);
+  } catch {
+    return <HouseReadout address={viewing.address} loadFailed />;
+  }
 
   return (
-    <HouseReadout address={viewing.address}>
+    <HouseReadout address={viewing.address} hasRecords={records.length > 0}>
       <form action={startViewingSession}>
         <input type="hidden" name="viewingId" value={viewing.id} />
         <button

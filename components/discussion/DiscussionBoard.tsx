@@ -41,11 +41,13 @@ export function DiscussionBoard({
   houses,
   rows,
   comments,
+  commentsFailed = false,
 }: {
   shareCode: string;
   houses: DiscussionHouse[];
   rows: DiscussionRow[];
   comments: DiscussionComment[];
+  commentsFailed?: boolean;
 }) {
   const router = useRouter();
   const [selected, setSelected] = useState<{ houseId: string; templateId: string } | null>(null);
@@ -64,7 +66,7 @@ export function DiscussionBoard({
     if (!selectedCell?.cardId) return;
     setBusy(true);
     setError("");
-    const response = await fetch("/api/discussion-comments", {
+    const response = await fetch("/api/discussion_comments", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -89,6 +91,11 @@ export function DiscussionBoard({
     <main className="min-h-screen bg-[#FAF6F1] text-[#1A1A1A]">
       <div className="mx-auto w-full max-w-5xl px-4 py-6">
         <h1 className="text-[20px] font-bold">比較討論</h1>
+        {commentsFailed ? (
+          <p className="mt-3 text-[15px] font-semibold">留言讀取失敗，請再試一次。</p>
+        ) : comments.length === 0 ? (
+          <p className="mt-3 text-[15px] font-semibold">這個討論室還沒有留言。</p>
+        ) : null}
         <div className="mt-4 overflow-x-auto">
           <table className="min-w-full border-separate border-spacing-2">
             <thead>

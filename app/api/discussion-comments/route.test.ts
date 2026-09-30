@@ -70,11 +70,11 @@ describe("POST /api/discussion-comments", () => {
     expect(insert).toHaveBeenCalledWith(
       expect.objectContaining({ nickname: "家人", content: "留言 1", vote: "like" }),
     );
-    for (let index = 2; index <= 8; index += 1) {
+    for (let index = 2; index <= 5; index += 1) {
       expect((await post(index)).status).toBe(200);
     }
-    const blocked = await post(9);
+    const blocked = await post(6);
     expect(blocked.status).toBe(429);
-    expect(insert).toHaveBeenCalledTimes(8);
+    expect(insert).toHaveBeenCalledTimes(5);
   });
 });

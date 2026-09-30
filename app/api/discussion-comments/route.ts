@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { clientIp } from "@/lib/ai-boundary/quota";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { isLiveCode } from "@/lib/viewing-session-code";
 import { createAdminClient } from "@/utils/supabase/admin";
@@ -7,10 +8,6 @@ export const runtime = "nodejs";
 
 const VOTES = new Set(["like", "meh", "dislike"]);
 const headers = { "Cache-Control": "no-store" };
-
-function clientIp(request: Request): string {
-  return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-}
 
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as {
@@ -21,11 +18,11 @@ export async function POST(request: Request) {
     vote?: unknown;
   } | null;
   const shareCode = typeof body?.shareCode === "string" ? body.shareCode : "";
-  const nickname = typeof body?.nickname === "string" ? body.nickname.replace(/\s+/g, " ").trim() : "";
+  const nickname = (typeof body?.nickname === "string" ? body.nickname.replace(/\s+/g, " ").trim() : "").slice(0, 24);
   const content = typeof body?.content === "string" ? body.content.trim() : "";
   const vote = typeof body?.vote === "string" ? body.vote : "";
   const cardId = typeof body?.cardId === "string" && body.cardId ? body.cardId : null;
-  if (!isLiveCode(shareCode) || nickname.length < 1 || nickname.length > 24) {
+  if (!isLiveCode(shareCode) || nickname.length < 1) {
     return NextResponse.json({ code: "invalid_request" }, { status: 400, headers });
   }
   if (!content && !VOTES.has(vote)) {
@@ -36,12 +33,12 @@ export async function POST(request: Request) {
   }
 
   const limited = consumeRateLimit(`discussion:${clientIp(request)}:${shareCode}`, {
-    limit: 8,
-    windowMs: 10 * 60 * 1000,
+    limit: 5,
+    windowMs: 60 * 1000,
   });
   if (!limited.ok) {
     return NextResponse.json(
-      { code: "rate_limited" },
+      { code: "rate_limited", error: "留言太頻繁，請稍後再試。" },
       { status: 429, headers: { ...headers, "Retry-After": String(limited.retryAfterSec) } },
     );
   }

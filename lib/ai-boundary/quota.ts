@@ -36,7 +36,7 @@ function fingerprint(value: string): string {
   return createHmac("sha256", secret).update(value).digest("hex");
 }
 
-function clientIp(request: Request): string {
+export function clientIp(request: Request): string {
   const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
   return forwarded || request.headers.get("x-real-ip")?.trim() || "unknown";
 }

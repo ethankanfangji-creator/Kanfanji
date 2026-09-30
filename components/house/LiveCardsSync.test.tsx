@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LiveCardsSync } from "./LiveCardsSync";
@@ -14,6 +14,10 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/utils/supabase/client", () => ({
   createClient: () => ({
+    auth: {
+      getSession: async () => ({ data: { session: { access_token: "token" } } }),
+    },
+    realtime: { setAuth: async () => undefined },
     channel: () => ({
       on: (_event: string, _filter: unknown, callback: (payload: { new: Record<string, unknown> }) => void) => {
         emit = callback;
@@ -31,7 +35,7 @@ afterEach(() => {
 });
 
 describe("LiveCardsSync", () => {
-  it("updates a card status from realtime without adding presence", () => {
+  it("updates a card status from realtime without adding presence", async () => {
     render(
       <LiveCardsSync
         viewingId="11111111-1111-4111-8111-111111111111"
@@ -52,7 +56,7 @@ describe("LiveCardsSync", () => {
       />,
     );
 
-    expect(emit).toBeTypeOf("function");
+    await waitFor(() => expect(emit).toBeTypeOf("function"));
     act(() => {
       emit?.({
         new: { template_id: "light", status: "good", notes: null, photos: [] },

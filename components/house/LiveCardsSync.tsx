@@ -26,26 +26,41 @@ export function LiveCardsSync({
 
   useEffect(() => {
     const supabase = createClient();
-    const channel = supabase
-      .channel(`viewing-cards:${viewingId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "viewing_cards",
-          filter: `viewing_id=eq.${viewingId}`,
-        },
-        (payload) => {
-          const row = (payload.new ?? {}) as ViewingCardChange;
-          setLiveCards((current) => applyViewingCardChange(current, row));
-          router.refresh();
-        },
-      )
-      .subscribe();
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let cancelled = false;
 
+    async function subscribe() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (cancelled) return;
+      if (session?.access_token) {
+        await supabase.realtime.setAuth(session.access_token);
+      }
+      if (cancelled) return;
+      channel = supabase
+        .channel(`viewing-cards:${viewingId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "viewing_cards",
+            filter: `viewing_id=eq.${viewingId}`,
+          },
+          (payload) => {
+            const row = (payload.new ?? {}) as ViewingCardChange;
+            setLiveCards((current) => applyViewingCardChange(current, row));
+            router.refresh();
+          },
+        )
+        .subscribe();
+    }
+
+    void subscribe();
     return () => {
-      void supabase.removeChannel(channel);
+      cancelled = true;
+      if (channel) void supabase.removeChannel(channel);
     };
   }, [router, viewingId]);
 

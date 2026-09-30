@@ -175,6 +175,9 @@ export type Messages = {
     noCoordinates: string;
     adminMismatchWarning: string;
     mapPinHint: string;
+    mapPinZoomIn: string;
+    mapPinZoomOut: string;
+    mapPinUseCenter: string;
   };
   propertyBasics: {
     title: string;

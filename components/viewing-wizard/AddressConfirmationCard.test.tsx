@@ -34,6 +34,9 @@ const copy = {
   noCoordinates: "Not available",
   adminMismatchWarning: "City/county mismatch — check carefully",
   mapPinHint: "This is only the street. Tap the building.",
+  mapPinZoomIn: "Zoom in",
+  mapPinZoomOut: "Zoom out",
+  mapPinUseCenter: "Pin the crosshair",
 };
 
 describe("AddressConfirmationCard", () => {

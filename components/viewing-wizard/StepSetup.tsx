@@ -64,6 +64,9 @@ export type StepSetupMessages = {
     noCoordinates: string;
     adminMismatchWarning: string;
     mapPinHint: string;
+    mapPinZoomIn: string;
+    mapPinZoomOut: string;
+    mapPinUseCenter: string;
   };
   setup: {
     title: string;
@@ -156,6 +159,9 @@ export function StepSetup({
     noCoordinates: messages.address.noCoordinates,
     adminMismatchWarning: messages.address.adminMismatchWarning,
     mapPinHint: messages.address.mapPinHint,
+    mapPinZoomIn: messages.address.mapPinZoomIn,
+    mapPinZoomOut: messages.address.mapPinZoomOut,
+    mapPinUseCenter: messages.address.mapPinUseCenter,
   };
 
   async function handlePhotoMetaFile(file: File | undefined) {

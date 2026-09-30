@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { latLngFromMapClick, worldPoint } from "./map-pin";
+import { latLngFromMapClick, panCenter, worldPoint } from "./map-pin";
 
 describe("latLngFromMapClick", () => {
   it("returns the center when the click is in the middle", () => {
@@ -25,5 +25,19 @@ describe("latLngFromMapClick", () => {
     });
     expect(next.lng).toBeGreaterThan(-122.8512);
     expect(worldPoint(next.lat, next.lng, 17).x).toBeCloseTo(center.x + 40, 4);
+  });
+});
+
+describe("panCenter", () => {
+  it("moves the view west when the pointer drags east", () => {
+    const next = panCenter({
+      centerLat: 49.2815,
+      centerLng: -122.8512,
+      zoom: 17,
+      deltaX: 80,
+      deltaY: 0,
+    });
+    expect(next.lng).toBeLessThan(-122.8512);
+    expect(next.lat).toBeCloseTo(49.2815, 4);
   });
 });

@@ -16,22 +16,29 @@ export type AddressConfirmationCopy = {
   noCoordinates: string;
   adminMismatchWarning: string;
   mapPinHint: string;
+  mapPinZoomIn: string;
+  mapPinZoomOut: string;
+  mapPinUseCenter: string;
 };
 
 export function AddressConfirmationCard({
   candidate,
   copy,
   busy = false,
+  initialPin = null,
+  onPinChange,
   onConfirm,
   onReject,
 }: {
   candidate: AddressConfirmationCandidate;
   copy: AddressConfirmationCopy;
   busy?: boolean;
+  initialPin?: { lat: number; lng: number } | null;
+  onPinChange?: (pin: { lat: number; lng: number }) => void;
   onConfirm: (pin: { lat: number; lng: number } | null) => void;
   onReject: () => void;
 }) {
-  const [picked, setPicked] = useState<{ lat: number; lng: number } | null>(null);
+  const [picked, setPicked] = useState<{ lat: number; lng: number } | null>(initialPin);
   const hintLat = candidate.lat ?? COQUITLAM_PORT_MOODY_CENTER.latitude;
   const hintLng = candidate.lng ?? COQUITLAM_PORT_MOODY_CENTER.longitude;
   const shown = picked ?? (candidate.needsMapPin ? null : { lat: candidate.lat, lng: candidate.lng });
@@ -81,7 +88,13 @@ export function AddressConfirmationCard({
             centerLng={hintLng}
             label={copy.mapPinHint}
             picked={picked}
-            onPick={setPicked}
+            zoomInLabel={copy.mapPinZoomIn}
+            zoomOutLabel={copy.mapPinZoomOut}
+            centerLabel={copy.mapPinUseCenter}
+            onPick={(pin) => {
+              setPicked(pin);
+              onPinChange?.(pin);
+            }}
           />
         </>
       ) : candidate.mapEmbedUrl ? (

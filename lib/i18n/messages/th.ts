@@ -183,7 +183,10 @@ const th: Messages = {
     noCoordinates: "ไม่มีข้อมูล",
     adminMismatchWarning:
       "คำเตือน: จังหวัด/เมืองในผลลัพธ์ไม่ตรงกับที่พิมพ์ — ตรวจให้ดีก่อนยืนยัน",
-    mapPinHint: "นี่เป็นแค่ถนน แตะอาคารบนแผนที่ จุดนั้นจะถูกจำไว้",
+    mapPinHint: "นี่เป็นแค่ถนน ลากแผนที่ไปที่อาคาร หรือแตะ จุดนั้นจะถูกจำไว้",
+    mapPinZoomIn: "ขยาย",
+    mapPinZoomOut: "ย่อ",
+    mapPinUseCenter: "ปักที่กากบาท",
   },
   propertyBasics: {
     title: "ข้อมูลพื้นฐานบ้าน (AI)",

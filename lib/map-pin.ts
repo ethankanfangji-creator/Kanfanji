@@ -15,6 +15,23 @@ export function worldPoint(lat: number, lng: number, zoom: number): { x: number;
   return { x, y };
 }
 
+/** Dragging the map moves the center opposite the pointer. */
+export function panCenter(input: {
+  centerLat: number;
+  centerLng: number;
+  zoom: number;
+  deltaX: number;
+  deltaY: number;
+}): { lat: number; lng: number } {
+  return latLngFromMapClick({
+    centerLat: input.centerLat,
+    centerLng: input.centerLng,
+    zoom: input.zoom,
+    offsetX: -input.deltaX,
+    offsetY: -input.deltaY,
+  });
+}
+
 /** Pixel offset from the map center, y positive downward. */
 export function latLngFromMapClick(input: {
   centerLat: number;

@@ -304,19 +304,13 @@ export default function ViewingsPage() {
             }
 
             return (
-              <div
+              <Link
                 key={viewing.id}
-                className="bg-white rounded-[22px] border border-black/[0.05] shadow-[0_4px_20px_rgba(0,0,0,0.04)] overflow-hidden"
+                href={`/viewings/${viewing.id}`}
+                className="block bg-white rounded-[22px] border border-black/[0.05] shadow-[0_4px_20px_rgba(0,0,0,0.04)] overflow-hidden"
               >
-                <Link href={`/viewings/${viewing.id}`} className="block">
-                  {body}
-                </Link>
-                <div className="px-3 pb-3">
-                  <Link href={`/house/${viewing.id}`} className="text-[12px] font-bold underline">
-                    看房卡片
-                  </Link>
-                </div>
-              </div>
+                {body}
+              </Link>
             );
           })}
         </div>

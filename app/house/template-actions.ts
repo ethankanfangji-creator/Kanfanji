@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { oneEmoji, templateName, type CardTemplate } from "@/lib/viewing-card-templates";
 
@@ -38,7 +37,6 @@ export async function addOwnCardTemplate(input: {
     .single();
   if (error || !data) return { error: "新增失敗，請再試一次。" };
 
-  revalidatePath(`/house/${input.viewingId}`);
   return {
     template: {
       id: data.id,

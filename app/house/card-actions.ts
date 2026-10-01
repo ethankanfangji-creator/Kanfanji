@@ -2,7 +2,8 @@
 
 import { MEDIA_BUCKET } from "@/lib/supabase";
 import { requireUser } from "@/lib/auth";
-import { MEDIA_SIGNED_TTL_SECONDS, absoluteStorageSignedUrl } from "@/lib/media-sign";
+import { MEDIA_SIGNED_TTL_SECONDS, absoluteStorageSignedUrl, assertOwnerMediaPath } from "@/lib/media-sign";
+import type { CardTemplate } from "@/lib/viewing-card-templates";
 import {
   cardNotes,
   cardPhotoStoragePath,
@@ -10,6 +11,7 @@ import {
   isStoredCardPhotoPath,
   type CardPhoto,
   type CardScore,
+  type ViewingCardState,
 } from "@/lib/viewing-card-record";
 import { createAdminClient } from "@/utils/supabase/admin";
 
@@ -141,4 +143,77 @@ export async function addCardPhoto(formData: FormData): Promise<{ photo: CardPho
   const url = absoluteStorageSignedUrl(signed.data?.signedUrl);
   if (signed.error || !url) return { error: "照片已上傳，但暫時無法顯示。" };
   return { photo: { path, url } };
+}
+
+export async function loadChatCards(viewingId: string): Promise<
+  { templates: CardTemplate[]; records: ViewingCardState[] } | { error: string }
+> {
+  const { supabase, user } = await requireUser();
+  const { data: viewing, error } = await supabase
+    .from("viewings")
+    .select("id")
+    .eq("id", viewingId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (error || !viewing) return { error: "看房卡片讀取失敗，請再試一次。" };
+
+  const { data: templateRows, error: templateError } = await supabase
+    .from("viewing_card_templates")
+    .select("id, name, icon, sort_order, is_system")
+    .order("sort_order", { ascending: true });
+  if (templateError) return { error: "看房卡片讀取失敗，請再試一次。" };
+
+  const templates: CardTemplate[] = (templateRows ?? [])
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      icon: row.icon,
+      sortOrder: row.sort_order,
+      isSystem: row.is_system,
+    }))
+    .sort((a, b) => Number(b.isSystem) - Number(a.isSystem) || a.sortOrder - b.sortOrder);
+
+  const { data, error: cardError } = await supabase
+    .from("viewing_cards")
+    .select("template_id, status, notes, photos, voice_transcript")
+    .eq("viewing_id", viewingId);
+  if (cardError) return { error: "看房卡片讀取失敗，請再試一次。" };
+
+  const paths = (data ?? []).flatMap((row) =>
+    Array.isArray(row.photos) ? row.photos.filter((item): item is string => typeof item === "string") : [],
+  );
+  const signed = new Map<string, string>();
+  const safePaths = paths.filter((path) => {
+    try {
+      assertOwnerMediaPath(path, user.id);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  if (safePaths.length > 0) {
+    const admin = createAdminClient();
+    const result = await admin.storage.from(MEDIA_BUCKET).createSignedUrls(safePaths, MEDIA_SIGNED_TTL_SECONDS);
+    result.data?.forEach((row, index) => {
+      const raw = row.signedUrl || ("signedURL" in row ? String(row.signedURL) : "");
+      const url = absoluteStorageSignedUrl(raw);
+      if (url) signed.set(safePaths[index], url);
+    });
+  }
+
+  const records: ViewingCardState[] = (data ?? []).map((row) => {
+    const photos: CardPhoto[] = (Array.isArray(row.photos) ? row.photos : [])
+      .filter((item): item is string => typeof item === "string")
+      .map((path) => ({ path, url: signed.get(path) ?? "" }))
+      .filter((photo) => photo.url);
+    return {
+      templateId: row.template_id,
+      status: cardScore(String(row.status)),
+      notes: row.notes ?? "",
+      photos,
+      voiceTranscript: row.voice_transcript ?? "",
+    };
+  });
+
+  return { templates, records };
 }

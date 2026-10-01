@@ -95,7 +95,7 @@ export function LiveCards({
           <h1 className="mt-1 text-[28px] font-bold tracking-[0.2em]">{code}</h1>
           <p className="mt-2 text-[15px] font-semibold">{address}</p>
           {viewingId ? (
-            <Link href={`/house/${viewingId}`} className="mt-2 inline-block text-[13px] font-bold underline">
+            <Link href={`/?thread=${viewingId}`} className="mt-2 inline-block text-[13px] font-bold underline">
               回這間房
             </Link>
           ) : null}

@@ -7,6 +7,7 @@ import { AddressAutocomplete } from "@/components/viewing-wizard/AddressAutocomp
 import { AddressConfirmationCard } from "@/components/viewing-wizard/AddressConfirmationCard";
 import { useI18n } from "@/components/I18nProvider";
 import { ChatMessageList } from "@/components/viewing-chat/ChatMessageList";
+import { ChatCards } from "@/components/viewing-chat/ChatCards";
 import { ChatFaces } from "@/components/viewing-chat/ChatFaces";
 import { ChatInvite } from "@/components/viewing-chat/ChatInvite";
 import { IconRail } from "@/components/viewing-chat/IconRail";
@@ -1982,6 +1983,7 @@ export function ViewingChatApp() {
               />
             </div>
             <div className="shrink-0 border-t border-black/8 bg-[#FAF6F1]">
+              {userId && active.cloud?.state === "synced" ? <ChatCards viewingId={active.id} /> : null}
               <input
                 ref={photoInputRef}
                 type="file"

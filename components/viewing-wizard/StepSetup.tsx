@@ -63,6 +63,10 @@ export type StepSetupMessages = {
     openMap: string;
     noCoordinates: string;
     adminMismatchWarning: string;
+    mapPinHint: string;
+    mapPinZoomIn: string;
+    mapPinZoomOut: string;
+    mapPinUseCenter: string;
   };
   setup: {
     title: string;
@@ -111,7 +115,7 @@ export function StepSetup({
   onReselectAddress: () => void;
   /** Normalized lookup result awaiting explicit user confirm before bind. */
   pendingCandidate?: AddressConfirmationCandidate | null;
-  onAcceptPendingAddress?: () => void;
+  onAcceptPendingAddress?: (pin?: { lat: number; lng: number } | null) => void;
   onRejectPendingAddress?: () => void;
   identified: boolean;
   tags: string[];
@@ -154,6 +158,10 @@ export function StepSetup({
     openMap: messages.address.openMap,
     noCoordinates: messages.address.noCoordinates,
     adminMismatchWarning: messages.address.adminMismatchWarning,
+    mapPinHint: messages.address.mapPinHint,
+    mapPinZoomIn: messages.address.mapPinZoomIn,
+    mapPinZoomOut: messages.address.mapPinZoomOut,
+    mapPinUseCenter: messages.address.mapPinUseCenter,
   };
 
   async function handlePhotoMetaFile(file: File | undefined) {
@@ -281,7 +289,7 @@ export function StepSetup({
             candidate={pendingCandidate}
             copy={confirmationCopy}
             busy={busy}
-            onConfirm={() => onAcceptPendingAddress?.()}
+            onConfirm={(pin) => onAcceptPendingAddress?.(pin)}
             onReject={() => onRejectPendingAddress?.()}
           />
         ) : (

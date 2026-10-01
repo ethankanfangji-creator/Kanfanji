@@ -109,6 +109,8 @@ describe("candidateFromSuggestion", () => {
         lng: -122.862,
         province: "BC",
         country: "Canada",
+        houseNumber: "2143",
+        locationPrecision: "civic",
         source: "google",
       },
       "2143 clarke",
@@ -121,8 +123,26 @@ describe("candidateFromSuggestion", () => {
         lng: -122.862,
         market: "CA",
         source: "google",
+        needsMapPin: false,
       }),
     );
+  });
+
+  it("does not treat a street midpoint as a storable site", () => {
+    const candidate = candidateFromSuggestion({
+      id: "photon:spring",
+      label: "2143 Spring Street, Port Moody, BC",
+      lat: 49.28,
+      lng: -122.86,
+      houseNumber: "2143",
+      houseNumberRetained: true,
+      locationPrecision: "street",
+      source: "photon",
+      country: "Canada",
+      province: "BC",
+    });
+    expect(candidate?.needsMapPin).toBe(true);
+    expect(candidate?.lat).toBe(49.28);
   });
 
   it("returns null when the suggestion has no coordinates", () => {

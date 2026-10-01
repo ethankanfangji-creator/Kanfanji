@@ -5,6 +5,15 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AddressAutocomplete } from "@/components/viewing-wizard/AddressAutocomplete";
 import { AddressConfirmationCard } from "@/components/viewing-wizard/AddressConfirmationCard";
+import {
+  clearAddressPinDraft,
+  readActiveThreadId,
+  readAddressPinDraft,
+  writeActiveThreadId,
+  writeAddressPinDraft,
+  type AddressPinDraft,
+} from "@/lib/address-pin-session";
+import { COQUITLAM_PORT_MOODY_CENTER } from "@/lib/map-pin";
 import { useI18n } from "@/components/I18nProvider";
 import { ChatMessageList } from "@/components/viewing-chat/ChatMessageList";
 import { IconRail } from "@/components/viewing-chat/IconRail";
@@ -123,6 +132,46 @@ function isTextEditingTarget(target: EventTarget | null): boolean {
   return tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable;
 }
 
+function pendingFromPinDraft(draft: AddressPinDraft): {
+  queryAddress: string;
+  candidate: AddressConfirmationCandidate;
+  payload: AddressLookupPayloadLike;
+  source: AddressSource | null;
+  region: AnalyticsRegion | null;
+  droppedPin: { lat: number; lng: number } | null;
+} {
+  const source =
+    draft.source === "bc_geocoder" ||
+    draft.source === "nominatim" ||
+    draft.source === "google" ||
+    draft.source === "photon"
+      ? draft.source
+      : null;
+  return {
+    queryAddress: draft.queryAddress,
+    source,
+    region: draft.region,
+    droppedPin: draft.picked,
+    candidate: {
+      displayAddress: draft.displayAddress,
+      propertyId: draft.propertyId,
+      lat: draft.hintLat,
+      lng: draft.hintLng,
+      market: "CA",
+      source,
+      tags: [],
+      mapEmbedUrl: null,
+      openMapUrl: null,
+      adminDistrictMismatch: false,
+      needsMapPin: true,
+    },
+    payload: {
+      displayAddress: draft.displayAddress,
+      details: { lat: draft.hintLat, lng: draft.hintLng },
+    },
+  };
+}
+
 export function ViewingChatApp() {
   const { messages: t, locale } = useI18n();
   const c = t.chat;
@@ -130,6 +179,7 @@ export function ViewingChatApp() {
   const searchParams = useSearchParams();
   const configured = isSupabaseConfigured();
   const shellRef = useRef<HTMLDivElement>(null);
+  const restoredView = useRef(false);
 
   const [threads, setThreads] = useState<ViewingChatThread[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -140,6 +190,7 @@ export function ViewingChatApp() {
     payload: AddressLookupPayloadLike;
     source: AddressSource | null;
     region: AnalyticsRegion | null;
+    droppedPin: { lat: number; lng: number } | null;
   } | null>(null);
   const [busy, setBusy] = useState(false);
   const [sourceBusy, setSourceBusy] = useState(false);
@@ -294,7 +345,20 @@ export function ViewingChatApp() {
   }
 
   useEffect(() => {
-    setThreads(listLocalThreads());
+    const stored = listLocalThreads();
+    setThreads(stored);
+    const savedId = readActiveThreadId();
+    if (savedId && stored.some((thread) => thread.id === savedId)) {
+      setActiveId(savedId);
+      const found = stored.find((thread) => thread.id === savedId);
+      if (found) setAddressDraft(found.address);
+    } else {
+      const draft = readAddressPinDraft();
+      if (draft) {
+        setAddressDraft(draft.queryAddress);
+        setPendingAddressConfirm(pendingFromPinDraft(draft));
+      }
+    }
     const mq = window.matchMedia("(max-width: 767px)");
     const syncViewport = () => {
       const mobile = mq.matches;
@@ -321,6 +385,15 @@ export function ViewingChatApp() {
       subscription.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    if (!restoredView.current) {
+      restoredView.current = true;
+      return;
+    }
+    writeActiveThreadId(activeId);
+    if (activeId) clearAddressPinDraft();
+  }, [activeId]);
 
   // Lock shell to svh so Safari chrome show/hide does not reflow the page.
   // Only follow visualViewport while a text field is focused (soft keyboard).
@@ -559,6 +632,7 @@ export function ViewingChatApp() {
     setActiveId(null);
     setAddressDraft("");
     setPendingAddressConfirm(null);
+    clearAddressPinDraft();
     setStatus("");
     setReplyTo(null);
     setAddressCue(true);
@@ -570,6 +644,7 @@ export function ViewingChatApp() {
   async function bindConfirmedAddress(
     label: string,
     place?: { placeId: string | null; placeSource: string | null },
+    sitePin?: { lat: number; lng: number; source: "civic" | "map" },
   ) {
     const trimmed = label.trim();
     if (!trimmed) {
@@ -642,6 +717,7 @@ export function ViewingChatApp() {
       lastTurnChanges: [],
       conversationStatus: "collecting",
       turnWarnings: [],
+      ...(sitePin ? { sitePin } : {}),
     });
     refreshLocal();
     track({
@@ -673,6 +749,7 @@ export function ViewingChatApp() {
             stage: "viewing_preparation",
             conversationStatus: "collecting",
             propertyRecord: seedRecord,
+            ...(sitePin ? { sitePin } : {}),
           },
         }),
       }).then(async (response) => {
@@ -716,16 +793,24 @@ export function ViewingChatApp() {
     }
   }
 
-  function acceptPendingAddress() {
+  function acceptPendingAddress(pin: { lat: number; lng: number } | null) {
     if (!pendingAddressConfirm) return;
-    const { candidate, source, region } = pendingAddressConfirm;
+    const { candidate, source, region, queryAddress } = pendingAddressConfirm;
+    if (candidate.needsMapPin && !pin) return;
     if (source && region) {
       track({ name: "address_confirmed", props: { source, region } });
     }
-    void bindConfirmedAddress(candidate.displayAddress, {
-      placeId: candidate.propertyId,
+    const sitePin = candidate.needsMapPin
+      ? pin
+        ? { lat: pin.lat, lng: pin.lng, source: "map" as const }
+        : undefined
+      : candidate.lat != null && candidate.lng != null
+        ? { lat: candidate.lat, lng: candidate.lng, source: "civic" as const }
+        : undefined;
+    void bindConfirmedAddress(candidate.needsMapPin ? queryAddress : candidate.displayAddress, {
+      placeId: candidate.needsMapPin ? null : candidate.propertyId,
       placeSource: candidate.source,
-    });
+    }, sitePin);
   }
 
   function rejectPendingAddress() {
@@ -734,6 +819,7 @@ export function ViewingChatApp() {
     if (source && region) {
       track({ name: "address_rejected", props: { source, region } });
     }
+    clearAddressPinDraft();
     setPendingAddressConfirm(null);
     setAddressDraft(queryAddress);
     setStatus("");
@@ -1060,11 +1146,12 @@ export function ViewingChatApp() {
       return;
     }
     const source = suggestion.source;
-    setPendingAddressConfirm({
+    const next = {
       queryAddress: suggestion.label,
       candidate,
       source,
       region,
+      droppedPin: null,
       payload: {
         displayAddress: candidate.displayAddress,
         propertyId: candidate.propertyId ?? undefined,
@@ -1072,7 +1159,22 @@ export function ViewingChatApp() {
         source: candidate.source ?? undefined,
         details: { lat: candidate.lat, lng: candidate.lng },
       },
-    });
+    };
+    setPendingAddressConfirm(next);
+    if (candidate.needsMapPin) {
+      writeAddressPinDraft({
+        queryAddress: next.queryAddress,
+        displayAddress: candidate.displayAddress,
+        hintLat: candidate.lat ?? COQUITLAM_PORT_MOODY_CENTER.latitude,
+        hintLng: candidate.lng ?? COQUITLAM_PORT_MOODY_CENTER.longitude,
+        picked: null,
+        propertyId: candidate.propertyId,
+        source,
+        region,
+      });
+    } else {
+      clearAddressPinDraft();
+    }
     setAddressDraft(candidate.displayAddress);
     setStatus("");
     track({
@@ -2325,6 +2427,7 @@ export function ViewingChatApp() {
               </div>
               {pendingAddressConfirm ? (
                 <AddressConfirmationCard
+                  key={pendingAddressConfirm.queryAddress}
                   candidate={pendingAddressConfirm.candidate}
                   copy={{
                     pendingTitle: t.address.pendingConfirmTitle,
@@ -2335,8 +2438,30 @@ export function ViewingChatApp() {
                     openMap: t.address.openMap,
                     noCoordinates: t.address.noCoordinates,
                     adminMismatchWarning: t.address.adminMismatchWarning,
+                    mapPinHint: t.address.mapPinHint,
+                    mapPinZoomIn: t.address.mapPinZoomIn,
+                    mapPinZoomOut: t.address.mapPinZoomOut,
+                    mapPinUseCenter: t.address.mapPinUseCenter,
                   }}
                   busy={false}
+                  initialPin={pendingAddressConfirm.droppedPin}
+                  onPinChange={(pin) => {
+                    setPendingAddressConfirm((current) => {
+                      if (!current) return current;
+                      const next = { ...current, droppedPin: pin };
+                      writeAddressPinDraft({
+                        queryAddress: next.queryAddress,
+                        displayAddress: next.candidate.displayAddress,
+                        hintLat: next.candidate.lat ?? COQUITLAM_PORT_MOODY_CENTER.latitude,
+                        hintLng: next.candidate.lng ?? COQUITLAM_PORT_MOODY_CENTER.longitude,
+                        picked: pin,
+                        propertyId: next.candidate.propertyId,
+                        source: next.source,
+                        region: next.region,
+                      });
+                      return next;
+                    });
+                  }}
                   onConfirm={acceptPendingAddress}
                   onReject={rejectPendingAddress}
                 />

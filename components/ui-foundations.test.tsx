@@ -130,6 +130,10 @@ const setupMessages: StepSetupMessages = {
     openMap: "Open map",
     noCoordinates: "Not available",
     adminMismatchWarning: "City/county mismatch — check carefully",
+    mapPinHint: "Tap the building",
+    mapPinZoomIn: "Zoom in",
+    mapPinZoomOut: "Zoom out",
+    mapPinUseCenter: "Pin the crosshair",
   },
   setup: {
     title: "Create a new viewing",

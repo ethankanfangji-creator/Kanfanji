@@ -1,6 +1,12 @@
 import { claimLocalThreads } from "./claim-local-threads";
 import { applyChatStateToLocal } from "./chat-state";
-import { buildChatStatePayload, pushViewingThread, syncedThreadIdsMissingFromCloud } from "./cloud-push";
+import {
+  buildChatStatePayload,
+  isLocalThreadNewer,
+  pushViewingThread,
+  syncedThreadIdsMissingFromCloud,
+  withCloudSyncState,
+} from "./cloud-push";
 import {
   deleteLocalThread,
   getLocalThread,
@@ -66,7 +72,7 @@ export async function claimAccountThreads(userId: string): Promise<{ blocked: nu
       }
       if (!response.ok) {
         patchLocalThread(full.id, {
-          cloud: { state: "failed", error: "claim_failed" },
+          cloud: withCloudSyncState(full.cloud, "failed", { error: "claim_failed" }),
         });
         return "network";
       }
@@ -110,8 +116,7 @@ export async function pullCloudThreads(userId: string) {
   }
   for (const remote of list.threads ?? []) {
     const local = getLocalThread(remote.id);
-    const localNewer = local && local.updatedAt >= remote.updatedAt && local.cloud?.state === "synced";
-    if (localNewer) continue;
+    if (isLocalThreadNewer(local?.updatedAt, remote.updatedAt)) continue;
     const detail = await fetch(`/api/viewing-chat/threads/${remote.id}`);
     if (!detail.ok) continue;
     const row = (await detail.json()) as {
@@ -153,6 +158,7 @@ export async function pullCloudThreads(userId: string) {
     const detail = await fetch(`/api/viewing-chat/threads/${thread.id}`);
     if (detail.ok) {
       const row = (await detail.json()) as { revision?: number; updated_at?: string; chat_state?: unknown };
+      if (isLocalThreadNewer(thread.updatedAt, row.updated_at)) continue;
       const restored = applyChatStateToLocal(thread, row.chat_state);
       patchLocalThread(thread.id, {
         ...restored,
@@ -161,7 +167,7 @@ export async function pullCloudThreads(userId: string) {
       continue;
     }
     if (detail.status !== 404) {
-      patchLocalThread(thread.id, { cloud: { state: "failed" } });
+      patchLocalThread(thread.id, { cloud: withCloudSyncState(thread.cloud, "failed") });
       continue;
     }
     if (thread.cloud?.revision || thread.cloud?.state === "synced") {
@@ -182,7 +188,7 @@ export async function pullCloudThreads(userId: string) {
     patchLocalThread(thread.id, {
       cloud: pushed.status >= 200 && pushed.status < 300
         ? { state: "synced", lastSyncedAt: new Date().toISOString(), revision: pushed.revision }
-        : { state: "failed" },
+        : withCloudSyncState(thread.cloud, "failed"),
     });
   }
 }

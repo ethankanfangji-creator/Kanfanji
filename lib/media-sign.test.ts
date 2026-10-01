@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  absoluteStorageSignedUrl,
   assertOwnerMediaPath,
   assertSharePhotoPath,
   isLikelyExpiredSignedUrl,
@@ -44,6 +45,18 @@ describe("assertOwnerMediaPath / assertSharePhotoPath", () => {
     expect(() =>
       assertSharePhotoPath("owner/other/photos/x.jpg", "owner", "v1"),
     ).toThrow(/SHARE_MEDIA_FORBIDDEN/);
+  });
+});
+
+describe("absoluteStorageSignedUrl", () => {
+  it("keeps a full url and expands a storage path", () => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+    expect(absoluteStorageSignedUrl("https://example.supabase.co/storage/v1/object/sign/a")).toBe(
+      "https://example.supabase.co/storage/v1/object/sign/a",
+    );
+    expect(absoluteStorageSignedUrl("/object/sign/viewing-media/a.jpg?token=1")).toBe(
+      "https://example.supabase.co/storage/v1/object/sign/viewing-media/a.jpg?token=1",
+    );
   });
 });
 

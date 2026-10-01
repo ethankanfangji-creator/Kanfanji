@@ -12,6 +12,7 @@ import type {
   PropertyData,
   PropertySource,
 } from "@/lib/property-source/types";
+import type { ChatReaction } from "@/lib/viewing-chat/chat-reactions";
 import type { PropertyChatStage } from "@/lib/viewing-chat/stage";
 import type {
   PropertyCollectionRecord,
@@ -80,6 +81,8 @@ export type ChatMessage = {
   fileName?: string;
   /** When this turn is a direct reply to an earlier message */
   replyTo?: ChatReplyRef;
+  /** Fixed emoji reactions from joined members */
+  reactions?: ChatReaction[];
   /** Vision / analysis note */
   analysis?: string;
   /** Cards filled from this AI turn */
@@ -149,6 +152,8 @@ export type ViewingChatThread = {
     candidateValue: string;
     source: string;
   } | null;
+  /** Each internal key is asked at most once. */
+  askedCount?: Record<string, number>;
   /** Last turn deltas for summary panel */
   lastTurnChanges?: import("@/lib/viewing-chat/collection").RecordChange[];
   /** Orchestrator conversation status */

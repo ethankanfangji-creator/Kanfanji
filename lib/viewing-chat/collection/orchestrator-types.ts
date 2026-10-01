@@ -57,6 +57,8 @@ export type ConversationState = {
   pendingConfirm?: PendingConfirmState | null;
   /** 招4 — completed user turns before this one (0-based count of prior user msgs) */
   userTurnCount?: number;
+  /** How many times each field key has already been asked. Max one. */
+  askedCount?: Record<string, number>;
 };
 
 export type UserTurnMessage = {
@@ -146,6 +148,7 @@ export type ProcessUserTurnResult = {
   focusFieldIds: PropertyFieldId[];
   /** 招1 — next Yes/No candidate (or null if cleared) */
   pendingConfirm: PendingConfirmState | null;
+  askedCount: Record<string, number>;
 };
 
 export type FieldSnapshot = PropertyFieldState;

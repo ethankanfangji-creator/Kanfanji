@@ -149,11 +149,33 @@ function toComment(
   };
 }
 
+async function accountFaces(userIds: string[]): Promise<Map<string, { label: string; avatarUrl: string | null }>> {
+  const result = new Map<string, { label: string; avatarUrl: string | null }>();
+  if (userIds.length === 0) return result;
+  const admin = createAdminClient();
+  await Promise.all(
+    userIds.map(async (id) => {
+      const { data } = await admin.auth.admin.getUserById(id);
+      const user = data.user;
+      const meta = (user?.user_metadata ?? {}) as Record<string, unknown>;
+      const picture = [meta.avatar_url, meta.picture].find(
+        (value): value is string =>
+          typeof value === "string" && (value.startsWith("https://") || value.startsWith("http://")),
+      );
+      const named = [meta.full_name, meta.name].find(
+        (value): value is string => typeof value === "string" && value.trim().length > 0,
+      );
+      const label = (named ?? user?.email?.split("@")[0] ?? "員").trim();
+      result.set(id, { label, avatarUrl: picture ?? null });
+    }),
+  );
+  return result;
+}
+
 async function emailMap(userIds: string[]): Promise<Map<string, string | null>> {
   const result = new Map<string, string | null>();
   if (userIds.length === 0) return result;
   const admin = createAdminClient();
-  // Family groups are intentionally small; avoid exposing full auth rows.
   await Promise.all(
     userIds.map(async (id) => {
       const { data } = await admin.auth.admin.getUserById(id);
@@ -171,7 +193,7 @@ export async function getCollaborationOverview(
   const admin = createAdminClient();
   const [{ data: viewing }, { data: memberRows }, { data: commentRows }] =
     await Promise.all([
-      admin.from("viewings").select("revision").eq("id", viewingId).single(),
+      admin.from("viewings").select("revision, user_id").eq("id", viewingId).single(),
       admin
         .from("viewing_members")
         .select(MEMBER_SELECT)
@@ -196,10 +218,15 @@ export async function getCollaborationOverview(
   const { data: inviteRows } = await invitesPromise;
 
   const ids = new Set<string>([
+    ...(viewing?.user_id ? [String(viewing.user_id)] : []),
     ...(memberRows ?? []).map((row) => String(row.user_id)),
     ...(commentRows ?? []).map((row) => String(row.author_id)),
   ]);
   const emails = await emailMap([...ids]);
+  const faces = await accountFaces([
+    ...(viewing?.user_id ? [String(viewing.user_id)] : []),
+    ...(memberRows ?? []).filter((row) => row.status === "active").map((row) => String(row.user_id)),
+  ]);
 
   return {
     role,
@@ -211,6 +238,11 @@ export async function getCollaborationOverview(
     comments: (commentRows ?? []).map((row) =>
       toComment(row, maskEmail(emails.get(String(row.author_id))) ?? "家人"),
     ),
+    faces: [...faces.entries()].map(([userId, face]) => ({
+      userId,
+      label: face.label,
+      avatarUrl: face.avatarUrl,
+    })),
   };
 }
 

@@ -73,6 +73,35 @@ export default function ViewingsPage() {
     });
   }
 
+  async function startDiscussion() {
+    if (selected.length < COMPARE_MIN) return;
+    setError("");
+    setCompareBusy(true);
+    try {
+      const response = await fetch("/api/discussion_rooms", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ viewingIds: selected }),
+      });
+      const body = (await response.json()) as { code?: string; path?: string };
+      if (!response.ok || !body.path) {
+        setError(
+          body.code === "upgrade_required"
+            ? "免費方案同時只能有一個比較。"
+            : body.code === "too_many_items"
+              ? `這個方案最多比較 ${compareMax} 間。`
+              : "討論室沒有建立。",
+        );
+        return;
+      }
+      router.push(body.path);
+    } catch {
+      setError("討論室沒有建立。");
+    } finally {
+      setCompareBusy(false);
+    }
+  }
+
   async function startCompare() {
     if (selected.length < COMPARE_MIN || selected.length > compareMax) {
       setError(messages.compare.selectRange.replace("{max}", String(compareMax)));
@@ -174,6 +203,16 @@ export default function ViewingsPage() {
               className="h-9 px-3 rounded-full bg-black text-white text-[11px] font-bold disabled:opacity-40"
             >
               {messages.compare.startCompare} ({selected.length})
+            </button>
+          ) : null}
+          {selectMode ? (
+            <button
+              type="button"
+              disabled={compareBusy || selected.length < COMPARE_MIN}
+              onClick={() => void startDiscussion()}
+              className="h-9 px-3 rounded-full bg-white border border-black text-[11px] font-bold disabled:opacity-40"
+            >
+              討論室 ({selected.length})
             </button>
           ) : null}
         </div>

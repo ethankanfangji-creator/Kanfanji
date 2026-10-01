@@ -16,6 +16,9 @@ import {
 import { COQUITLAM_PORT_MOODY_CENTER } from "@/lib/map-pin";
 import { useI18n } from "@/components/I18nProvider";
 import { ChatMessageList } from "@/components/viewing-chat/ChatMessageList";
+import { ChatCards } from "@/components/viewing-chat/ChatCards";
+import { ChatFaces } from "@/components/viewing-chat/ChatFaces";
+import { ChatInvite } from "@/components/viewing-chat/ChatInvite";
 import { IconRail } from "@/components/viewing-chat/IconRail";
 import {
   MobileAccountSheet,
@@ -44,6 +47,8 @@ import {
   type AddressLookupPayloadLike,
 } from "@/lib/address-confirmation";
 import { shortenAddressLabel } from "@/lib/shorten-address";
+import { toggleChatReaction } from "@/lib/viewing-chat/chat-reactions";
+import { loadQuestionState, saveQuestionState } from "@/lib/store";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 import {
   createLocalThread,
@@ -62,6 +67,7 @@ import { sameViewingAddress } from "@/lib/viewing-chat/same-address";
 import { FREE_VIEWING_LIMIT } from "@/lib/viewing-wizard/free-tier";
 import { buildChatStatePayload, pushViewingThread } from "@/lib/viewing-chat/cloud-push";
 import { appendChatMessages } from "@/lib/viewing-chat/append-messages";
+import { mergeChatMessages } from "@/lib/viewing-chat/merge-messages";
 import { GuestLimitDialog } from "@/components/viewing-chat/GuestLimitDialog";
 import { ShareReportDialog } from "@/components/viewing-chat/ShareReportDialog";
 import { syncWithRetry } from "@/lib/viewing-chat/cloud-sync";
@@ -93,14 +99,12 @@ import {
 } from "@/lib/property-source/error-messages";
 import type { PropertyChatStage } from "@/lib/viewing-chat/stage";
 import {
-  countAgendaProgress,
-  getActiveAgendaItem,
   inferAgendaMarket,
   openingAgendaActiveId,
   projectAgenda,
 } from "@/lib/viewing-chat/agenda";
 import { createAgendaLabelResolver } from "@/lib/viewing-chat/agenda-labels";
-import { applyCollectionSkip, createEmptyPropertyRecord, mergePropertyFacts } from "@/lib/viewing-chat/collection";
+import { createEmptyPropertyRecord, mergePropertyFacts } from "@/lib/viewing-chat/collection";
 import { applyPropertyIntelInferences } from "@/lib/viewing-chat/collection/apply-intel-inferences";
 import type {
   PropertyCollectionRecord,
@@ -198,7 +202,6 @@ export function ViewingChatApp() {
   const [guestLimitOpen, setGuestLimitOpen] = useState(false);
   const [proLimitOpen, setProLimitOpen] = useState(false);
   const [addressCue, setAddressCue] = useState(false);
-  const [turnMode, setTurnMode] = useState<"supplement" | "correct" | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [shareLinkId, setShareLinkId] = useState<string | null>(null);
@@ -314,8 +317,9 @@ export function ViewingChatApp() {
         sessionStorage.setItem("kf.claim.notice", "1");
         setStatus(claimNoticeRef.current);
       }
-      if (searchParams.get("share") !== "1") return;
       const threadId = searchParams.get("thread");
+      if (threadId) setActiveId(threadId);
+      if (searchParams.get("share") !== "1") return;
       if (threadId) setActiveId(threadId);
       window.setTimeout(() => requestShareRef.current(), 0);
       router.replace(threadId ? `/?thread=${threadId}` : "/");
@@ -324,6 +328,73 @@ export function ViewingChatApp() {
       cancelled = true;
     };
   }, [userId, searchParams, router]);
+
+  useEffect(() => {
+    if (!userId || !activeId) return;
+    const threadId = activeId;
+    const current = getLocalThread(threadId);
+    if (current?.cloud?.state !== "synced") return;
+    const supabase = getSupabase();
+    if (!supabase) return;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let cancelled = false;
+
+    async function subscribe() {
+      const {
+        data: { session },
+      } = await supabase!.auth.getSession();
+      if (cancelled) return;
+      if (session?.access_token) await supabase!.realtime.setAuth(session.access_token);
+      if (cancelled) return;
+      channel = supabase!
+        .channel(`viewing-chat:${threadId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "UPDATE",
+            schema: "public",
+            table: "viewings",
+            filter: `id=eq.${threadId}`,
+          },
+          () => {
+            void (async () => {
+              const response = await fetch(`/api/viewing-chat/threads/${threadId}`);
+              if (!response.ok) return;
+              const row = (await response.json()) as {
+                messages?: ChatMessage[];
+                revision?: number;
+                updated_at?: string;
+              };
+              const local = getLocalThread(threadId);
+              if (!local || !Array.isArray(row.messages)) return;
+              if (
+                typeof row.revision === "number" &&
+                typeof local.cloud?.revision === "number" &&
+                row.revision <= local.cloud.revision
+              ) {
+                return;
+              }
+              saveLocalMessages(threadId, mergeChatMessages(local.messages, row.messages));
+              patchLocalThread(threadId, {
+                cloud: {
+                  state: "synced",
+                  lastSyncedAt: row.updated_at ?? new Date().toISOString(),
+                  revision: row.revision,
+                },
+              });
+              refreshLocal();
+            })();
+          },
+        )
+        .subscribe();
+    }
+
+    void subscribe();
+    return () => {
+      cancelled = true;
+      if (channel) void supabase.removeChannel(channel);
+    };
+  }, [userId, activeId]);
 
   useEffect(() => {
     if (!chatSearchOpen) return;
@@ -635,8 +706,6 @@ export function ViewingChatApp() {
     clearAddressPinDraft();
     setStatus("");
     setReplyTo(null);
-    setAddressCue(true);
-    setTurnMode(null);
     closeChatSearch();
   }
 
@@ -888,55 +957,6 @@ export function ViewingChatApp() {
     } catch {
       setStatus("");
     }
-  }
-
-  function skipActiveAgendaItem() {
-    if (!active) return;
-    const focus = (active.collectionFocusFieldIds ?? [])[0];
-    const current = getActiveAgendaItem(agenda);
-    const skipId = focus || current?.id || active.agendaActiveId;
-    if (!skipId) return;
-    const beforeFields = { ...(active.propertyRecord?.fields ?? {}) };
-    const skipped = applyCollectionSkip({
-      record:
-        active.propertyRecord ??
-        createEmptyPropertyRecord({ address: active.address }),
-      evidence: active.propertyEvidence ?? [],
-      skippedFields: (active.collectionSkippedFields ?? []) as PropertyFieldId[],
-      skipId,
-      locale,
-    });
-    // Do not delete field values — only extend skippedFields
-    const preservedRecord = {
-      ...skipped.record,
-      fields: {
-        ...beforeFields,
-        ...skipped.record.fields,
-      },
-    };
-    const msg = createAiMessage({
-      type: "follow_up",
-      text: skipped.replyText,
-    });
-    const change: RecordChange = {
-      fieldId: skipId.replace(/^q_/, "") as PropertyFieldId,
-      kind: "skipped",
-      previousValue: beforeFields[skipId.replace(/^q_/, "") as PropertyFieldId]?.value ?? null,
-      nextValue: null,
-    };
-    patchLocalThread(active.id, {
-      agendaActiveId: skipped.focusMatchedId,
-      agendaSkippedIds: [
-        ...new Set([...(active.agendaSkippedIds ?? []), skipId]),
-      ],
-      collectionSkippedFields: skipped.skippedFields,
-      propertyRecord: preservedRecord,
-      propertyEvidence: skipped.evidence,
-      lastTurnChanges: [change],
-      messages: [...active.messages, msg],
-    });
-    queueCloudSync(active.id);
-    refreshLocal();
   }
 
   function openReviewCard() {
@@ -1219,14 +1239,7 @@ export function ViewingChatApp() {
         ? `[Uploaded file: ${payload.file.name}]`
         : `【已上傳檔案：${payload.file.name}】`
       : "";
-    const steered =
-      turnMode === "supplement" && payload.text && !/^補充/.test(payload.text)
-        ? `補充 ${payload.text}`
-        : turnMode === "correct" && payload.text && !/^更正/.test(payload.text)
-          ? `更正 ${payload.text}`
-          : payload.text;
-    setTurnMode(null);
-    const textForAi = [steered, fileNote].filter(Boolean).join("\n");
+    const textForAi = [payload.text, fileNote].filter(Boolean).join("\n");
     const media: ChatMediaRef[] = [];
     const remember = async (blob: Blob, name: string) => {
       const file = blob instanceof File ? blob : new File([blob], name, { type: blob.type || "application/octet-stream" });
@@ -1297,6 +1310,7 @@ export function ViewingChatApp() {
         "pendingConfirm",
         JSON.stringify(active.pendingConfirm ?? null),
       );
+      form.append("askedCount", JSON.stringify(active.askedCount ?? {}));
       if (replyTo) {
         form.append("replyTo", JSON.stringify(replyTo));
         form.append("replyToMessageId", replyTo.messageId);
@@ -1323,7 +1337,7 @@ export function ViewingChatApp() {
       }
       if (payload.image) form.append("image", payload.image);
 
-      const response = await fetch("/api/viewing-chat/turn", {
+      const response = await fetch("/api/chat", {
         method: "POST",
         body: form,
       });
@@ -1341,6 +1355,7 @@ export function ViewingChatApp() {
         extractionStatus?: "ok" | "extraction_failed";
         collectionFocusFieldIds?: PropertyFieldId[];
         pendingConfirm?: ViewingChatThread["pendingConfirm"];
+        askedCount?: Record<string, number>;
         persisted?: boolean;
         error?: string;
         code?: string;
@@ -1414,24 +1429,20 @@ export function ViewingChatApp() {
           data.pendingConfirm !== undefined
             ? data.pendingConfirm
             : active.pendingConfirm,
+        askedCount: data.askedCount ?? active.askedCount ?? {},
         lastTurnChanges: data.changes ?? [],
         conversationStatus:
           data.conversationStatus ?? active.conversationStatus ?? "collecting",
         turnWarnings: data.turnWarnings ?? [],
       });
+      saveQuestionState(
+        active.id,
+        { ...loadQuestionState(active.id).answered },
+        data.askedCount ?? active.askedCount ?? {},
+      );
       refreshLocal();
       setReplyTo(null);
-
-      if (
-        data.extractionStatus === "extraction_failed" ||
-        data.turnWarnings?.includes("extraction_failed")
-      ) {
-        setTurnError(c.extractionFailed);
-        setTurnErrorActions(["retry"]);
-        // Keep lastTurnPayload so retry stays available
-      } else {
-        setLastTurnPayload(null);
-      }
+      setLastTurnPayload(null);
 
       if (data.conversationStatus === "reviewing") {
         setSummaryOpen(true);
@@ -1457,13 +1468,6 @@ export function ViewingChatApp() {
     skippedFields?: string[];
   }) {
     if (!active) return;
-    const progress = countAgendaProgress(agenda);
-    if (progress.highPending > 0) {
-      const ok = window.confirm(
-        c.agendaFinishWarn.replace("{count}", String(progress.highPending)),
-      );
-      if (!ok) return;
-    }
     const record = override?.record ?? active.propertyRecord;
     setBusy(true);
     setStatus(c.generatingReport);
@@ -1902,6 +1906,7 @@ export function ViewingChatApp() {
                 <ChevronLeft className="h-5 w-5" strokeWidth={2.25} />
               </button>
               <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
+              {userId && active.cloud?.state === "synced" ? <ChatInvite viewingId={active.id} /> : null}
               <button
                 type="button"
                 onClick={() => setSummaryOpen((v) => !v)}
@@ -1961,6 +1966,11 @@ export function ViewingChatApp() {
                 >
                   {shortenAddressLabel(active.normalizedAddress || active.address)}
                 </p>
+                {userId && active.cloud?.state === "synced" ? (
+                  <div className="mt-2 flex justify-center">
+                    <ChatFaces viewingId={active.id} />
+                  </div>
+                ) : null}
                 {!userId ? (
                   <p className="mt-1 text-center text-[11px] text-[#6B7280]">
                     {c.guestLocalNotice.replace("{days}", String(guestDaysLeft(active)))}{" "}
@@ -2052,23 +2062,21 @@ export function ViewingChatApp() {
                   setReplyTo(target);
                   document.getElementById("viewing-chat-composer")?.focus();
                 }}
-                turnActions={{
-                  supplement: c.bubbleSupplement,
-                  correct: c.bubbleCorrect,
-                  skip: c.actionSkip,
-                  onSupplement: () => {
-                    setTurnMode("supplement");
-                    document.getElementById("viewing-chat-composer")?.focus();
-                  },
-                  onCorrect: () => {
-                    setTurnMode("correct");
-                    document.getElementById("viewing-chat-composer")?.focus();
-                  },
-                  onSkip: skipActiveAgendaItem,
+                onReact={(messageId, emoji) => {
+                  if (!userId || !active) return;
+                  const next = active.messages.map((message) =>
+                    message.id === messageId
+                      ? { ...message, reactions: toggleChatReaction(message.reactions, emoji, userId) }
+                      : message,
+                  );
+                  saveLocalMessages(active.id, next);
+                  queueCloudSync(active.id);
+                  refreshLocal();
                 }}
               />
             </div>
             <div className="shrink-0 border-t border-black/8 bg-[#FAF6F1]">
+              {userId && active.cloud?.state === "synced" ? <ChatCards viewingId={active.id} /> : null}
               <input
                 ref={photoInputRef}
                 type="file"

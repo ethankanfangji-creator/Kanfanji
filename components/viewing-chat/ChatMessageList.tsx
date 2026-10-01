@@ -10,8 +10,7 @@ import {
   type ChatMessage,
   type ChatReplyRef,
 } from "@/lib/viewing-chat/types";
-import { resolveAgendaId } from "@/lib/viewing-chat/agenda-catalog";
-import { agendaIdToFieldId } from "@/lib/viewing-chat/collection/field-map";
+import { CHAT_REACTIONS, type ChatReactionEmoji } from "@/lib/viewing-chat/chat-reactions";
 import { ChatReportBubble } from "@/components/viewing-chat/ChatReportBubble";
 import { useChatMediaUrl } from "@/components/viewing-chat/useChatMediaUrl";
 import { InitialReportCard } from "@/components/viewing-chat/InitialReportCard";
@@ -41,10 +40,29 @@ function MediaRefView({ item, missing }: { item: ChatMediaRef; missing: string }
 const LONG_PRESS_MS = 480;
 const MOVE_CANCEL_PX = 12;
 
-function looksLikeQuestion(text: string): boolean {
-  const t = text.trim();
-  if (!t) return false;
-  return /[？?]/.test(t) || /^(下一|Next|ข้อถัดไป)/i.test(t);
+function orderedMessages(messages: ChatMessage[]): ChatMessage[] {
+  const children = new Map<string, ChatMessage[]>();
+  for (const message of messages) {
+    const parentId = message.replyTo?.messageId;
+    if (!parentId) continue;
+    const list = children.get(parentId) ?? [];
+    list.push(message);
+    children.set(parentId, list);
+  }
+  const result: ChatMessage[] = [];
+  const seen = new Set<string>();
+  const walk = (message: ChatMessage) => {
+    if (seen.has(message.id)) return;
+    seen.add(message.id);
+    result.push(message);
+    for (const child of children.get(message.id) ?? []) walk(child);
+  };
+  for (const message of messages) {
+    const parentId = message.replyTo?.messageId;
+    if (parentId && messages.some((item) => item.id === parentId)) continue;
+    walk(message);
+  }
+  return result;
 }
 
 export function ChatMessageList({
@@ -53,31 +71,24 @@ export function ChatMessageList({
   onShareReport,
   shareLabel,
   onReply,
+  onReact,
   replyLabel,
   cancelLabel,
   highlightMessageId,
   matchQuery,
-  turnActions,
 }: {
   messages: ChatMessage[];
   emptyHint: string;
   onShareReport?: () => void;
   shareLabel?: string;
   onReply?: (reply: ChatReplyRef) => void;
+  onReact?: (messageId: string, emoji: ChatReactionEmoji) => void;
   replyLabel?: string;
   cancelLabel?: string;
   /** Currently focused in-chat search match */
   highlightMessageId?: string | null;
   /** When set, soft-mark all messages that contain this query */
   matchQuery?: string;
-  turnActions?: {
-    supplement: string;
-    correct: string;
-    skip: string;
-    onSupplement: () => void;
-    onCorrect: () => void;
-    onSkip: () => void;
-  };
 }) {
   const { messages: t } = useI18n();
   const c = t.chat;
@@ -86,6 +97,7 @@ export function ChatMessageList({
     x: number;
     y: number;
   } | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
   const pressRef = useRef<{
     message: ChatMessage;
     timer: number;
@@ -155,7 +167,7 @@ export function ChatMessageList({
     };
   }
 
-  const actionMessageId = [...messages].reverse().find((message) => message.role === "ai")?.id;
+  const visibleMessages = orderedMessages(messages);
 
   if (messages.length === 0) {
     return (
@@ -167,7 +179,7 @@ export function ChatMessageList({
 
   return (
     <div className="space-y-3 px-3 py-4">
-      {messages.map((message) => {
+      {visibleMessages.map((message) => {
         const isUser = message.role === "user";
         const replyable = Boolean(onReply && canReplyToMessage(message));
         const isMatch =
@@ -178,7 +190,7 @@ export function ChatMessageList({
           <div
             key={message.id}
             data-chat-message-id={message.id}
-            className={`group flex scroll-mt-24 ${isUser ? "justify-end" : "justify-start"}`}
+            className={`group flex scroll-mt-24 ${message.replyTo ? "ml-8" : ""} ${isUser ? "justify-end" : "justify-start"}`}
             onContextMenu={
               replyable
                 ? (event) => {
@@ -219,6 +231,7 @@ export function ChatMessageList({
           >
             <div
               tabIndex={replyable ? 0 : undefined}
+              onClick={() => setOpenId((current) => (current === message.id ? null : message.id))}
               className={`max-w-[min(92%,420px)] select-none rounded-[20px] px-3.5 py-2.5 text-[14px] leading-[1.45] ${
                 isUser
                   ? "bg-[#DBEAFE] text-[#1E3A8A]"
@@ -277,11 +290,10 @@ export function ChatMessageList({
                 message.type === "system" ||
                 message.type === "intel" ||
                 message.type === "source_status") &&
-              message.text &&
-              !(message.matched?.length && looksLikeQuestion(message.text)) ? (
+              message.text ? (
                 <p className="whitespace-pre-wrap">{message.text}</p>
               ) : null}
-              {message.analysis ? (
+              {message.analysis && message.analysis !== "extraction_failed" ? (
                 <p className="mt-1 rounded-xl bg-[#FFF7ED] px-2.5 py-1.5 text-[12px] text-[#9A3412]">
                   {message.analysis}
                 </p>
@@ -302,55 +314,6 @@ export function ChatMessageList({
                   {message.question}
                   {message.answer ? ` → ${message.answer}` : ""}
                 </p>
-              ) : null}
-              {message.matched?.length ? (
-                <div
-                  className={`space-y-1.5 text-[12px] text-[#374151] ${
-                    message.text && looksLikeQuestion(message.text) ? "" : "mt-1.5"
-                  }`}
-                >
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-[#1E40AF]">
-                    {c.matchedLogged}
-                  </p>
-                  <ul className="space-y-1.5">
-                    {message.matched.map((hit) => {
-                      const agendaId = resolveAgendaId(hit.id);
-                      const fieldId = agendaIdToFieldId(agendaId);
-                      const itemLabel =
-                        c.agendaItems[
-                          agendaId as keyof typeof c.agendaItems
-                        ] ??
-                        c.fieldLabels?.[
-                          fieldId as keyof typeof c.fieldLabels
-                        ] ??
-                        agendaId;
-                      return (
-                        <li
-                          key={`${message.id}-${hit.id}`}
-                          className="rounded-xl border border-[#BFDBFE]/80 bg-[#EFF6FF] px-2.5 py-2"
-                        >
-                          <p className="text-[11px] font-semibold text-[#1E40AF]">
-                            {itemLabel}
-                          </p>
-                          <p className="mt-0.5 whitespace-pre-wrap text-[12px] leading-snug text-[#1F2937]">
-                            {hit.answer}
-                          </p>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              ) : null}
-              {/* Advance turn: show logged facts first, then the next question. */}
-              {message.matched?.length &&
-              message.text &&
-              looksLikeQuestion(message.text) ? (
-                <div className="mt-2 border-t border-black/8 pt-2">
-                  <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[#6B7280]">
-                    {c.agendaNextItem}
-                  </p>
-                  <p className="whitespace-pre-wrap font-medium">{message.text}</p>
-                </div>
               ) : null}
               {message.type === "report" && message.report ? (
                 <ChatReportBubble
@@ -374,20 +337,47 @@ export function ChatMessageList({
                   onShare={onShareReport}
                 />
               ) : null}
+              {message.reactions?.length ? (
+                <p className="mt-1 text-[13px]">
+                  {CHAT_REACTIONS.filter((emoji) => message.reactions?.some((item) => item.emoji === emoji)).map((emoji) => (
+                    <span key={emoji} className="mr-1">
+                      {emoji}
+                      {message.reactions!.filter((item) => item.emoji === emoji).length}
+                    </span>
+                  ))}
+                </p>
+              ) : null}
               <p className="mt-1 text-[10px] opacity-50">
                 {new Date(message.timestamp).toLocaleTimeString()}
               </p>
             </div>
-            {turnActions && message.id === actionMessageId && !isUser ? (
-              <div className="ml-1.5 flex shrink-0 flex-col justify-center gap-1">
-                <button type="button" onClick={turnActions.onSupplement} className="rounded-full border border-black/10 bg-white px-2 py-1 text-[11px] font-bold">
-                  {turnActions.supplement}
-                </button>
-                <button type="button" onClick={turnActions.onCorrect} className="rounded-full border border-black/10 bg-white px-2 py-1 text-[11px] font-bold">
-                  {turnActions.correct}
-                </button>
-                <button type="button" onClick={turnActions.onSkip} className="rounded-full border border-black/10 bg-white px-2 py-1 text-[11px] font-bold">
-                  {turnActions.skip}
+            {openId === message.id ? (
+              <div className="ml-2 flex flex-col justify-center gap-1">
+                <div className="flex gap-1 rounded-full bg-white px-2 py-1 shadow-[0_4px_16px_rgba(0,0,0,0.08)]">
+                  {CHAT_REACTIONS.map((emoji) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      className="text-[16px]"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onReact?.(message.id, emoji);
+                      }}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="rounded-full border border-black/10 bg-white px-2 py-1 text-[11px] font-bold"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onReply?.(toReplyRef(message));
+                    setOpenId(null);
+                  }}
+                >
+                  直接回覆
                 </button>
               </div>
             ) : null}
@@ -422,7 +412,7 @@ export function ChatMessageList({
             }}
           >
             <Reply className="h-4 w-4 text-[#6B7280]" />
-            {replyLabel || "Reply"}
+            {replyLabel || "直接回覆"}
           </button>
           {cancelLabel ? (
             <button

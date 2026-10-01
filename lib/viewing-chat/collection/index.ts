@@ -67,7 +67,10 @@ export {
 export type { FieldDisplayStatus } from "./field-display";
 export type { ExtractionStatus } from "./orchestrator-types";
 export { fillFocusSlot } from "./fill-focus-slot";
-export { applyPropertyIntelInferences } from "./apply-intel-inferences";
+export {
+  applyPropertyIntelInferences,
+  applyIntelSnapshotToLatestRecord,
+} from "./apply-intel-inferences";
 export {
   extractPropertyFactsWithLlm,
   mergeRuleAndLlmFacts,

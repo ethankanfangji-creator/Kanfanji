@@ -3,7 +3,11 @@
  * the viewing stays unbound (`identified=false`) until the user confirms.
  */
 
-import { twAdminDistrictMismatch, type AddressSuggestion } from "@/lib/address-suggest";
+import {
+  isPreciseHousePoint,
+  twAdminDistrictMismatch,
+  type AddressSuggestion,
+} from "@/lib/address-suggest";
 
 export type AddressLookupPayloadLike = {
   error?: string;
@@ -27,6 +31,8 @@ export type AddressConfirmationCandidate = {
   openMapUrl: string | null;
   /** Query city admin conflicts with geocoded display (e.g. 臺北市 vs 新北市). */
   adminDistrictMismatch: boolean;
+  /** Street midpoint only. The user must drop a pin before this can be saved. */
+  needsMapPin: boolean;
 };
 
 function asFiniteNumber(value: unknown): number | null {
@@ -103,6 +109,7 @@ export function buildAddressConfirmationCandidate(
     mapEmbedUrl: map.mapEmbedUrl,
     openMapUrl: map.openMapUrl,
     adminDistrictMismatch: twAdminDistrictMismatch(queryAddress, display),
+    needsMapPin: false,
   };
 }
 
@@ -119,6 +126,7 @@ export function candidateFromSuggestion(
   if (typeof suggestion.lat !== "number" || typeof suggestion.lng !== "number") {
     return null;
   }
+  const needsMapPin = !isPreciseHousePoint(suggestion);
   const map = buildMapUrls(suggestion.lat, suggestion.lng);
   const hay = `${display} ${suggestion.country ?? ""} ${suggestion.province ?? ""}`;
   const market = /台灣|臺灣|Taiwan/i.test(hay)
@@ -137,6 +145,7 @@ export function candidateFromSuggestion(
     mapEmbedUrl: map.mapEmbedUrl,
     openMapUrl: map.openMapUrl,
     adminDistrictMismatch: twAdminDistrictMismatch(queryAddress || suggestion.label, display),
+    needsMapPin,
   };
 }
 

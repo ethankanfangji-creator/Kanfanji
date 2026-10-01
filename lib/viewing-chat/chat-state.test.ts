@@ -40,6 +40,18 @@ describe("chat state round trip", () => {
     expect(merged.pinned).toBe(true);
   });
 
+  it("keeps a map pin across refresh and does not let a later payload without a pin replace it", () => {
+    const withPin = {
+      ...thread,
+      sitePin: { lat: 49.2815, lng: -122.8512, source: "map" as const },
+    };
+    const saved = buildChatStatePayload(withPin);
+    const reloaded = applyChatStateToLocal(thread, saved);
+    expect(reloaded.sitePin).toEqual({ lat: 49.2815, lng: -122.8512, source: "map" });
+    const merged = mergeChatState(saved, { v: 1, pinned: true });
+    expect(merged.sitePin).toEqual({ lat: 49.2815, lng: -122.8512, source: "map" });
+  });
+
   it("keeps existing fields when a turn sends a null property record", () => {
     const merged = mergeChatState(buildChatStatePayload(thread), { v: 1, propertyRecord: null });
     const fields = (merged.propertyRecord as { fields: Record<string, { value: string }> }).fields;

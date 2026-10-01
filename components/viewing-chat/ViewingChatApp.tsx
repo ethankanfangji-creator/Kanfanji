@@ -95,7 +95,7 @@ import {
   projectAgenda,
 } from "@/lib/viewing-chat/agenda";
 import { createAgendaLabelResolver } from "@/lib/viewing-chat/agenda-labels";
-import { createEmptyPropertyRecord, mergePropertyFacts } from "@/lib/viewing-chat/collection";
+import { createEmptyPropertyRecord, mergePropertyFacts } from "@/lib/viewing-chat/collection/merge-property-facts";
 import { applyPropertyIntelInferences } from "@/lib/viewing-chat/collection/apply-intel-inferences";
 import type {
   PropertyCollectionRecord,

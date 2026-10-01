@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import "server-only";
 import {
   aiOutputLanguageInstruction,
   resolveAiLocale,

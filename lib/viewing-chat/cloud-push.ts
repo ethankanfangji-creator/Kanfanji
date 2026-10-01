@@ -38,6 +38,25 @@ export function buildChatStatePayload(thread: {
   };
 }
 
+export function withCloudSyncState(
+  existing: { revision?: number; lastSyncedAt?: string | null; error?: string } | null | undefined,
+  state: "local_only" | "syncing" | "synced" | "failed" | "blocked_limit",
+  extra?: { revision?: number; lastSyncedAt?: string | null; error?: string },
+) {
+  return {
+    ...existing,
+    ...extra,
+    state,
+  };
+}
+
+export function isLocalThreadNewer(
+  localUpdatedAt: string | undefined,
+  remoteUpdatedAt: string | undefined,
+) {
+  return Boolean(localUpdatedAt && remoteUpdatedAt && localUpdatedAt >= remoteUpdatedAt);
+}
+
 export function syncedThreadIdsMissingFromCloud(
   local: Array<{ id: string; ownerUserId?: string | null; cloud?: { state?: string } | null }>,
   remoteIds: ReadonlySet<string>,

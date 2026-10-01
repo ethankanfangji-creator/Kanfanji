@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { pushViewingThread, syncedThreadIdsMissingFromCloud } from "./cloud-push";
+import {
+  isLocalThreadNewer,
+  pushViewingThread,
+  syncedThreadIdsMissingFromCloud,
+  withCloudSyncState,
+} from "./cloud-push";
 
 describe("pushViewingThread", () => {
   it("creates an unsynced thread with POST then PUT and does not GET", async () => {
@@ -79,5 +84,24 @@ describe("syncedThreadIdsMissingFromCloud", () => {
       "user",
     );
     expect(removed).toEqual(["x"]);
+  });
+});
+
+describe("cloud sync metadata helpers", () => {
+  it("keeps revision when a later sync is marked failed", () => {
+    expect(
+      withCloudSyncState({ state: "synced", revision: 7, lastSyncedAt: "2026-09-28T00:00:00.000Z" }, "failed"),
+    ).toEqual({
+      state: "failed",
+      revision: 7,
+      lastSyncedAt: "2026-09-28T00:00:00.000Z",
+    });
+  });
+
+  it("treats equal or newer local timestamps as the source of truth", () => {
+    expect(isLocalThreadNewer("2026-09-30T12:00:00.000Z", "2026-09-30T11:00:00.000Z")).toBe(true);
+    expect(isLocalThreadNewer("2026-09-30T12:00:00.000Z", "2026-09-30T12:00:00.000Z")).toBe(true);
+    expect(isLocalThreadNewer("2026-09-30T11:00:00.000Z", "2026-09-30T12:00:00.000Z")).toBe(false);
+    expect(isLocalThreadNewer(undefined, "2026-09-30T12:00:00.000Z")).toBe(false);
   });
 });

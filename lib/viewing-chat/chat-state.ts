@@ -11,6 +11,7 @@ const STATE_KEYS = [
   "collectionFocusFieldIds",
   "conversationStatus",
   "pendingConfirm",
+  "askedCount",
   "pinned",
 ] as const;
 

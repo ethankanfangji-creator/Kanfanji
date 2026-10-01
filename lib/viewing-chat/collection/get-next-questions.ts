@@ -1,5 +1,9 @@
 import { FIELD_CATALOG, questionForField } from "./field-catalog";
 import {
+  filterAskableKeys,
+  type QuestionState,
+} from "@/lib/viewing-chat/question-state";
+import {
   allowedFieldsForDepth,
   clarifyQuestionForField,
   confirmQuestion,
@@ -59,7 +63,9 @@ export type GetRemindersInput = GetNextQuestionsInput & {
   /** 招3 — fields that need clarify after vague answer */
   clarifyFieldIds?: PropertyFieldId[];
   /** 招1 — existing pending confirm */
-  pendingConfirm?: PendingConfirm | null;
+  pendingConfirm?: import("./dialogue-strategy").PendingConfirm | null;
+  /** Keys already shown to the user. Each key may be asked once. */
+  askedCount?: Record<string, number>;
 };
 
 /**
@@ -113,6 +119,9 @@ export function getNextQuestions(
   const pendingIn = isObjectForm
     ? (recordOrInput as GetRemindersInput).pendingConfirm
     : null;
+  const askedCount = isObjectForm
+    ? (recordOrInput as GetRemindersInput).askedCount ?? {}
+    : {};
 
   void (isObjectForm
     ? (recordOrInput as GetRemindersInput).evidence
@@ -170,11 +179,25 @@ export function getNextQuestions(
     for (const rel of RELATED[id] ?? []) relatedBoost.add(rel);
   }
 
+  const answered: QuestionState["answered"] = {};
+  for (const entry of FIELD_CATALOG) {
+    if (isFieldSatisfied(record, entry.fieldId)) {
+      const value = record.fields[entry.fieldId]?.value;
+      answered[entry.fieldId] = value == null ? "" : String(value);
+    }
+  }
+  const askable = new Set(
+    filterAskableKeys(
+      FIELD_CATALOG.map((entry) => entry.fieldId),
+      { answered, askedCount },
+    ),
+  );
+
   const gapIds: PropertyFieldId[] = [];
   for (const entry of FIELD_CATALOG) {
+    if (!askable.has(entry.fieldId)) continue;
     if (skipped.has(entry.fieldId)) continue;
     if (!allowed.has(entry.fieldId)) continue;
-    if (isFieldSatisfied(record, entry.fieldId)) continue;
     if (changed.has(entry.fieldId)) continue;
     if (results.some((r) => r.fieldId === entry.fieldId)) continue;
     gapIds.push(entry.fieldId);

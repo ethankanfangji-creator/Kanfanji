@@ -18,6 +18,7 @@ import {
   viewingRecorderSystemPrompt,
 } from "./llm-prompt";
 import { parseLlmJson, PolishReplySchema } from "./llm-schemas";
+import { markAnswered, markAsked, stripInternalKeys } from "@/lib/viewing-chat/question-state";
 import { createEmptyPropertyRecord, mergePropertyFacts } from "./merge-property-facts";
 import type {
   ConversationState,
@@ -236,6 +237,14 @@ function keepDraftWhenPolishFlips(draft: string, polished: string, userText: str
   return next;
 }
 
+async function readStreamText(stream: AsyncIterable<{ choices: Array<{ delta?: { content?: string | null } }> }>): Promise<string> {
+  let text = "";
+  for await (const chunk of stream) {
+    text += chunk.choices[0]?.delta?.content ?? "";
+  }
+  return text.trim();
+}
+
 async function maybePolishReply(input: {
   apiKey?: string;
   draft: string;
@@ -257,7 +266,8 @@ async function maybePolishReply(input: {
     const completion = await openai.chat.completions.create(
       {
         model: "gpt-4o-mini",
-        temperature: 0.4,
+        temperature: 0.7,
+        stream: true,
         response_format: { type: "json_object" },
         max_tokens: 420,
         messages: [
@@ -285,7 +295,7 @@ Return JSON: { "assistantMessage": string }`,
       { signal: input.signal ?? AbortSignal.timeout(20_000) },
     );
 
-    const raw = completion.choices[0]?.message?.content?.trim() || "";
+    const raw = await readStreamText(completion);
     const parsed = parseLlmJson(raw, PolishReplySchema);
     if (!parsed.ok) {
       // Draft already has rule-based facts — polish miss is soft, not "extraction failed"
@@ -605,6 +615,7 @@ export async function processUserTurn(
           userTurnCount,
           clarifyFieldIds,
           pendingConfirm: divertedFromConfirm ? null : nextPending,
+          askedCount: input.conversation.askedCount ?? {},
         });
 
   const nextFocusFieldIds = (() => {
@@ -654,8 +665,26 @@ export async function processUserTurn(
         locale: message.locale ?? input.conversation.locale,
         signal: input.signal,
       });
-  assistantMessage = keepDraftWhenPolishFlips(assistantMessage, polished.text, sourceText || message.text || "");
+  const locale = message.locale ?? input.conversation.locale ?? "zh-Hant";
+  assistantMessage = stripInternalKeys(
+    keepDraftWhenPolishFlips(assistantMessage, polished.text, sourceText || message.text || ""),
+    locale,
+  );
   if (polished.warning) warnings.push(polished.warning);
+
+  let nextAsked = { ...(input.conversation.askedCount ?? {}) };
+  const questionKey = suggestedQuestions[0]?.fieldId;
+  if (questionKey) {
+    nextAsked = markAsked({ answered: {}, askedCount: nextAsked }, questionKey).askedCount;
+  }
+  for (const fact of extracted.fields) {
+    if (fact.value == null || fact.value === "" || fact.status === "unknown") continue;
+    nextAsked = markAnswered(
+      { answered: {}, askedCount: nextAsked },
+      fact.fieldId,
+      String(fact.value),
+    ).askedCount;
+  }
 
   const extractionStatus: ExtractionStatus =
     polished.extractionStatus === "extraction_failed" ||
@@ -680,6 +709,7 @@ export async function processUserTurn(
       ("rawAiResponse" in llmExtract ? llmExtract.rawAiResponse : undefined),
     focusFieldIds: nextFocusFieldIds,
     pendingConfirm: nextPending,
+    askedCount: nextAsked,
   };
 }
 

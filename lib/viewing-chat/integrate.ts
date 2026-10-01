@@ -119,6 +119,7 @@ export async function integrateChatTurn(input: {
   collectionFocusFieldIds?: PropertyFieldId[];
   /** 招1 — pending yes/no candidate */
   pendingConfirm?: import("@/lib/viewing-chat/collection/orchestrator-types").PendingConfirmState | null;
+  askedCount?: Record<string, number>;
   signal?: AbortSignal;
   /**
    * Called after the raw user message is built and appended, before AI polish.
@@ -145,6 +146,7 @@ export async function integrateChatTurn(input: {
   rawAiResponse?: string;
   collectionFocusFieldIds: PropertyFieldId[];
   pendingConfirm: import("@/lib/viewing-chat/collection/orchestrator-types").PendingConfirmState | null;
+  askedCount: Record<string, number>;
 }> {
   // 1) Persist raw user message first — never wait for AI
   const userMessage = createUserMessage({
@@ -191,6 +193,7 @@ export async function integrateChatTurn(input: {
         : (input.collectionFocusFieldIds ?? []),
       pendingConfirm: input.pendingConfirm ?? null,
       userTurnCount,
+      askedCount: input.askedCount ?? {},
     },
     replyContext: input.replyContext,
     message: {
@@ -266,6 +269,7 @@ export async function integrateChatTurn(input: {
     rawAiResponse: turn.rawAiResponse,
     collectionFocusFieldIds: turn.focusFieldIds,
     pendingConfirm: turn.pendingConfirm,
+    askedCount: turn.askedCount,
   };
 }
 

@@ -405,6 +405,21 @@ export async function POST(request: Request) {
           return null;
         }
       })(),
+      askedCount: (() => {
+        const raw = form.get("askedCount");
+        if (typeof raw !== "string" || !raw.trim()) return {};
+        try {
+          const parsed = JSON.parse(raw) as unknown;
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+          const counts: Record<string, number> = {};
+          for (const [key, value] of Object.entries(parsed)) {
+            if (typeof value === "number" && value >= 1) counts[key] = 1;
+          }
+          return counts;
+        } catch {
+          return {};
+        }
+      })(),
       beforeExtraction: async (_userMessage, messagesWithUser) => {
         // Persist raw user message before AI so model failure cannot erase input
         if (!viewingId) return;
@@ -436,6 +451,7 @@ export async function POST(request: Request) {
           collectionFocusFieldIds: result.collectionFocusFieldIds,
           conversationStatus: result.conversationStatus,
           pendingConfirm: result.pendingConfirm,
+          askedCount: result.askedCount,
         });
         if (!persisted) console.error("viewing_chat_turn_persist");
       }
@@ -459,6 +475,7 @@ export async function POST(request: Request) {
         rawAiResponse: result.rawAiResponse,
         collectionFocusFieldIds: result.collectionFocusFieldIds,
         pendingConfirm: result.pendingConfirm,
+        askedCount: result.askedCount,
         persisted,
         ...sourceBundle,
       }),

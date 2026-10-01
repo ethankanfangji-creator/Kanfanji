@@ -19,6 +19,7 @@ export function buildChatStatePayload(thread: {
   collectionFocusFieldIds?: unknown;
   conversationStatus?: string;
   pendingConfirm?: unknown;
+  askedCount?: Record<string, number>;
   pinned?: boolean;
 }) {
   return {
@@ -32,6 +33,7 @@ export function buildChatStatePayload(thread: {
     collectionFocusFieldIds: thread.collectionFocusFieldIds ?? [],
     conversationStatus: thread.conversationStatus ?? "collecting",
     pendingConfirm: thread.pendingConfirm ?? null,
+    askedCount: thread.askedCount ?? {},
     pinned: Boolean(thread.pinned),
   };
 }

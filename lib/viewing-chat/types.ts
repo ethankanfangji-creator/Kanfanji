@@ -150,6 +150,8 @@ export type ViewingChatThread = {
     candidateValue: string;
     source: string;
   } | null;
+  /** Each internal key is asked at most once. */
+  askedCount?: Record<string, number>;
   /** Last turn deltas for summary panel */
   lastTurnChanges?: import("@/lib/viewing-chat/collection").RecordChange[];
   /** Orchestrator conversation status */

@@ -39,6 +39,7 @@ import {
 } from "@/lib/address-confirmation";
 import { shortenAddressLabel } from "@/lib/shorten-address";
 import { toggleChatReaction } from "@/lib/viewing-chat/chat-reactions";
+import { loadQuestionState, saveQuestionState } from "@/lib/store";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 import {
   createLocalThread,
@@ -1207,6 +1208,7 @@ export function ViewingChatApp() {
         "pendingConfirm",
         JSON.stringify(active.pendingConfirm ?? null),
       );
+      form.append("askedCount", JSON.stringify(active.askedCount ?? {}));
       if (replyTo) {
         form.append("replyTo", JSON.stringify(replyTo));
         form.append("replyToMessageId", replyTo.messageId);
@@ -1233,7 +1235,7 @@ export function ViewingChatApp() {
       }
       if (payload.image) form.append("image", payload.image);
 
-      const response = await fetch("/api/viewing-chat/turn", {
+      const response = await fetch("/api/chat", {
         method: "POST",
         body: form,
       });
@@ -1251,6 +1253,7 @@ export function ViewingChatApp() {
         extractionStatus?: "ok" | "extraction_failed";
         collectionFocusFieldIds?: PropertyFieldId[];
         pendingConfirm?: ViewingChatThread["pendingConfirm"];
+        askedCount?: Record<string, number>;
         persisted?: boolean;
         error?: string;
         code?: string;
@@ -1324,11 +1327,17 @@ export function ViewingChatApp() {
           data.pendingConfirm !== undefined
             ? data.pendingConfirm
             : active.pendingConfirm,
+        askedCount: data.askedCount ?? active.askedCount ?? {},
         lastTurnChanges: data.changes ?? [],
         conversationStatus:
           data.conversationStatus ?? active.conversationStatus ?? "collecting",
         turnWarnings: data.turnWarnings ?? [],
       });
+      saveQuestionState(
+        active.id,
+        { ...loadQuestionState(active.id).answered },
+        data.askedCount ?? active.askedCount ?? {},
+      );
       refreshLocal();
       setReplyTo(null);
       setLastTurnPayload(null);

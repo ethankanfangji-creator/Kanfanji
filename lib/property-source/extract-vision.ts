@@ -4,10 +4,8 @@
  */
 
 import OpenAI from "openai";
-import {
-  aiOutputLanguageInstruction,
-  aiTimeoutMs,
-} from "@/lib/ai-boundary/server-entry";
+import { aiTimeoutMs } from "@/lib/ai-boundary/server-entry";
+import { getVisionPrompt } from "@/lib/prompts/get-system-prompt";
 import { fenceUntrusted } from "@/lib/security/untrusted-content";
 import {
   parseVisionExtractRaw,
@@ -46,7 +44,7 @@ export async function extractPropertyFromImage(args: {
     return null;
   }
 
-  const languageLock = aiOutputLanguageInstruction(args.locale);
+  const languageLock = getVisionPrompt(args.locale);
 
   try {
     const openai = new OpenAI({ apiKey });
@@ -59,26 +57,7 @@ export async function extractPropertyFromImage(args: {
         messages: [
           {
             role: "system",
-            content: `You extract listing OCR text, condition observations, and optional equipment slots from property photos.
-Return JSON only:
-{
-  "extractedText": string,
-  "observedConditions": string[],
-  "uncertainItems": string[],
-  "confidence": number,
-  "slots": [{ "fieldId": string, "value": string, "confidence": number, "note": string }]
-}
-Rules:
-- ${languageLock}
-- Prefer copying visible listing text into extractedText when this is a screenshot
-- Do NOT invent listing facts not visible in the image
-- slots.fieldId limited to: electrical, plumbing, hvac, water_damage, odor, light, amenities, layout, noise, parking, floor
-- Example: electrical panel labeled "Federal Pioneer" → slot { fieldId: "electrical", value: "Federal Pioneer", confidence: 0.7, note: "panel label visible" }
-- If brand/text is unclear, put in uncertainItems — do not guess brand names
-- Phrase conditions as suspected observations needing on-site check
-- Never claim verified leaks/faults from a photo alone
-- Never infer race, gender, age, wealth, or other sensitive traits of people
-- confidence is 0..1 for OCR/observation quality`,
+            content: languageLock,
           },
           {
             role: "user",

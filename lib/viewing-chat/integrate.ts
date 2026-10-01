@@ -85,26 +85,6 @@ function stripFiledChangesBlock(text: string): string {
   return parts.join("\n\n").trim();
 }
 
-function collapseRepeatedAnswer(answer: string): string {
-  const trimmed = answer.trim();
-  if (!trimmed) return "";
-  const lines = trimmed
-    .split(/\n+/)
-    .map((l) => l.trim())
-    .filter(Boolean);
-  if (lines.length >= 2 && lines.every((l) => l === lines[0])) {
-    return lines[0]!;
-  }
-  // Exact doubled string without newline: "foo"+"foo"
-  if (trimmed.length % 2 === 0) {
-    const half = trimmed.length / 2;
-    const a = trimmed.slice(0, half);
-    const b = trimmed.slice(half);
-    if (a === b && a.length >= 2) return a;
-  }
-  return trimmed;
-}
-
 export async function integrateChatTurn(input: {
   apiKey: string;
   address: string;
@@ -235,63 +215,14 @@ export async function integrateChatTurn(input: {
     signal: input.signal,
   });
 
-  const matchedRaw = turn.changes
-    .filter(
-      (c) =>
-        c.kind === "added" ||
-        c.kind === "updated" ||
-        c.kind === "corrected",
-    )
-    .map((c) => ({
-      id: fieldIdToMatchedId(c.fieldId),
-      answer: collapseRepeatedAnswer(
-        c.nextValue === null || c.nextValue === undefined
-          ? c.rawText || ""
-          : typeof c.nextValue === "number" &&
-              c.nextValue >= 10_000 &&
-              c.nextValue % 10_000 === 0
-            ? `${c.nextValue / 10_000}萬`
-            : String(c.nextValue),
-      ),
-    }))
-    .filter((m) => m.answer);
-
-  // One chip per field — avoid duplicate「已記下」for the same slot
-  const matchedById = new Map<string, { id: string; answer: string }>();
-  for (const row of matchedRaw) {
-    if (!matchedById.has(row.id)) matchedById.set(row.id, row);
-  }
-  const matched = [...matchedById.values()];
-
-  const kind =
-    turn.intent === "finish"
-      ? "follow_up"
-      : matched.length > 0
-        ? "fill"
-        : "follow_up";
-
-  const extractionFailed = turn.extractionStatus === "extraction_failed";
-
-  // When UI renders matched chips, drop the prose「剛記入」block so facts aren't shown twice
-  const assistantText = matched.length
-    ? stripFiledChangesBlock(turn.assistantMessage)
-    : turn.assistantMessage;
+  const assistantText = stripFiledChangesBlock(turn.assistantMessage);
 
   const aiMessage = createAiMessage({
-    type: kind,
+    type: "follow_up",
     text: assistantText,
-    matched: matched.length ? matched : undefined,
-    analysis: extractionFailed
-      ? "extraction_failed"
-      : turn.warnings.includes("pending_vision")
-        ? "影像辨識尚未完成（未當確定事實）"
-        : turn.changes.some((c) => c.kind === "conflict")
-          ? `欄位衝突待確認：${turn.changes
-              .filter((c) => c.kind === "conflict")
-              .map((c) => c.fieldId)
-              .slice(0, 3)
-              .join("、")}`
-          : undefined,
+    analysis: turn.warnings.includes("pending_vision")
+      ? "影像辨識尚未完成（未當確定事實）"
+      : undefined,
   });
 
   const agendaSkippedIds = [

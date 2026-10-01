@@ -11,8 +11,6 @@ import {
   type ChatReplyRef,
 } from "@/lib/viewing-chat/types";
 import { CHAT_REACTIONS, type ChatReactionEmoji } from "@/lib/viewing-chat/chat-reactions";
-import { resolveAgendaId } from "@/lib/viewing-chat/agenda-catalog";
-import { agendaIdToFieldId } from "@/lib/viewing-chat/collection/field-map";
 import { ChatReportBubble } from "@/components/viewing-chat/ChatReportBubble";
 import { useChatMediaUrl } from "@/components/viewing-chat/useChatMediaUrl";
 import { InitialReportCard } from "@/components/viewing-chat/InitialReportCard";
@@ -65,12 +63,6 @@ function orderedMessages(messages: ChatMessage[]): ChatMessage[] {
     walk(message);
   }
   return result;
-}
-
-function looksLikeQuestion(text: string): boolean {
-  const t = text.trim();
-  if (!t) return false;
-  return /[？?]/.test(t) || /^(下一|Next|ข้อถัดไป)/i.test(t);
 }
 
 export function ChatMessageList({
@@ -298,11 +290,10 @@ export function ChatMessageList({
                 message.type === "system" ||
                 message.type === "intel" ||
                 message.type === "source_status") &&
-              message.text &&
-              !(message.matched?.length && looksLikeQuestion(message.text)) ? (
+              message.text ? (
                 <p className="whitespace-pre-wrap">{message.text}</p>
               ) : null}
-              {message.analysis ? (
+              {message.analysis && message.analysis !== "extraction_failed" ? (
                 <p className="mt-1 rounded-xl bg-[#FFF7ED] px-2.5 py-1.5 text-[12px] text-[#9A3412]">
                   {message.analysis}
                 </p>
@@ -323,55 +314,6 @@ export function ChatMessageList({
                   {message.question}
                   {message.answer ? ` → ${message.answer}` : ""}
                 </p>
-              ) : null}
-              {message.matched?.length ? (
-                <div
-                  className={`space-y-1.5 text-[12px] text-[#374151] ${
-                    message.text && looksLikeQuestion(message.text) ? "" : "mt-1.5"
-                  }`}
-                >
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-[#1E40AF]">
-                    {c.matchedLogged}
-                  </p>
-                  <ul className="space-y-1.5">
-                    {message.matched.map((hit) => {
-                      const agendaId = resolveAgendaId(hit.id);
-                      const fieldId = agendaIdToFieldId(agendaId);
-                      const itemLabel =
-                        c.agendaItems[
-                          agendaId as keyof typeof c.agendaItems
-                        ] ??
-                        c.fieldLabels?.[
-                          fieldId as keyof typeof c.fieldLabels
-                        ] ??
-                        agendaId;
-                      return (
-                        <li
-                          key={`${message.id}-${hit.id}`}
-                          className="rounded-xl border border-[#BFDBFE]/80 bg-[#EFF6FF] px-2.5 py-2"
-                        >
-                          <p className="text-[11px] font-semibold text-[#1E40AF]">
-                            {itemLabel}
-                          </p>
-                          <p className="mt-0.5 whitespace-pre-wrap text-[12px] leading-snug text-[#1F2937]">
-                            {hit.answer}
-                          </p>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              ) : null}
-              {/* Advance turn: show logged facts first, then the next question. */}
-              {message.matched?.length &&
-              message.text &&
-              looksLikeQuestion(message.text) ? (
-                <div className="mt-2 border-t border-black/8 pt-2">
-                  <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[#6B7280]">
-                    {c.agendaNextItem}
-                  </p>
-                  <p className="whitespace-pre-wrap font-medium">{message.text}</p>
-                </div>
               ) : null}
               {message.type === "report" && message.report ? (
                 <ChatReportBubble

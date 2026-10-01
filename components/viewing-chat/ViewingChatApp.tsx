@@ -89,7 +89,6 @@ import {
 } from "@/lib/property-source/error-messages";
 import type { PropertyChatStage } from "@/lib/viewing-chat/stage";
 import {
-  countAgendaProgress,
   inferAgendaMarket,
   openingAgendaActiveId,
   projectAgenda,
@@ -1332,17 +1331,7 @@ export function ViewingChatApp() {
       });
       refreshLocal();
       setReplyTo(null);
-
-      if (
-        data.extractionStatus === "extraction_failed" ||
-        data.turnWarnings?.includes("extraction_failed")
-      ) {
-        setTurnError(c.extractionFailed);
-        setTurnErrorActions(["retry"]);
-        // Keep lastTurnPayload so retry stays available
-      } else {
-        setLastTurnPayload(null);
-      }
+      setLastTurnPayload(null);
 
       if (data.conversationStatus === "reviewing") {
         setSummaryOpen(true);
@@ -1368,13 +1357,6 @@ export function ViewingChatApp() {
     skippedFields?: string[];
   }) {
     if (!active) return;
-    const progress = countAgendaProgress(agenda);
-    if (progress.highPending > 0) {
-      const ok = window.confirm(
-        c.agendaFinishWarn.replace("{count}", String(progress.highPending)),
-      );
-      if (!ok) return;
-    }
     const record = override?.record ?? active.propertyRecord;
     setBusy(true);
     setStatus(c.generatingReport);

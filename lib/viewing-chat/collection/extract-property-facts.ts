@@ -498,26 +498,32 @@ export function extractPropertyFacts(
     );
   }
 
-  // --- Noise (can appear mid-answer about something else) ---
-  const noiseMatch = trustedText.match(
-    /(?:噪音|吵|吵雜|高架|車流聲|很吵|有點吵|安靜)[^\n，。]{0,24}|陽台外有高架[^。\n]{0,20}/,
+  // --- Noise: keep the user's negation. "不吵" is not "吵". ---
+  const quietNoise = trustedText.match(
+    /不吵|沒(?:有)?吵|不太吵|沒有噪音|噪音不大|很安靜|安靜小區|安靜/,
   );
-  if (noiseMatch) {
+  const noiseMatch = quietNoise
+    ? null
+    : trustedText.match(
+        /(?<!不)(?:噪音|吵雜|很吵|有點吵|高架|車流聲)[^\n，。]{0,24}|陽台外有高架[^。\n]{0,20}/,
+      );
+  const noiseSpan = quietNoise?.[0] ?? noiseMatch?.[0];
+  if (noiseSpan) {
     pushUnique(
       createFact({
         fieldId: "noise",
-        value: noiseMatch[0].trim(),
+        value: noiseSpan.trim(),
         status: "confirmed",
         confidence: 0.86,
         sourceMessageId: messageId,
-        rawText: noiseMatch[0].trim(),
+        rawText: noiseSpan.trim(),
       }),
     );
   }
 
   // --- Odor from trusted user wording (not only vision analysis) ---
   const odorMatch = trustedText.match(
-    /(?:沒有|無|不見|不太有)[^。\n]{0,8}(?:特別的)?(?:氣味|味道|異味|怪味)|(?:氣味|味道|進門).{0,8}(?:霉|臭|菸|煙|寵物|污水|異味)|(?:有點|一股)?(?:霉味|臭味|菸味)|smell[^\n.]{0,20}/i,
+    /(?:沒有|無|不見|不太有|沒特別)[^。\n]{0,8}(?:特別的)?(?:氣味|味道|異味|怪味)|沒特別(?:的)?(?:氣味|味道|異味|怪味)|(?:氣味|味道|進門).{0,8}(?:霉|臭|菸|煙|寵物|污水|異味)|(?:有點|一股)?(?:霉味|臭味|菸味)|smell[^\n.]{0,20}/i,
   );
   if (odorMatch) {
     pushUnique(
@@ -611,10 +617,12 @@ export function extractPropertyFacts(
     );
   }
 
-  // --- Water damage when mentioned in multi-slot replies ---
-  const waterHit = trustedText.match(
-    /(?:沒有|無|不見)[^。\n]{0,6}(?:水漬|壁癌|滲漏|漏水)|(?:有|看到)[^。\n]{0,8}(?:水漬|壁癌|滲漏|漏水)|(?:水漬|壁癌|滲漏|漏水)[^。\n]{0,12}/i,
-  );
+  const mentionsWater = /壁癌|水損|水漬|滲漏|漏水|滲水/.test(trustedText);
+  const waterHit = mentionsWater
+    ? trustedText.match(
+        /(?:沒有|無|不見)[^。\n]{0,6}(?:水漬|壁癌|滲漏|漏水)|(?:有|看到)[^。\n]{0,8}(?:水漬|壁癌|滲漏|漏水)|(?:水漬|壁癌|滲漏|漏水|水損)[^。\n]{0,16}/i,
+      )
+    : null;
   if (waterHit && !fields.some((f) => f.fieldId === "water_damage")) {
     pushUnique(
       createFact({

@@ -225,6 +225,17 @@ function buildChanges(input: {
   return changes;
 }
 
+function keepDraftWhenPolishFlips(draft: string, polished: string, userText: string): string {
+  const next = polished.trim();
+  if (!next) return draft;
+  if (/不吵|安靜/.test(userText) && /吵/.test(next) && !/不吵|安靜/.test(next)) return draft;
+  if (/沒特別異味|沒有異味|無異味/.test(userText) && /水損/.test(next) && !/壁癌|漏水|水漬/.test(userText)) {
+    return draft;
+  }
+  if (/壁癌/.test(userText) && /水損(?:尚未|未確認|還沒)/.test(next)) return draft;
+  return next;
+}
+
 async function maybePolishReply(input: {
   apiKey?: string;
   draft: string;
@@ -474,10 +485,21 @@ export async function processUserTurn(
     warnings.push(llmExtract.warning);
   }
 
-  let extractedFields = mergeRuleAndLlmFacts(
-    ruleExtracted.fields,
-    llmExtract.fields,
-  );
+  const llmFacts = llmExtract.fields.filter((fact) => {
+    if (fact.fieldId === "water_damage" && !/壁癌|水損|水漬|滲漏|漏水|滲水/.test(freeformText)) {
+      return false;
+    }
+    if (
+      fact.fieldId === "noise" &&
+      /不吵|安靜/.test(freeformText) &&
+      /吵/.test(String(fact.value ?? "")) &&
+      !/不吵|安靜/.test(String(fact.value ?? ""))
+    ) {
+      return false;
+    }
+    return true;
+  });
+  let extractedFields = mergeRuleAndLlmFacts(ruleExtracted.fields, llmFacts);
   if (confirmResolved.facts.length) {
     extractedFields = mergeRuleAndLlmFacts(confirmResolved.facts, extractedFields);
   } else if (vagueFact) {
@@ -632,7 +654,7 @@ export async function processUserTurn(
         locale: message.locale ?? input.conversation.locale,
         signal: input.signal,
       });
-  assistantMessage = polished.text;
+  assistantMessage = keepDraftWhenPolishFlips(assistantMessage, polished.text, sourceText || message.text || "");
   if (polished.warning) warnings.push(polished.warning);
 
   const extractionStatus: ExtractionStatus =

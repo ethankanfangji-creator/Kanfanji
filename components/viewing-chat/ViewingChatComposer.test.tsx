@@ -107,7 +107,7 @@ function renderComposer(
 }
 
 describe("ViewingChatComposer permission onboarding", () => {
-  it("shows mic preflight before getUserMedia on first tap", async () => {
+  it("asks the browser for the microphone on the first tap", async () => {
     const user = userEvent.setup();
     const adapter = createMockMediaPermissionAdapter({
       statuses: { microphone: "prompt" },
@@ -117,12 +117,12 @@ describe("ViewingChatComposer permission onboarding", () => {
 
     await user.click(screen.getByRole("button", { name: labels.recording }));
 
-    expect(await screen.findByText(permissionCopy.titleMic)).toBeTruthy();
-    expect(screen.getByText(permissionCopy.bodyMic)).toBeTruthy();
-    expect(requestSpy).not.toHaveBeenCalled();
+    expect(screen.queryByText(permissionCopy.titleMic)).toBeNull();
+    expect(screen.queryByText(permissionCopy.bodyMic)).toBeNull();
+    await waitFor(() => expect(requestSpy).toHaveBeenCalled());
   });
 
-  it("requests mic after Continue and keeps typed notes on deny", async () => {
+  it("keeps typed notes when the browser denies the microphone", async () => {
     const user = userEvent.setup();
     const adapter = createMockMediaPermissionAdapter({
       statuses: { microphone: "prompt" },
@@ -139,16 +139,13 @@ describe("ViewingChatComposer permission onboarding", () => {
     ) as HTMLTextAreaElement;
     await user.type(textarea, "keep this note");
     await user.click(screen.getByRole("button", { name: labels.recording }));
-    await user.click(
-      await screen.findByRole("button", { name: permissionCopy.continue }),
-    );
 
-    expect(await screen.findByText(permissionCopy.status.denied)).toBeTruthy();
-    expect(screen.getByText(permissionCopy.importInstead)).toBeTruthy();
+    expect(screen.queryByText(permissionCopy.titleMic)).toBeNull();
+    expect(screen.queryByText(permissionCopy.importInstead)).toBeNull();
     expect(textarea.value).toBe("keep this note");
   });
 
-  it("offers audio import when mic is already denied", async () => {
+  it("does not open our microphone dialog when permission was already denied", async () => {
     const user = userEvent.setup();
     const adapter = createMockMediaPermissionAdapter({
       statuses: { microphone: "denied" },
@@ -158,17 +155,9 @@ describe("ViewingChatComposer permission onboarding", () => {
 
     await user.click(screen.getByRole("button", { name: labels.recording }));
 
-    expect(await screen.findByText(permissionCopy.status.denied)).toBeTruthy();
-    expect(requestSpy).not.toHaveBeenCalled();
-
-    const importInput = screen.getByTestId(
-      "audio-import-input",
-    ) as HTMLInputElement;
-    const clickSpy = vi.spyOn(importInput, "click");
-    await user.click(
-      screen.getByRole("button", { name: permissionCopy.importInstead }),
-    );
-    expect(clickSpy).toHaveBeenCalled();
+    expect(screen.queryByText(permissionCopy.titleMic)).toBeNull();
+    expect(screen.queryByText(permissionCopy.importInstead)).toBeNull();
+    await waitFor(() => expect(requestSpy).toHaveBeenCalled());
   });
 
   it("starts recording directly after explained when mic is granted", async () => {

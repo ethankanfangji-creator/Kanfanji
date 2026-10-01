@@ -56,7 +56,8 @@ export function classifyTurnIntent(input: {
 
   if (
     skippedFieldIds.length > 0 ||
-    /^(跳過|略過|之後再補|先跳過)([。.!！…]*)$/i.test(text) ||
+    /剛說過了|剛才說過|剛說了|這題說過/.test(text) ||
+    /^(跳過|略過|之後再補|先跳過|剛說過了)([。.!！…]*)$/i.test(text) ||
     /\bskip\b/i.test(text)
   ) {
     return { intent: "skip", skippedFieldIds };

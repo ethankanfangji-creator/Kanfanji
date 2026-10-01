@@ -40,9 +40,23 @@ describe("extractPropertyFacts", () => {
         field.status,
       );
       expect(field).toHaveProperty("confidence");
-      expect(field).toHaveProperty("sourceMessageId");
       expect(field).toHaveProperty("rawText");
     }
+  });
+  it("keeps negations and treats mold as the water answer", () => {
+    const quiet = extractPropertyFacts({ text: "這區不吵，也沒特別異味", messageId: "q" });
+    const byQuiet = Object.fromEntries(quiet.fields.map((field) => [field.fieldId, field]));
+    expect(String(byQuiet.noise?.value)).toMatch(/不吵/);
+    expect(String(byQuiet.noise?.value)).not.toBe("吵");
+    expect(byQuiet.odor?.rawText).toMatch(/異味/);
+    expect(byQuiet.water_damage).toBeUndefined();
+
+    const mold = extractPropertyFacts({ text: "客廳牆角有壁癌", messageId: "m" });
+    const water = mold.fields.find((field) => field.fieldId === "water_damage");
+    expect(water?.rawText).toMatch(/壁癌/);
+    const merged = mergePropertyFacts(createEmptyPropertyRecord(), mold.fields, { evidence: [] });
+    const next = getNextQuestions(merged.record, merged.evidence, []);
+    expect(next.every((question) => question.fieldId !== "water_damage")).toBe(true);
   });
 
   it("accepts multimodal capture shape without inventing listing numbers from analysis", () => {

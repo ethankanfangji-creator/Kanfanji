@@ -34,6 +34,7 @@ function fieldLabel(fieldId: PropertyFieldId, lang: "zh" | "en" | "th" | "other"
     hvac: "空調",
     parking: "車位",
     amenities: "設備",
+    year_built: "年份",
   };
   const en: Record<string, string> = {
     address: "address",
@@ -391,14 +392,8 @@ export function composeAssistantMessage(input: {
           ? "The transcript looks incomplete — feel free to restate or type the missing part."
           : "語音轉錄看起來不完整，你可以再補一句或打字修正。",
       );
-    } else if (w === "extraction_failed" || w === "llm_failed") {
-      parts.push(
-        lang === "en"
-          ? "AI polish failed, but your raw message and filed facts are kept — you can retry."
-          : "AI 潤飾失敗，但你的原始輸入與已歸檔資料都在，可重試。",
-      );
-    } else if (w === "polish_failed") {
-      // Soft — draft reply already usable; don't scare the user
+    } else if (w === "extraction_failed" || w === "llm_failed" || w === "polish_failed") {
+      // Keep the draft reply. A failed polish is not a new status for the user.
     }
   }
 

@@ -220,7 +220,6 @@ export function ViewingChatComposer({
 
     const media = mediaRef.current;
     if (!media.isMediaDevicesSupported() || !media.isMediaRecorderSupported()) {
-      showPermissionBanner("unsupported", "audio");
       return;
     }
 
@@ -229,8 +228,7 @@ export function ViewingChatComposer({
       video: false,
     });
     if (!requested.ok) {
-      // Keep typed notes / attachments — only surface actionable fallback.
-      showPermissionBanner(requested.status, "audio");
+      setRecording(false);
       return;
     }
 
@@ -270,32 +268,6 @@ export function ViewingChatComposer({
     setAttachOpen(false);
     setPermissionBanner(null);
     if (busy || recording) return;
-
-    const media = mediaRef.current;
-    setPreflightBusy(true);
-    let status: MediaPermissionStatus = "prompt";
-    if (!media.isMediaDevicesSupported() || !media.isMediaRecorderSupported()) {
-      status = "unsupported";
-    } else {
-      status = await media.query("microphone");
-    }
-    setPreflightBusy(false);
-
-    const decision = decideCaptureStart({
-      kind: "audio",
-      status,
-      explained: hasCaptureExplained("audio"),
-    });
-
-    if (decision.action === "show-reauth") {
-      showPermissionBanner(decision.status, "audio");
-      return;
-    }
-    if (decision.action === "show-preflight") {
-      setPreflightKind("audio");
-      setPreflightStatus(decision.status);
-      return;
-    }
     await beginRecording();
   }
 

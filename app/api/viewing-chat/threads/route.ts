@@ -93,6 +93,24 @@ export async function GET() {
     .eq("user_id", user.id)
     .not("chat_state", "is", null);
   if (error) return noStore({ code: "unavailable" }, 503);
+  const { data: memberships, error: memberError } = await admin
+    .from("viewing_members")
+    .select("viewing_id")
+    .eq("user_id", user.id)
+    .eq("status", "active");
+  if (memberError) return noStore({ code: "unavailable" }, 503);
+  const memberIds = (memberships ?? [])
+    .map((row) => String(row.viewing_id))
+    .filter((id) => !(data ?? []).some((row) => row.id === id));
+  const shared = memberIds.length
+    ? await admin
+        .from("viewings")
+        .select("id, address, updated_at, created_at, chat_state, report")
+        .in("id", memberIds)
+        .not("chat_state", "is", null)
+    : { data: [], error: null };
+  if (shared.error) return noStore({ code: "unavailable" }, 503);
+  const rows = [...(data ?? []), ...(shared.data ?? [])];
   const counted = await admin
     .from("viewings")
     .select("id", { count: "exact", head: true })
@@ -105,7 +123,7 @@ export async function GET() {
     if (!(tierError instanceof TierLookupError)) return noStore({ code: "unavailable" }, 503);
   }
   return noStore({
-    threads: (data ?? []).map((row) => ({
+    threads: rows.map((row) => ({
       id: row.id,
       address: row.address,
       updatedAt: row.updated_at,

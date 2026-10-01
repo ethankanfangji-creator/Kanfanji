@@ -36,12 +36,19 @@ export type ViewingComment = {
   updatedAt: string;
 };
 
+export type ChatFace = {
+  userId: string;
+  label: string;
+  avatarUrl: string | null;
+};
+
 export type CollaborationOverview = {
   role: ViewingRole;
   revision: number;
   members: ViewingMember[];
   invites: ViewingInvite[];
   comments: ViewingComment[];
+  faces: ChatFace[];
 };
 
 export const ROLE_RANK: Record<ViewingRole, number> = {

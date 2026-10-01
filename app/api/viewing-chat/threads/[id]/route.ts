@@ -6,7 +6,8 @@ import {
   readJsonObject,
   RequestValidationError,
 } from "@/lib/http/validation";
-import { appendChatMessages } from "@/lib/viewing-chat/append-messages";
+import { mergeChatMessages } from "@/lib/viewing-chat/merge-messages";
+import { getViewingRole } from "@/lib/collaboration/server";
 import {
   assertChatBodySize,
   parseChatMessages,
@@ -50,8 +51,21 @@ export async function PUT(
       .select("id, user_id, messages, revision, chat_state")
       .eq("id", id)
       .maybeSingle();
-    if (current.error || !current.data || current.data.user_id !== user.id) {
+    if (current.error || !current.data) {
       return noStore({ code: "not_found" }, 404);
+    }
+    const isOwner = current.data.user_id === user.id;
+    if (!isOwner) {
+      const member = await admin
+        .from("viewing_members")
+        .select("role, status")
+        .eq("viewing_id", id)
+        .eq("user_id", user.id)
+        .eq("status", "active")
+        .maybeSingle();
+      if (member.data?.role !== "editor" && member.data?.role !== "commenter") {
+        return noStore({ code: "not_found" }, 404);
+      }
     }
     const revision = Number(current.data.revision ?? 1);
     if (baseRevision === undefined) {
@@ -63,18 +77,18 @@ export async function PUT(
     const existing = Array.isArray(current.data.messages)
       ? (current.data.messages as ChatMessage[])
       : [];
-    const merged = messages ? appendChatMessages(existing, messages) : undefined;
+    const merged = messages ? mergeChatMessages(existing, messages) : undefined;
     const { error } = await admin
       .from("viewings")
       .update({
         ...(merged ? { messages: merged } : {}),
-        ...(chatState ? { chat_state: mergeChatState(current.data.chat_state, chatState) } : {}),
+        ...(isOwner && chatState ? { chat_state: mergeChatState(current.data.chat_state, chatState) } : {}),
         ...(clientUpdatedAt ? { client_updated_at: clientUpdatedAt } : {}),
         revision: revision + 1,
         updated_at: new Date().toISOString(),
       })
       .eq("id", id)
-      .eq("user_id", user.id);
+      .eq("user_id", current.data.user_id);
     if (error) return noStore({ code: "unavailable" }, 503);
     return noStore({ ok: true, revision: revision + 1 });
   } catch (error) {
@@ -102,7 +116,9 @@ export async function GET(
     .select("id, user_id, address, messages, report, metadata, chat_state, revision, updated_at")
     .eq("id", id)
     .maybeSingle();
-  if (error || !data || data.user_id !== user.id) return noStore({ code: "not_found" }, 404);
+  if (error || !data) return noStore({ code: "not_found" }, 404);
+  const role = data.user_id === user.id ? "owner" : await getViewingRole(id, user.id);
+  if (!role) return noStore({ code: "not_found" }, 404);
   return noStore(data);
 }
 

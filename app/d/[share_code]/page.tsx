@@ -5,6 +5,7 @@ import {
   type DiscussionHouse,
   type DiscussionRow,
 } from "@/components/discussion/DiscussionBoard";
+import { discussionHousesForOwner } from "@/lib/discussion/owned-viewings";
 import { MEDIA_SIGNED_TTL_SECONDS, absoluteStorageSignedUrl, assertOwnerMediaPath } from "@/lib/media-sign";
 import { MEDIA_BUCKET } from "@/lib/supabase";
 import { isLiveCode } from "@/lib/viewing-session-code";
@@ -55,19 +56,18 @@ export default async function DiscussionPage({
   const comments = commentsResult.error ? [] : commentsResult.data;
 
   const houseRows = (viewings ?? []) as Array<{ id: string; address: string; user_id: string | null }>;
-  const houses: DiscussionHouse[] = viewingIds
-    .map((id) => houseRows.find((viewing) => viewing.id === id))
-    .filter((viewing): viewing is { id: string; address: string; user_id: string | null } => Boolean(viewing))
-    .map((viewing) => ({ id: viewing.id, address: viewing.address }));
-  const ownerIds = new Set(
-    houses
-      .map((house) => houseRows.find((viewing) => viewing.id === house.id)?.user_id)
-      .filter((id): id is string => typeof id === "string"),
+  const houses: DiscussionHouse[] = discussionHousesForOwner(
+    viewingIds,
+    houseRows,
+    room.owner_user_id,
   );
+  const ownerIds = new Set(room.owner_user_id ? [room.owner_user_id] : []);
+  const ownedViewingIds = new Set(houses.map((house) => house.id));
+  const ownedCards = (saved ?? []).filter((card) => ownedViewingIds.has(card.viewing_id));
   const templateRows = (templates ?? [])
     .filter((template) => template.is_system || ownerIds.has(template.owner_user_id))
     .sort((a, b) => Number(b.is_system) - Number(a.is_system) || a.sort_order - b.sort_order);
-  const paths = (saved ?? []).flatMap((card) => (Array.isArray(card.photos) ? card.photos.slice(0, 4) : []));
+  const paths = ownedCards.flatMap((card) => (Array.isArray(card.photos) ? card.photos.slice(0, 4) : []));
   const signed = await signPhotos(
     paths.filter((path): path is string => {
       if (typeof path !== "string" || !ownerIds.has(path.split("/")[0] ?? "")) return false;
@@ -86,7 +86,7 @@ export default async function DiscussionPage({
     icon: template.icon,
     cells: Object.fromEntries(
       houses.map((house) => {
-        const card = (saved ?? []).find(
+        const card = ownedCards.find(
           (item) => item.viewing_id === house.id && item.template_id === template.id,
         );
         const photos = Array.isArray(card?.photos) ? card.photos.filter((path): path is string => typeof path === "string") : [];

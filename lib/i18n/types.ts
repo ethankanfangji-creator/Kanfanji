@@ -813,6 +813,17 @@ export type Messages = {
     confirmAddress: string;
     generateReport: string;
     generatingReport: string;
+    briefingTitle: string;
+    briefingHint: string;
+    briefingLoading: string;
+    briefingEmpty: string;
+    briefingSource: string;
+    notesTitle: string;
+    notesEmpty: string;
+    reportTitle: string;
+    reportStale: string;
+    reportUnseen: string;
+    reportNone: string;
     shareReport: string;
     openBank: string;
     openThreads: string;
@@ -1025,7 +1036,6 @@ export type Messages = {
     shareExisting: string;
     shareClose: string;
     shareNoReportYet: string;
-    reportTitle: string;
     reportPros: string;
     reportRisks: string;
     reportPartial: string;

@@ -12,6 +12,7 @@ export type { PromptCountry, PromptState };
 const FILES = {
   vision: "vision.md",
   report: "report.md",
+  briefing: "briefing.md",
 } as const;
 
 const cache = new Map<string, string>();
@@ -53,6 +54,12 @@ ${aiOutputLanguageInstruction(resolveAiLocale(language))}`;
 
 export function getReportPrompt(language: string): string {
   return `${readPromptFile("report")}
+
+${aiOutputLanguageInstruction(resolveAiLocale(language))}`;
+}
+
+export function getBriefingPrompt(language: string): string {
+  return `${readPromptFile("briefing")}
 
 ${aiOutputLanguageInstruction(resolveAiLocale(language))}`;
 }

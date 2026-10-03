@@ -14,6 +14,8 @@ const STATE_KEYS = [
   "askedCount",
   "pinned",
   "sitePin",
+  "briefing",
+  "reportNotesFingerprint",
 ] as const;
 
 type StateKey = (typeof STATE_KEYS)[number];

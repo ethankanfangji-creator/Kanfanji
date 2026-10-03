@@ -813,6 +813,17 @@ export type Messages = {
     confirmAddress: string;
     generateReport: string;
     generatingReport: string;
+    briefingTitle: string;
+    briefingSmell: string;
+    briefingLook: string;
+    briefingAsk: string;
+    briefingHint: string;
+    notesTitle: string;
+    notesEmpty: string;
+    reportTitle: string;
+    reportStale: string;
+    reportUnseen: string;
+    reportNone: string;
     shareReport: string;
     openBank: string;
     openThreads: string;

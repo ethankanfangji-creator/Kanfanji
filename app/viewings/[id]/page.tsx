@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { notFound, redirect } from "next/navigation";
-import { ViewingChatApp } from "@/components/viewing-chat/ViewingChatApp";
+import { ViewingSessionApp } from "@/components/viewing-session/ViewingSessionApp";
 import { getViewingRole } from "@/lib/collaboration/server";
 import { createClient } from "@/utils/supabase/server";
 
@@ -22,7 +22,7 @@ export default async function ViewingChatPage({
 
   return (
     <Suspense fallback={null}>
-      <ViewingChatApp viewingId={id} />
+      <ViewingSessionApp viewingId={id} />
     </Suspense>
   );
 }

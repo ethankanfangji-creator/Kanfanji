@@ -793,6 +793,10 @@ export function ViewingChatApp({
       setStatus(c.needAddress);
       return;
     }
+    if (startOnly && !userId) {
+      setStatus(c.syncRetry);
+      return;
+    }
     const pool = listLocalThreads().filter((thread) =>
       userId ? thread.ownerUserId === userId || !thread.ownerUserId : !thread.ownerUserId,
     );
@@ -834,37 +838,15 @@ export function ViewingChatApp({
       }
     }
     const market = inferAgendaMarket(trimmed);
-    const opening = buildOpeningBubble(trimmed, locale as Locale);
-    const seedRecord = createEmptyPropertyRecord({
-      address: trimmed,
-      mode: "collecting",
-      fields: {
-        address: {
-          fieldId: "address",
-          value: trimmed,
-          status: "confirmed",
-          confidence: 0.95,
-          sourceMessageId: null,
-          rawText: trimmed,
-          updatedAt: new Date().toISOString(),
-        },
-      },
-    });
-    const thread = createLocalThread(trimmed, [opening.message], null);
+    // Confirm address first — do not seed empty chat, SOP fields, or "already viewed" copy.
+    const thread = createLocalThread(trimmed, [], null);
     patchLocalThread(thread.id, {
-      stage: "viewing_preparation",
       normalizedAddress: trimmed,
       skippedSources: true,
-      agendaActiveId: fieldIdToAgenda(opening.focusFieldIds[0]),
-      agendaSkippedIds: [],
       agendaMarket: market,
-      propertyRecord: seedRecord,
-      propertyEvidence: [],
-      collectionSkippedFields: [],
-      collectionFocusFieldIds: opening.focusFieldIds,
-      lastTurnChanges: [],
-      conversationStatus: "collecting",
-      turnWarnings: [],
+      briefing: null,
+      reportNotesFingerprint: null,
+      report: null,
       ...(sitePin ? { sitePin } : {}),
     });
     refreshLocal();
@@ -880,7 +862,6 @@ export function ViewingChatApp({
     setTurnErrorActions([]);
     setConflicts([]);
 
-    void enrichAddressIntel(thread.id, trimmed, seedRecord, place);
     if (userId) {
       patchLocalThread(thread.id, { cloud: { state: "syncing" }, ownerUserId: userId });
       const creating = fetch("/api/viewing-chat/threads", {
@@ -890,13 +871,12 @@ export function ViewingChatApp({
           threadId: thread.id,
           address: trimmed,
           clientUpdatedAt: new Date().toISOString(),
-          messages: [opening.message],
+          messages: [],
           chatState: {
             v: 1,
             normalizedAddress: trimmed,
-            stage: "viewing_preparation",
-            conversationStatus: "collecting",
-            propertyRecord: seedRecord,
+            briefing: null,
+            reportNotesFingerprint: null,
             ...(sitePin ? { sitePin } : {}),
           },
         }),
@@ -920,6 +900,8 @@ export function ViewingChatApp({
         if (startOnly) setStatus(c.syncRetry);
       });
       threadCreations.current.set(thread.id, creating);
+    } else if (startOnly) {
+      setStatus(c.syncRetry);
     }
   }
 

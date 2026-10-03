@@ -22,6 +22,8 @@ export function buildChatStatePayload(thread: {
   askedCount?: Record<string, number>;
   pinned?: boolean;
   sitePin?: { lat: number; lng: number; source: "civic" | "map" } | null;
+  briefing?: unknown;
+  reportNotesFingerprint?: string | null;
 }) {
   return {
     v: 1 as const,
@@ -36,6 +38,8 @@ export function buildChatStatePayload(thread: {
     pendingConfirm: thread.pendingConfirm ?? null,
     askedCount: thread.askedCount ?? {},
     pinned: Boolean(thread.pinned),
+    briefing: thread.briefing ?? null,
+    reportNotesFingerprint: thread.reportNotesFingerprint ?? null,
     ...(thread.sitePin ? { sitePin: thread.sitePin } : {}),
   };
 }

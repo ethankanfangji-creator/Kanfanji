@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Database,
-  GitCompare,
   LifeBuoy,
   List,
   LogIn,
@@ -116,7 +115,6 @@ export function IconRail({
   onTogglePinThread,
   compareMode,
   selectedIds,
-  onToggleCompareMode,
   onToggleSelect,
   onOpenCompare,
   maxItems = COMPARE_LITE_MAX,
@@ -229,14 +227,6 @@ export function IconRail({
           onClick={onOpenMedia}
         >
           <Database className="h-5 w-5" strokeWidth={2} />
-        </RailButton>
-        <RailButton
-          label={messages.compareLite.compareToggle}
-          active={compareMode}
-          expanded={expanded}
-          onClick={onToggleCompareMode}
-        >
-          <GitCompare className="h-5 w-5" strokeWidth={2} />
         </RailButton>
         <RailButton label="看房列表" href="/viewings" expanded={expanded}>
           <List className="h-5 w-5" strokeWidth={2} />

@@ -20,7 +20,7 @@ export function ChatInvite({ viewingId }: { viewingId: string }) {
       });
       const body = (await response.json()) as { inviteUrl?: string; error?: string };
       if (response.status === 401) {
-        window.location.href = `/login?next=${encodeURIComponent(`/?thread=${viewingId}`)}`;
+        window.location.href = `/login?next=${encodeURIComponent(`/viewings/${viewingId}`)}`;
         return null;
       }
       if (response.status === 403) {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, GitCompare, Pin, Search, Trash2 } from "lucide-react";
+import { Check, Pin, Search, Trash2 } from "lucide-react";
 import type { ViewingChatThread } from "@/lib/viewing-chat/types";
 import { shortenAddressLabel } from "@/lib/shorten-address";
 import { filterHistoryThreads } from "@/lib/viewing-chat/history-filter";
@@ -24,7 +24,6 @@ export function MobileHistoryDrawer({
   onStartNew,
   compareMode,
   selectedIds,
-  onToggleCompareMode,
   onToggleSelect,
   onOpenCompare,
   maxItems = COMPARE_LITE_MAX,
@@ -82,16 +81,6 @@ export function MobileHistoryDrawer({
       tall
       headerExtra={
         <div className="flex items-center gap-1">
-          <button
-            type="button"
-            aria-label={labels.compareToggle}
-            onClick={onToggleCompareMode}
-            className={`inline-flex h-9 w-9 items-center justify-center rounded-full ${
-              compareMode ? "bg-black text-white" : "text-[#111]"
-            }`}
-          >
-            <GitCompare className="h-4 w-4" />
-          </button>
           <button
             type="button"
             aria-label={labels.searchPlaceholder ?? labels.title}

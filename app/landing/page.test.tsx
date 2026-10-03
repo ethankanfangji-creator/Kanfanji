@@ -27,9 +27,10 @@ describe("landing page", () => {
     expect(screen.queryByText(/6\.99|12\.99|Couple|評價/)).toBeNull();
   });
 
-  it("leaves the home page on the viewing app", () => {
+  it("leaves the home page as a chat index", () => {
     const home = readFileSync("app/page.tsx", "utf8");
-    expect(home).toContain("ViewingChatApp");
+    expect(home).toContain("ViewingChatIndex");
+    expect(home).not.toContain("ViewingChatApp");
     expect(home).not.toContain("landing");
   });
 });

@@ -1036,7 +1036,6 @@ export type Messages = {
     shareExisting: string;
     shareClose: string;
     shareNoReportYet: string;
-    reportTitle: string;
     reportPros: string;
     reportRisks: string;
     reportPartial: string;

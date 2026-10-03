@@ -8,22 +8,38 @@ import {
   resolveAiLocale,
   validateConsent,
 } from "@/lib/ai-boundary/server-entry";
+import { getBriefingPrompt } from "@/lib/prompts/get-system-prompt";
+import { assemblePropertyFacts } from "@/lib/property-facts/orchestrator";
 import {
-  fallbackBriefing,
+  emptyBriefing,
+  isViewingBriefing,
   type ViewingBriefing,
+  type ViewingBriefingPoint,
 } from "@/lib/viewing-chat/briefing";
+import { extractBriefingFoundFacts } from "@/lib/viewing-chat/briefing-facts";
 import { mergeChatState } from "@/lib/viewing-chat/chat-state";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
 
 export const runtime = "nodejs";
 
-function asStringList(value: unknown, max = 5): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item) => (typeof item === "string" ? item.trim() : ""))
-    .filter(Boolean)
-    .slice(0, max);
+function parsePoints(raw: unknown, allowedSources: Set<string>): ViewingBriefingPoint[] {
+  if (!Array.isArray(raw)) return [];
+  const points: ViewingBriefingPoint[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const text = typeof (item as { text?: unknown }).text === "string"
+      ? (item as { text: string }).text.trim()
+      : "";
+    const source = typeof (item as { source?: unknown }).source === "string"
+      ? (item as { source: string }).source.trim()
+      : "";
+    if (!text || !source) continue;
+    if (allowedSources.size > 0 && !allowedSources.has(source)) continue;
+    points.push({ text: text.slice(0, 280), source: source.slice(0, 120) });
+    if (points.length >= 5) break;
+  }
+  return points;
 }
 
 export async function POST(request: Request) {
@@ -38,52 +54,55 @@ export async function POST(request: Request) {
     const locale = resolveAiLocale(body.locale);
     const viewingId = typeof body.viewingId === "string" ? body.viewingId.trim() : "";
 
-    const apiKey = process.env.OPENAI_API_KEY;
-    let briefing: ViewingBriefing = fallbackBriefing(address);
+    const card = await assemblePropertyFacts({ address });
+    const { facts, sourcesQueried } = extractBriefingFoundFacts(card);
 
-    if (apiKey) {
+    let briefing: ViewingBriefing = emptyBriefing(address, sourcesQueried);
+    const apiKey = process.env.OPENAI_API_KEY;
+
+    if (facts.length > 0 && apiKey) {
       try {
         const openai = new OpenAI({ apiKey });
+        const system = getBriefingPrompt(locale);
         const completion = await openai.chat.completions.create(
           {
             model: "gpt-4o-mini",
-            temperature: 0.4,
+            temperature: 0.2,
             response_format: { type: "json_object" },
-            max_tokens: 500,
+            max_tokens: 700,
             messages: [
-              {
-                role: "system",
-                content: `你幫買家準備「還沒進門」的看房看點。只能根據地址推測常見該注意什麼。
-絕對不能寫成已經看過、已經聞到、已經確認。用「要聞／要看／要問」的預備語氣。
-回傳 JSON：{"smell": string[], "look": string[], "ask": string[]}
-每類 2–4 條，短句，語言：${locale.startsWith("en") ? "English" : locale.startsWith("th") ? "Thai" : "繁體中文"}。
-不要編造該地址的具體屋況、噪音或成交事實。`,
-              },
+              { role: "system", content: system },
               {
                 role: "user",
-                content: `地址：${address}`,
+                content: `Address: ${address}
+locale: ${locale}
+
+FOUND_FACTS (only these may be used):
+${JSON.stringify(facts, null, 0)}
+
+Return JSON: {"points":[{"text":string,"source":string}]}`,
               },
             ],
           },
-          { signal: AbortSignal.timeout(30_000) },
+          { signal: AbortSignal.timeout(45_000) },
         );
         const raw = completion.choices[0]?.message?.content?.trim() || "{}";
         const parsed = JSON.parse(raw) as Record<string, unknown>;
-        const smell = asStringList(parsed.smell);
-        const look = asStringList(parsed.look);
-        const ask = asStringList(parsed.ask);
-        if (smell.length && look.length && ask.length) {
-          briefing = {
-            address,
-            smell,
-            look,
-            ask,
-            generatedAt: new Date().toISOString(),
-          };
-        }
+        const allowed = new Set(facts.map((fact) => fact.source));
+        const points = parsePoints(parsed.points, allowed);
+        briefing = {
+          address,
+          points,
+          sourcesQueried,
+          generatedAt: new Date().toISOString(),
+        };
       } catch {
-        briefing = fallbackBriefing(address);
+        briefing = emptyBriefing(address, sourcesQueried);
       }
+    }
+
+    if (!isViewingBriefing(briefing)) {
+      briefing = emptyBriefing(address, sourcesQueried);
     }
 
     if (viewingId) {
@@ -118,7 +137,13 @@ export async function POST(request: Request) {
       }
     }
 
-    return boundary.applyCookie(NextResponse.json({ briefing }));
+    return boundary.applyCookie(
+      NextResponse.json({
+        briefing,
+        factsFound: facts.length,
+        sourcesQueried,
+      }),
+    );
   } catch (error) {
     return aiErrorResponse(error);
   }

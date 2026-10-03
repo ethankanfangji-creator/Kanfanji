@@ -1,15 +1,28 @@
 import { describe, expect, it } from "vitest";
 import {
   briefingMatchesAddress,
-  fallbackBriefing,
+  emptyBriefing,
+  isViewingBriefing,
   notesFingerprint,
   userNotesOnly,
 } from "./briefing";
 import { createAiMessage, createUserMessage } from "./types";
 
 describe("viewing briefing helpers", () => {
+  it("rejects the old smell/look/ask shape", () => {
+    expect(
+      isViewingBriefing({
+        address: "A Street",
+        smell: ["x"],
+        look: ["y"],
+        ask: ["z"],
+        generatedAt: new Date().toISOString(),
+      }),
+    ).toBe(false);
+  });
+
   it("treats briefing as stale when the address changes", () => {
-    const briefing = fallbackBriefing("A Street");
+    const briefing = emptyBriefing("A Street");
     expect(briefingMatchesAddress(briefing, "A Street")).toBe(true);
     expect(briefingMatchesAddress(briefing, "B Street")).toBe(false);
   });

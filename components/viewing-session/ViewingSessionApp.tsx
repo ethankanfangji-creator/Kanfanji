@@ -9,7 +9,8 @@ import { useChatMediaUrl } from "@/components/viewing-chat/useChatMediaUrl";
 import { AI_CONSENT_VERSION } from "@/lib/ai-boundary/client";
 import {
   briefingMatchesAddress,
-  fallbackBriefing,
+  emptyBriefing,
+  isViewingBriefing,
   notesFingerprint,
   userNotesOnly,
   type ViewingBriefing,
@@ -135,7 +136,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
   function refresh() {
     const next = getLocalThread(viewingId);
     setThread(next);
-    if (next?.briefing && briefingMatchesAddress(next.briefing, next.address)) {
+    if (next?.briefing && isViewingBriefing(next.briefing) && briefingMatchesAddress(next.briefing, next.address)) {
       setBriefing(next.briefing);
     }
   }
@@ -203,7 +204,11 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
       }
       setThread(local);
       setReady(true);
-      if (local.briefing && briefingMatchesAddress(local.briefing, local.address)) {
+      if (
+        local.briefing &&
+        isViewingBriefing(local.briefing) &&
+        briefingMatchesAddress(local.briefing, local.address)
+      ) {
         setBriefing(local.briefing);
       }
       // Restore a previously generated report product; never invent one without a press.
@@ -241,14 +246,17 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
           briefing?: ViewingBriefing;
         };
         if (cancelled) return;
-        const next = body.briefing ?? fallbackBriefing(thread.address);
+        const next =
+          body.briefing && isViewingBriefing(body.briefing)
+            ? body.briefing
+            : emptyBriefing(thread.address);
         setBriefing(next);
         patchLocalThread(thread.id, { briefing: next });
         queueSync();
         refresh();
       } catch {
         if (cancelled) return;
-        const next = fallbackBriefing(thread.address);
+        const next = emptyBriefing(thread.address);
         setBriefing(next);
         patchLocalThread(thread.id, { briefing: next });
       } finally {
@@ -447,26 +455,25 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
         </h2>
         <p className="mt-1 text-[12px] text-[#6B7280]">{c.briefingHint}</p>
         {briefingBusy && !briefing ? (
-          <p className="mt-3 text-[13px] text-[#6B7280]">…</p>
+          <p className="mt-3 text-[13px] text-[#6B7280]">{c.briefingLoading}</p>
         ) : briefing ? (
-          <div className="mt-3 grid gap-3">
-            {(
-              [
-                [c.briefingSmell, briefing.smell],
-                [c.briefingLook, briefing.look],
-                [c.briefingAsk, briefing.ask],
-              ] as const
-            ).map(([label, items]) => (
-              <div key={label} className="rounded-2xl bg-white px-4 py-3 shadow-[0_4px_16px_rgba(0,0,0,0.04)]">
-                <p className="text-[12px] font-bold text-[#374151]">{label}</p>
-                <ul className="mt-1.5 space-y-1 text-[13px] leading-snug text-[#1A1A1A]">
-                  {items.map((item) => (
-                    <li key={item}>· {item}</li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
+          briefing.points.length === 0 ? (
+            <p className="mt-3 text-[13px] text-[#6B7280]">{c.briefingEmpty}</p>
+          ) : (
+            <ul className="mt-3 space-y-2">
+              {briefing.points.map((point) => (
+                <li
+                  key={`${point.source}-${point.text}`}
+                  className="rounded-2xl bg-white px-4 py-3 text-[14px] leading-snug shadow-[0_4px_16px_rgba(0,0,0,0.04)]"
+                >
+                  <p>{point.text}</p>
+                  <p className="mt-1.5 text-[11px] font-semibold text-[#6B7280]">
+                    {c.briefingSource}: {point.source}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )
         ) : null}
       </section>
 

@@ -3,18 +3,11 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ArrowLeft, Camera, Check, GitCompare, MapPin, Video } from "lucide-react";
+import { ArrowLeft, Camera, MapPin, Video } from "lucide-react";
 import { ClientAuthBar } from "@/components/ClientAuthBar";
 import { useI18n } from "@/components/I18nProvider";
 import { PageContainer } from "@/components/ui/primitives";
-import {
-  buildComparisonDraft,
-  COMPARE_MAX,
-  COMPARE_MIN,
-  putComparison,
-} from "@/lib/comparison";
 import { createClient } from "@/utils/supabase/client";
-import { track } from "@/lib/analytics/client";
 import type { Viewing } from "@/lib/types";
 
 function formatWhen(iso: string, locale: string) {
@@ -33,10 +26,6 @@ export default function ViewingsPage() {
   const [email, setEmail] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [selectMode, setSelectMode] = useState(false);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [compareBusy, setCompareBusy] = useState(false);
-  const [compareMax, setCompareMax] = useState(COMPARE_MAX);
 
   useEffect(() => {
     const supabase = createClient();
@@ -56,106 +45,9 @@ export default function ViewingsPage() {
       };
       if (!response.ok) setError(body.error || "讀取案件失敗");
       setViewings(body.viewings ?? []);
-      const entitlement = await fetch("/api/compare/entitlement");
-      if (entitlement.ok) {
-        const gate = (await entitlement.json()) as { maxItems?: number; tier?: "free" | "pro" };
-        if (gate.maxItems) setCompareMax(gate.maxItems);
-      }
       setLoading(false);
     })();
   }, [router]);
-
-  function toggleSelect(id: string) {
-    setSelected((prev) => {
-      if (prev.includes(id)) return prev.filter((x) => x !== id);
-      if (prev.length >= compareMax) return prev;
-      return [...prev, id];
-    });
-  }
-
-  async function startDiscussion() {
-    if (selected.length < COMPARE_MIN) return;
-    setError("");
-    setCompareBusy(true);
-    try {
-      const response = await fetch("/api/discussion_rooms", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ viewingIds: selected }),
-      });
-      const body = (await response.json()) as { code?: string; path?: string };
-      if (!response.ok || !body.path) {
-        setError(
-          body.code === "upgrade_required"
-            ? "免費方案同時只能有一個比較。"
-            : body.code === "too_many_items"
-              ? `這個方案最多比較 ${compareMax} 間。`
-              : "討論室沒有建立。",
-        );
-        return;
-      }
-      router.push(body.path);
-    } catch {
-      setError("討論室沒有建立。");
-    } finally {
-      setCompareBusy(false);
-    }
-  }
-
-  async function startCompare() {
-    if (selected.length < COMPARE_MIN || selected.length > compareMax) {
-      setError(messages.compare.selectRange.replace("{max}", String(compareMax)));
-      return;
-    }
-    setError("");
-    setCompareBusy(true);
-    try {
-      const started = await fetch("/api/compare/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source: "viewings_list", itemIds: selected }),
-      });
-      const startedBody = (await started.json()) as { code?: string; compareId?: string };
-      if (!started.ok) {
-        setError(
-          started.status === 402
-            ? messages.compare.gateUpgradeBody
-            : messages.compare.startFailed,
-        );
-        if (started.status === 402) {
-          track({ name: "compare_gate_shown", props: { reason: "upgrade_required", source: "viewings_list" } });
-        }
-        return;
-      }
-      const picked = selected
-        .map((id) => viewings.find((v) => v.id === id))
-        .filter((v): v is Viewing => Boolean(v));
-      const draft = buildComparisonDraft(
-        picked.map((v) => ({
-          id: v.id,
-          address: v.address,
-          updated_at: v.updated_at,
-          pros: v.pros,
-          risks: v.risks,
-          questions: v.questions,
-          property: v.property ?? {},
-        })),
-      );
-      if (startedBody.compareId) draft.serverCompareId = startedBody.compareId;
-      await putComparison(draft);
-      if (picked.length >= 2 && picked.length <= 5) {
-        track({
-          name: "compare_opened",
-          props: { count: picked.length as 2 | 3 | 4 | 5, source: "viewings_list" },
-        });
-      }
-      router.push(`/compare/${draft.id}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : messages.compare.error);
-    } finally {
-      setCompareBusy(false);
-    }
-  }
 
   return (
     <div className="min-h-screen w-full flex justify-center bg-[var(--color-canvas)] text-[var(--color-text)]">
@@ -181,45 +73,6 @@ export default function ViewingsPage() {
           </div>
         </div>
 
-        <div className="mb-4 flex gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              setSelectMode((v) => !v);
-              setSelected([]);
-            }}
-            className="h-9 px-3 rounded-full bg-white border border-black/10 text-[11px] font-bold inline-flex items-center gap-1.5"
-          >
-            <GitCompare className="w-3.5 h-3.5" />
-            {selectMode ? messages.compare.cancelSelect : messages.compare.selectMode}
-          </button>
-          {selectMode ? (
-            <button
-              type="button"
-              disabled={
-                compareBusy || selected.length < COMPARE_MIN || selected.length > compareMax
-              }
-              onClick={() => void startCompare()}
-              className="h-9 px-3 rounded-full bg-black text-white text-[11px] font-bold disabled:opacity-40"
-            >
-              {messages.compare.startCompare} ({selected.length})
-            </button>
-          ) : null}
-          {selectMode ? (
-            <button
-              type="button"
-              disabled={compareBusy || selected.length < COMPARE_MIN}
-              onClick={() => void startDiscussion()}
-              className="h-9 px-3 rounded-full bg-white border border-black text-[11px] font-bold disabled:opacity-40"
-            >
-              討論室 ({selected.length})
-            </button>
-          ) : null}
-        </div>
-        {selectMode ? (
-          <p className="mb-3 text-[12px] text-[#6B7280]">{messages.compare.selectHint}</p>
-        ) : null}
-
         {error && (
           <div className="rounded-[18px] bg-[#FEF2F2] border border-[#FECACA] p-4 mb-4 text-[13px] text-[#991B1B]">
             {error}
@@ -243,18 +96,8 @@ export default function ViewingsPage() {
             const cover = viewing.photo_urls[0];
             const photoCount = viewing.photo_urls?.length ?? 0;
             const videoCount = viewing.video_urls?.length ?? 0;
-            const isSelected = selected.includes(viewing.id);
             const body = (
               <div className="flex gap-3 p-3">
-                {selectMode ? (
-                  <div
-                    className={`mt-1 w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ${
-                      isSelected ? "bg-black border-black text-white" : "border-black/20 bg-white"
-                    }`}
-                  >
-                    {isSelected ? <Check className="w-3.5 h-3.5" /> : null}
-                  </div>
-                ) : null}
                 <div className="w-[72px] h-[72px] rounded-xl overflow-hidden bg-[#F5F3F0] shrink-0">
                   {cover ? (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -287,21 +130,6 @@ export default function ViewingsPage() {
                 </div>
               </div>
             );
-
-            if (selectMode) {
-              return (
-                <button
-                  key={viewing.id}
-                  type="button"
-                  onClick={() => toggleSelect(viewing.id)}
-                  className={`w-full text-left bg-white rounded-[22px] border shadow-[0_4px_20px_rgba(0,0,0,0.04)] overflow-hidden ${
-                    isSelected ? "border-black" : "border-black/[0.05]"
-                  }`}
-                >
-                  {body}
-                </button>
-              );
-            }
 
             return (
               <Link

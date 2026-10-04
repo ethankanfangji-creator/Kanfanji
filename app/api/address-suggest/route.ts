@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { isLocale } from "@/lib/i18n/config";
 import {
-  detectSuggestRegion,
   METRO_VANCOUVER_BIAS,
   queryNamesPlace,
+  resolveSuggestRegion,
   type SuggestBias,
 } from "@/lib/address-suggest";
 import { createServerAddressService } from "@/lib/services/address/server-adapter";
@@ -35,14 +35,16 @@ export async function GET(request: Request) {
 
   const localeParam = searchParams.get("locale");
   const locale = isLocale(localeParam) ? localeParam : undefined;
+  const ipCountry = request.headers.get("x-vercel-ip-country");
+  const region = resolveSuggestRegion(q, ipCountry);
   const bias = queryNamesPlace(q) ? null : biasFromRequest(request);
 
   try {
     const address = createServerAddressService();
-    const suggestions = await address.suggest(q, request.signal, locale, bias);
+    const suggestions = await address.suggest(q, request.signal, locale, bias, region);
     return NextResponse.json({
       suggestions,
-      region: detectSuggestRegion(q),
+      region,
     });
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {

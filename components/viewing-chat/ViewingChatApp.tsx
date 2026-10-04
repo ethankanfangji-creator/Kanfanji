@@ -16,7 +16,6 @@ import {
 import { COQUITLAM_PORT_MOODY_CENTER } from "@/lib/map-pin";
 import { useI18n } from "@/components/I18nProvider";
 import { ChatMessageList } from "@/components/viewing-chat/ChatMessageList";
-import { ChatCards } from "@/components/viewing-chat/ChatCards";
 import { ChatFaces } from "@/components/viewing-chat/ChatFaces";
 import { ChatInvite } from "@/components/viewing-chat/ChatInvite";
 import { IconRail } from "@/components/viewing-chat/IconRail";
@@ -40,8 +39,13 @@ import {
 } from "@/lib/ai-boundary/map-ai-error-ui";
 import { track } from "@/lib/analytics/client";
 import type { AddressSource, AnalyticsRegion } from "@/lib/analytics/events";
-import type { AddressSuggestion } from "@/lib/address-suggest";
 import {
+  splitAddressQuery,
+  withUnitLabel,
+  type AddressSuggestion,
+} from "@/lib/address-suggest";
+import {
+  buildAddressConfirmationCandidate,
   candidateFromSuggestion,
   type AddressConfirmationCandidate,
   type AddressLookupPayloadLike,
@@ -50,6 +54,7 @@ import { shortenAddressLabel } from "@/lib/shorten-address";
 import { toggleChatReaction } from "@/lib/viewing-chat/chat-reactions";
 import { loadQuestionState, saveQuestionState } from "@/lib/store";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
+import { applyChatStateToLocal } from "@/lib/viewing-chat/chat-state";
 import {
   createLocalThread,
   deleteLocalThread,
@@ -58,6 +63,7 @@ import {
   patchLocalThread,
   saveLocalMessages,
   setLocalThreadPinned,
+  upsertLocalThread,
 } from "@/lib/viewing-chat/local-store";
 import { addMediaFile, getMediaBlob, removeMediaByThread } from "@/lib/viewing-chat/media-library";
 import { uploadViewingFile, appendViewingPath } from "@/lib/media";
@@ -117,6 +123,59 @@ import type { PropertyIntel } from "@/lib/property-intel/types";
 import type { Locale } from "@/lib/i18n/config";
 import { shouldStartNewViewing } from "@/lib/viewing-chat/should-start-new-viewing";
 import { isChatFocusMode } from "@/lib/viewing-chat/chat-focus-mode";
+
+async function hydrateViewingThread(threadId: string, ownerUserId: string) {
+  const detail = await fetch(`/api/viewing-chat/threads/${threadId}`);
+  if (!detail.ok) return false;
+  const row = (await detail.json()) as {
+    id: string;
+    address: string;
+    messages: ChatMessage[];
+    report: ViewingChatThread["report"];
+    metadata: ViewingChatThread["metadata"];
+    chat_state: Record<string, unknown> | null;
+    revision: number;
+    updated_at: string;
+    created_at?: string;
+  };
+  const local = getLocalThread(threadId);
+  const base: ViewingChatThread = local ?? {
+    id: row.id,
+    address: row.address,
+    createdAt: row.created_at ?? row.updated_at,
+    updatedAt: row.updated_at,
+    messages: [],
+    report: null,
+    metadata: null,
+    pinned: false,
+  };
+  const restored = applyChatStateToLocal(base, row.chat_state);
+  const localNewer =
+    Boolean(local) &&
+    local!.updatedAt >= row.updated_at &&
+    local!.cloud?.state === "synced" &&
+    local!.messages.length > 0;
+  upsertLocalThread(
+    localNewer
+      ? local!
+      : {
+          ...restored,
+          address: row.address || restored.address,
+          messages: appendChatMessages(restored.messages ?? [], row.messages ?? []),
+          report: row.report ?? restored.report,
+          metadata: row.metadata ?? restored.metadata,
+          updatedAt: row.updated_at,
+          ownerUserId,
+          cloud: {
+            state: "synced",
+            lastSyncedAt: row.updated_at,
+            revision: row.revision,
+          },
+        },
+  );
+  return true;
+}
+
 function consentSessionId(): string {
   if (typeof window === "undefined") return "ssr";
   const key = "kanfangji.chat.consentSession";
@@ -176,7 +235,13 @@ function pendingFromPinDraft(draft: AddressPinDraft): {
   };
 }
 
-export function ViewingChatApp() {
+export function ViewingChatApp({
+  viewingId = null,
+  startOnly = false,
+}: {
+  viewingId?: string | null;
+  startOnly?: boolean;
+} = {}) {
   const { messages: t, locale } = useI18n();
   const c = t.chat;
   const router = useRouter();
@@ -186,7 +251,8 @@ export function ViewingChatApp() {
   const restoredView = useRef(false);
 
   const [threads, setThreads] = useState<ViewingChatThread[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(viewingId);
+  const [threadReady, setThreadReady] = useState(() => !viewingId);
   const [addressDraft, setAddressDraft] = useState("");
   const [pendingAddressConfirm, setPendingAddressConfirm] = useState<{
     queryAddress: string;
@@ -311,23 +377,25 @@ export function ViewingChatApp() {
     void (async () => {
       const claim = await claimAccountThreads(userId);
       await pullCloudThreads(userId);
+      if (viewingId) await hydrateViewingThread(viewingId, userId);
       if (cancelled) return;
       refreshLocal();
       if (claim.blocked > 0 && !sessionStorage.getItem("kf.claim.notice")) {
         sessionStorage.setItem("kf.claim.notice", "1");
         setStatus(claimNoticeRef.current);
       }
+      if (viewingId) {
+        setActiveId(viewingId);
+        setThreadReady(true);
+        return;
+      }
       const threadId = searchParams.get("thread");
-      if (threadId) setActiveId(threadId);
-      if (searchParams.get("share") !== "1") return;
-      if (threadId) setActiveId(threadId);
-      window.setTimeout(() => requestShareRef.current(), 0);
-      router.replace(threadId ? `/?thread=${threadId}` : "/");
+      if (threadId) router.replace(`/viewings/${threadId}`);
     })();
     return () => {
       cancelled = true;
     };
-  }, [userId, searchParams, router]);
+  }, [userId, searchParams, router, viewingId]);
 
   useEffect(() => {
     if (!userId || !activeId) return;
@@ -418,16 +486,22 @@ export function ViewingChatApp() {
   useEffect(() => {
     const stored = listLocalThreads();
     setThreads(stored);
-    const savedId = readActiveThreadId();
-    if (savedId && stored.some((thread) => thread.id === savedId)) {
-      setActiveId(savedId);
-      const found = stored.find((thread) => thread.id === savedId);
+    if (viewingId) {
+      setActiveId(viewingId);
+      const found = stored.find((thread) => thread.id === viewingId);
       if (found) setAddressDraft(found.address);
-    } else {
-      const draft = readAddressPinDraft();
-      if (draft) {
-        setAddressDraft(draft.queryAddress);
-        setPendingAddressConfirm(pendingFromPinDraft(draft));
+    } else if (!startOnly) {
+      const savedId = readActiveThreadId();
+      if (savedId && stored.some((thread) => thread.id === savedId)) {
+        setActiveId(savedId);
+        const found = stored.find((thread) => thread.id === savedId);
+        if (found) setAddressDraft(found.address);
+      } else {
+        const draft = readAddressPinDraft();
+        if (draft) {
+          setAddressDraft(draft.queryAddress);
+          setPendingAddressConfirm(pendingFromPinDraft(draft));
+        }
       }
     }
     const mq = window.matchMedia("(max-width: 767px)");
@@ -455,7 +529,7 @@ export function ViewingChatApp() {
       mq.removeEventListener("change", syncViewport);
       subscription.unsubscribe();
     };
-  }, []);
+  }, [startOnly, viewingId]);
 
   useEffect(() => {
     if (!restoredView.current) {
@@ -527,6 +601,10 @@ export function ViewingChatApp() {
     ) {
       closeMobileOverlays();
       setMobileNavTab(null);
+      return;
+    }
+    if (viewingId) {
+      router.push("/");
       return;
     }
     startNewProperty();
@@ -720,6 +798,10 @@ export function ViewingChatApp() {
       setStatus(c.needAddress);
       return;
     }
+    if (startOnly && !userId) {
+      setStatus(c.syncRetry);
+      return;
+    }
     const pool = listLocalThreads().filter((thread) =>
       userId ? thread.ownerUserId === userId || !thread.ownerUserId : !thread.ownerUserId,
     );
@@ -729,10 +811,16 @@ export function ViewingChatApp() {
         sameViewingAddress(thread.normalizedAddress ?? "", trimmed),
     );
     if (duplicate) {
-      setActiveId(duplicate.id);
-      setAddressDraft(duplicate.address);
       setPendingAddressConfirm(null);
       setAddressCue(false);
+      if (startOnly) {
+        const exists = await fetch(`/api/viewing-chat/threads/${duplicate.id}`);
+        if (exists.ok) router.replace(`/viewings/${duplicate.id}`);
+        else setStatus(c.syncRetry);
+        return;
+      }
+      setActiveId(duplicate.id);
+      setAddressDraft(duplicate.address);
       return;
     }
     if (userId) {
@@ -755,37 +843,15 @@ export function ViewingChatApp() {
       }
     }
     const market = inferAgendaMarket(trimmed);
-    const opening = buildOpeningBubble(trimmed, locale as Locale);
-    const seedRecord = createEmptyPropertyRecord({
-      address: trimmed,
-      mode: "collecting",
-      fields: {
-        address: {
-          fieldId: "address",
-          value: trimmed,
-          status: "confirmed",
-          confidence: 0.95,
-          sourceMessageId: null,
-          rawText: trimmed,
-          updatedAt: new Date().toISOString(),
-        },
-      },
-    });
-    const thread = createLocalThread(trimmed, [opening.message], null);
+    // Confirm address first — do not seed empty chat, SOP fields, or "already viewed" copy.
+    const thread = createLocalThread(trimmed, [], null);
     patchLocalThread(thread.id, {
-      stage: "viewing_preparation",
       normalizedAddress: trimmed,
       skippedSources: true,
-      agendaActiveId: fieldIdToAgenda(opening.focusFieldIds[0]),
-      agendaSkippedIds: [],
       agendaMarket: market,
-      propertyRecord: seedRecord,
-      propertyEvidence: [],
-      collectionSkippedFields: [],
-      collectionFocusFieldIds: opening.focusFieldIds,
-      lastTurnChanges: [],
-      conversationStatus: "collecting",
-      turnWarnings: [],
+      briefing: null,
+      reportNotesFingerprint: null,
+      report: null,
       ...(sitePin ? { sitePin } : {}),
     });
     refreshLocal();
@@ -801,7 +867,6 @@ export function ViewingChatApp() {
     setTurnErrorActions([]);
     setConflicts([]);
 
-    void enrichAddressIntel(thread.id, trimmed, seedRecord, place);
     if (userId) {
       patchLocalThread(thread.id, { cloud: { state: "syncing" }, ownerUserId: userId });
       const creating = fetch("/api/viewing-chat/threads", {
@@ -811,13 +876,12 @@ export function ViewingChatApp() {
           threadId: thread.id,
           address: trimmed,
           clientUpdatedAt: new Date().toISOString(),
-          messages: [opening.message],
+          messages: [],
           chatState: {
             v: 1,
             normalizedAddress: trimmed,
-            stage: "viewing_preparation",
-            conversationStatus: "collecting",
-            propertyRecord: seedRecord,
+            briefing: null,
+            reportNotesFingerprint: null,
             ...(sitePin ? { sitePin } : {}),
           },
         }),
@@ -832,11 +896,17 @@ export function ViewingChatApp() {
           },
         });
         refreshLocal();
+        if (startOnly && response.ok) router.replace(`/viewings/${thread.id}`);
+        else if (startOnly && response.status === 402) setProLimitOpen(true);
+        else if (startOnly) setStatus(c.syncRetry);
       }).catch(() => {
         patchLocalThread(thread.id, { cloud: { state: "failed" }, ownerUserId: userId });
         refreshLocal();
+        if (startOnly) setStatus(c.syncRetry);
       });
       threadCreations.current.set(thread.id, creating);
+    } else if (startOnly) {
+      setStatus(c.syncRetry);
     }
   }
 
@@ -1160,14 +1230,20 @@ export function ViewingChatApp() {
     index: number,
     region: AnalyticsRegion,
   ) {
-    const candidate = candidateFromSuggestion(suggestion, suggestion.label);
+    const split = splitAddressQuery(addressDraft || suggestion.label);
+    const labeled = {
+      ...suggestion,
+      label: withUnitLabel(suggestion.label, split.unit),
+      formatted: withUnitLabel(suggestion.formatted || suggestion.label, split.unit),
+    };
+    const candidate = candidateFromSuggestion(labeled, labeled.label);
     if (!candidate) {
       setStatus(t.address.suggestError);
       return;
     }
     const source = suggestion.source;
     const next = {
-      queryAddress: suggestion.label,
+      queryAddress: labeled.label,
       candidate,
       source,
       region,
@@ -1203,10 +1279,73 @@ export function ViewingChatApp() {
     });
   }
 
-  function onCommitAddressDraft(label: string) {
+  async function onCommitAddressDraft(label: string) {
     const trimmed = label.trim();
     if (!trimmed) return;
-    setStatus(t.address.suggestEmpty);
+    setStatus(t.address.suggestLoading);
+    try {
+      const response = await fetch(
+        `/api/address-lookup?q=${encodeURIComponent(trimmed)}&locale=${encodeURIComponent(locale)}`,
+      );
+      const body = (await response.json().catch(() => ({}))) as AddressLookupPayloadLike & {
+        error?: string;
+        code?: string;
+      };
+      if (!response.ok) {
+        setStatus(t.address.suggestEmpty);
+        return;
+      }
+      const candidate = buildAddressConfirmationCandidate(body, trimmed);
+      if (!candidate || candidate.lat == null || candidate.lng == null) {
+        setStatus(t.address.suggestEmpty);
+        return;
+      }
+      const region: AnalyticsRegion =
+        candidate.market === "US" || candidate.market === "TW" || candidate.market === "CA"
+          ? candidate.market
+          : "OTHER";
+      const sourceRaw = (candidate.source || "").toLowerCase();
+      const source: AddressSource = sourceRaw.includes("nominatim") || sourceRaw.includes("osm")
+        ? "nominatim"
+        : sourceRaw.includes("photon")
+          ? "photon"
+          : sourceRaw.includes("bc")
+            ? "bc_geocoder"
+            : "google";
+      const next = {
+        queryAddress: trimmed,
+        candidate,
+        source,
+        region,
+        droppedPin: null,
+        payload: {
+          displayAddress: candidate.displayAddress,
+          propertyId: candidate.propertyId ?? undefined,
+          market: candidate.market ?? undefined,
+          source: candidate.source ?? undefined,
+          details: { lat: candidate.lat, lng: candidate.lng },
+        },
+      };
+      setPendingAddressConfirm(next);
+      if (candidate.needsMapPin) {
+        writeAddressPinDraft({
+          queryAddress: next.queryAddress,
+          displayAddress: candidate.displayAddress,
+          hintLat: candidate.lat ?? COQUITLAM_PORT_MOODY_CENTER.latitude,
+          hintLng: candidate.lng ?? COQUITLAM_PORT_MOODY_CENTER.longitude,
+          picked: null,
+          propertyId: candidate.propertyId,
+          source,
+          region,
+        });
+      } else {
+        clearAddressPinDraft();
+      }
+      setAddressDraft(candidate.displayAddress);
+      setStatus("");
+    } catch {
+      setStatus(t.address.suggestError);
+    }
   }
 
   async function submitTurn(payload: {
@@ -1570,7 +1709,7 @@ export function ViewingChatApp() {
     const target = active ?? (queryThread ? listLocalThreads().find((item) => item.id === queryThread) ?? null : null);
     if (!target) return;
     if (!configured || !userId) {
-      router.push(`/login?next=${encodeURIComponent(`/?thread=${target.id}&share=1`)}`);
+      router.push(`/login?next=${encodeURIComponent(`/viewings/${target.id}`)}`);
       return;
     }
     if (target.cloud?.state && target.cloud.state !== "synced") {
@@ -1600,6 +1739,10 @@ export function ViewingChatApp() {
   claimNoticeRef.current = c.claimLimitNotice;
 
   function selectThread(id: string) {
+    if ((viewingId || startOnly) && id !== viewingId) {
+      router.push(`/viewings/${id}`);
+      return;
+    }
     setActiveId(id);
     setReplyTo(null);
     closeChatSearch();
@@ -1678,9 +1821,6 @@ export function ViewingChatApp() {
         props: { count: compareSelectedIds.length as 2 | 3 | 4 | 5, source: "chat_history" },
       });
     }
-    router.push(
-      `/compare?ids=${compareSelectedIds.map((id) => encodeURIComponent(id)).join(",")}`,
-    );
   }
 
   function closeHistoryDrawer() {
@@ -1699,6 +1839,10 @@ export function ViewingChatApp() {
     void removeMediaByThread(id);
     refreshLocal();
     if (activeId === id) {
+      if (viewingId) {
+        router.push("/");
+        return;
+      }
       setActiveId(null);
       setAddressDraft("");
       setStatus("");
@@ -1863,6 +2007,10 @@ export function ViewingChatApp() {
           setMediaOpen(false);
         }}
         onNew={() => {
+          if (viewingId) {
+            router.push("/");
+            return;
+          }
           setSearchOpen(false);
           setMediaOpen(false);
           if (shouldStartNewViewing(Boolean(active))) {
@@ -1893,7 +2041,7 @@ export function ViewingChatApp() {
       />
 
       <section className="mx-auto flex min-h-0 min-w-0 max-w-[1200px] flex-1 flex-col">
-        {active ? (
+        {active && !startOnly ? (
           <>
             <header className="relative z-40 flex shrink-0 items-center gap-1 border-b border-black/8 bg-[#FAF6F1]/95 px-2 py-2.5 pt-[max(0.65rem,env(safe-area-inset-top))] backdrop-blur sm:px-3">
               <button
@@ -1976,7 +2124,7 @@ export function ViewingChatApp() {
                     {c.guestLocalNotice.replace("{days}", String(guestDaysLeft(active)))}{" "}
                     <a
                       className="underline"
-                      href={`/login?next=${encodeURIComponent(`/?thread=${active.id}`)}`}
+                      href={`/login?next=${encodeURIComponent(`/viewings/${active.id}`)}`}
                     >
                       {c.guestLocalSave}
                     </a>
@@ -2052,7 +2200,6 @@ export function ViewingChatApp() {
               <ChatMessageList
                 messages={active.messages}
                 emptyHint={sourceBusy ? c.sourceExtracting : c.emptyChatCapture}
-                onShareReport={requestShare}
                 shareLabel={c.shareReport}
                 replyLabel={c.reply}
                 cancelLabel={c.replyMenuCancel}
@@ -2076,7 +2223,6 @@ export function ViewingChatApp() {
               />
             </div>
             <div className="shrink-0 border-t border-black/8 bg-[#FAF6F1]">
-              {userId && active.cloud?.state === "synced" ? <ChatCards viewingId={active.id} /> : null}
               <input
                 ref={photoInputRef}
                 type="file"
@@ -2422,6 +2568,23 @@ export function ViewingChatApp() {
               ) : null}
             </div>
           </>
+        ) : viewingId ? (
+          <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
+            <div>
+              <p className="text-[14px] font-semibold text-[#6B7280]">
+                {threadReady ? "這則聊天讀不到。" : "正在打開這則聊天…"}
+              </p>
+              {threadReady ? (
+                <button
+                  type="button"
+                  onClick={() => router.push("/")}
+                  className="mt-4 text-[13px] font-bold underline"
+                >
+                  {t.loginPage.backHome}
+                </button>
+              ) : null}
+            </div>
+          </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto overscroll-contain px-5 py-8 pt-[max(2rem,env(safe-area-inset-top))]">
             <div className="w-full max-w-md space-y-5">
@@ -2550,6 +2713,10 @@ export function ViewingChatApp() {
         onOpenCompare={() => void openCompare()}
         maxItems={compareItemMax}
         onStartNew={() => {
+          if (viewingId) {
+            router.push("/");
+            return;
+          }
           closeMobileOverlays();
           setMobileNavTab("new");
           if (shouldStartNewViewing(Boolean(active))) {

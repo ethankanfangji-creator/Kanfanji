@@ -14,7 +14,7 @@ Last updated: 2026-09-19. Living inventory for agents and humans.
 | Local draft | IndexedDB (`lib/idb`, `lib/draft-db`) | Guests can create/read without login |
 | AI | OpenAI (`gpt-4o-mini`, Whisper) | **Server routes only** via `lib/ai-boundary` + `AiService` |
 | Geocoding | Google Places (New) for CA suggest; TW Geocode uses `language=zh-TW` (zh-CN when locale is zh-Hans) and `region=tw` | **Server only.** `GOOGLE_MAPS_API_KEY` never `NEXT_PUBLIC_` |
-| Property intel | Property facts pipeline → projected intel; BC/Google/OSM/Bing evidence (+ optional ATTOM); DB cache | `/api/property-facts`, `/api/property-intel` — no crawling; LLM does not invent facts |
+| Property intel | Property facts pipeline → projected intel; BC/Google/OSM/Bing evidence (+ optional ATTOM); DB cache | `/api/property-facts`, `/api/property-intel` — no crawling. Viewing briefing also uses OpenAI web_search for neighborhood tips. |
 | Payments | Stripe Checkout + webhook | Server secrets only |
 | Analytics | PostHog (`posthog-js` / `posthog-node`) | Action counts only. No-op when `NEXT_PUBLIC_POSTHOG_KEY` is unset. Product analytics are processed by PostHog in the United States (`https://us.i.posthog.com`). Supabase stays in ca-central-1. |
 | i18n | `zh-Hant` / `zh-Hans` / `en` / `th` | `lib/i18n/*` — no hardcoded product copy in new UI |

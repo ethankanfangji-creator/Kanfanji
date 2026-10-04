@@ -7,8 +7,14 @@ import {
   nominatimAdminCompatible,
   nominatimLooksLikeNonAddress,
   normalizeTwAdminText,
+  queryNamesPlace,
+  rankCanadianSuggestions,
+  regionFromIpCountry,
+  resolveSuggestRegion,
+  splitAddressQuery,
   suggestAddresses,
   twAdminDistrictMismatch,
+  withUnitLabel,
   type AddressSuggestion,
 } from "./address-suggest";
 
@@ -29,6 +35,176 @@ describe("suggestAddresses", () => {
   });
 });
 
+describe("splitAddressQuery / withUnitLabel", () => {
+  it("splits Unit prefix from the street query", () => {
+    expect(splitAddressQuery("Unit 5, 2143 Spring St, Port Moody")).toEqual({
+      unit: "Unit 5",
+      streetQuery: "2143 Spring St, Port Moody",
+      houseNumber: "2143",
+    });
+  });
+
+  it("splits dashed unit-house forms", () => {
+    expect(splitAddressQuery("#1202-2143 Spring St")).toMatchObject({
+      unit: "1202",
+      streetQuery: "2143 Spring St",
+      houseNumber: "2143",
+    });
+  });
+
+  it("leaves plain civic addresses alone", () => {
+    expect(splitAddressQuery("2143 Spring Street, Port Moody")).toEqual({
+      unit: null,
+      streetQuery: "2143 Spring Street, Port Moody",
+      houseNumber: "2143",
+    });
+  });
+
+  it("prefixes confirmed labels with Unit", () => {
+    expect(withUnitLabel("2143 Spring St, Port Moody, BC", "5")).toBe(
+      "Unit 5, 2143 Spring St, Port Moody, BC",
+    );
+    expect(withUnitLabel("2143 Spring St, Port Moody, BC", "Unit 5")).toBe(
+      "Unit 5, 2143 Spring St, Port Moody, BC",
+    );
+  });
+});
+
+describe("queryNamesPlace", () => {
+  it("does not treat street names that reuse province/city words as places", () => {
+    expect(queryNamesPlace("7428 Alberta Street")).toBeNull();
+    expect(queryNamesPlace("206 - 7428 Alberta Street")).toBeNull();
+    expect(queryNamesPlace("100 Victoria Drive")).toBeNull();
+    expect(queryNamesPlace("12 Richmond St")).toBeNull();
+  });
+
+  it("still detects real city/province tokens", () => {
+    expect(queryNamesPlace("Edmonton")).toBe("edmonton");
+    expect(queryNamesPlace("123 Main St, Alberta")).toBe("alberta");
+    expect(queryNamesPlace("Burnaby")).toBe("burnaby");
+  });
+});
+
+describe("rankCanadianSuggestions", () => {
+  const springStreet: AddressSuggestion = {
+    id: "street-1",
+    label: "Spring Street, Port Moody, BC",
+    title: "Spring Street",
+    street: "Spring Street",
+    city: "Port Moody",
+    province: "BC",
+    country: "Canada",
+    lat: 49.28,
+    lng: -122.83,
+    source: "photon",
+    locationPrecision: "street",
+  };
+
+  const metroBias = { latitude: 49.28, longitude: -122.91, radiusMeters: 45_000 };
+
+  it("keeps unit queries matching the civic street number", () => {
+    const ranked = rankCanadianSuggestions(
+      "Unit 5, 2143 Spring St, Port Moody",
+      [springStreet],
+      undefined,
+      5,
+    );
+    expect(ranked).toHaveLength(1);
+    expect(ranked[0]?.label).toMatch(/Unit 5/i);
+    expect(ranked[0]?.label).toMatch(/2143/i);
+    expect(ranked[0]?.houseNumberRetained).toBe(true);
+  });
+
+  it("soft-falls back instead of returning empty when house number misses", () => {
+    const other: AddressSuggestion = {
+      ...springStreet,
+      id: "other",
+      label: "Barnet Highway, Port Moody, BC",
+      title: "Barnet Highway",
+      street: "Barnet Highway",
+      houseNumber: "900",
+      locationPrecision: "civic",
+    };
+    const ranked = rankCanadianSuggestions("9999 Nowhere Ave, Port Moody", [other], undefined, 5);
+    expect(ranked.length).toBeGreaterThan(0);
+  });
+
+  it("prefers Alberta Street Vancouver over same house number in Alberta province", () => {
+    const vancouver: AddressSuggestion = {
+      id: "van",
+      label: "7428 Alberta Street, Vancouver, British Columbia",
+      title: "7428 Alberta Street",
+      street: "Alberta Street",
+      houseNumber: "7428",
+      city: "Vancouver",
+      province: "BC",
+      country: "Canada",
+      lat: 49.21,
+      lng: -123.1,
+      source: "google",
+      locationPrecision: "civic",
+    };
+    const edmonton: AddressSuggestion = {
+      id: "edm",
+      label: "7428 106 Street North-west, Edmonton, Alberta",
+      title: "7428 106 Street North-west",
+      street: "106 Street North-west",
+      houseNumber: "7428",
+      city: "Edmonton",
+      province: "Alberta",
+      country: "Canada",
+      lat: 53.54,
+      lng: -113.5,
+      source: "google",
+      locationPrecision: "civic",
+    };
+    const grandePrairie: AddressSuggestion = {
+      id: "gp",
+      label: "7428 103A Street, Grande Prairie, Alberta",
+      title: "7428 103A Street",
+      street: "103A Street",
+      houseNumber: "7428",
+      city: "Grande Prairie",
+      province: "Alberta",
+      country: "Canada",
+      lat: 55.17,
+      lng: -118.8,
+      source: "google",
+      locationPrecision: "civic",
+    };
+    const ranked = rankCanadianSuggestions(
+      "Unit 206, 7428 Alberta Street",
+      [edmonton, grandePrairie, vancouver],
+      metroBias,
+      5,
+    );
+    expect(ranked.length).toBeGreaterThan(0);
+    expect(ranked.every((row) => /Alberta Street/i.test(row.label))).toBe(true);
+    expect(ranked.some((row) => /Edmonton|Grande Prairie|106 Street/i.test(row.label))).toBe(false);
+    expect(ranked[0]?.label).toMatch(/Unit 206/i);
+  });
+
+  it("matches a partial street prefix like Albert → Alberta Street", () => {
+    const albertaStreet: AddressSuggestion = {
+      id: "van-st",
+      label: "Alberta Street, Vancouver, British Columbia",
+      title: "Alberta Street",
+      street: "Alberta Street",
+      city: "Vancouver",
+      province: "BC",
+      country: "Canada",
+      lat: 49.21,
+      lng: -123.1,
+      source: "photon",
+      locationPrecision: "street",
+    };
+    const ranked = rankCanadianSuggestions("7428 Albert", [albertaStreet], metroBias, 5);
+    expect(ranked).toHaveLength(1);
+    expect(ranked[0]?.label).toMatch(/7428/i);
+    expect(ranked[0]?.label).toMatch(/Alberta Street/i);
+  });
+});
+
 describe("detectSuggestRegion", () => {
   it("detects US street + ZIP with comma after state", () => {
     expect(detectSuggestRegion("2436 S Leah St, Visalia, CA, 93292")).toBe("US");
@@ -42,6 +218,26 @@ describe("detectSuggestRegion", () => {
   it("detects Taiwan cues", () => {
     expect(detectSuggestRegion("台北市信義路五段7號")).toBe("TW");
     expect(detectSuggestRegion("台北市市府路1號")).toBe("TW");
+  });
+});
+
+describe("resolveSuggestRegion", () => {
+  it("maps IP country codes", () => {
+    expect(regionFromIpCountry("tw")).toBe("TW");
+    expect(regionFromIpCountry("US")).toBe("US");
+    expect(regionFromIpCountry("CA")).toBe("CA");
+    expect(regionFromIpCountry("JP")).toBeNull();
+  });
+
+  it("uses IP country when the query has no place cues", () => {
+    expect(resolveSuggestRegion("1200 Westwood", "TW")).toBe("TW");
+    expect(resolveSuggestRegion("1200 Westwood", "US")).toBe("US");
+    expect(resolveSuggestRegion("1200 Westwood", null)).toBe("OTHER");
+  });
+
+  it("lets typed place cues override IP country", () => {
+    expect(resolveSuggestRegion("123 Main St, Vancouver, BC", "TW")).toBe("CA");
+    expect(resolveSuggestRegion("台北市信義路五段7號", "CA")).toBe("TW");
   });
 });
 

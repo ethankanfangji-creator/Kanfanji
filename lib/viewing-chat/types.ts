@@ -54,6 +54,8 @@ export type ChatReportSnapshot = {
   checklist: Array<{ id: string; question: string; answer: string; status: "ok" | "risk" | "unknown" }>;
   summary?: string;
   generatedAt: string;
+  /** Fingerprint of user notes used to build this report — mismatch means stale. */
+  notesFingerprint?: string;
 };
 
 export type ChatMediaRef = {
@@ -167,6 +169,12 @@ export type ViewingChatThread = {
     error?: string;
     revision?: number;
   };
+  /** Address-only prep product (smell / look / ask). Not a note. */
+  briefing?: import("./briefing").ViewingBriefing | null;
+  /** Optional listing page URL used to ground property-specific briefing tips. */
+  listingUrl?: string | null;
+  /** Fingerprint of notes that produced the current report, if any. */
+  reportNotesFingerprint?: string | null;
 };
 
 export const DEFAULT_QUESTION_BANK: Array<Omit<QuestionBankItem, "answer" | "justDiscussed">> = [

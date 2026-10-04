@@ -65,6 +65,8 @@ export async function searchPropertySnippets(
             `${address} BC Assessment`,
             `${address} realtor.ca`,
             `${address} strata fees reviews`,
+            `${address} neighborhood parks transit`,
+            `${address} SkyTrain West Coast Express walk score`,
           ];
 
   try {

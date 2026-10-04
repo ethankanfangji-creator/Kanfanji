@@ -1,10 +1,10 @@
 import { Suspense } from "react";
-import { ViewingChatApp } from "@/components/viewing-chat/ViewingChatApp";
+import { ViewingChatIndex } from "@/components/home/ViewingChatIndex";
 
 export default function Home() {
   return (
     <Suspense fallback={null}>
-      <ViewingChatApp />
+      <ViewingChatIndex />
     </Suspense>
   );
 }

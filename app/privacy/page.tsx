@@ -40,10 +40,10 @@ export default function PrivacyPage() {
       <ul className="mt-2 list-disc pl-5">
         <li>Supabase — ca-central-1 ({english ? "account, cloud viewings" : "帳號與雲端看房"})</li>
         <li>Vercel ({english ? "application hosting" : "應用程式託管"})</li>
-        <li>OpenAI ({english ? "AI turns you consent to" : "你同意後的 AI 處理"})</li>
+        <li>OpenAI ({english ? "AI turns you consent to, including web search for viewing tips" : "你同意後的 AI 處理（含看點用的網路搜尋）"})</li>
         <li>Stripe ({english ? "payments" : "付款"})</li>
         <li>Google Maps Platform ({english ? "address suggestions and map facts" : "地址建議與地圖資訊"})</li>
-        <li>Bing ({english ? "public web snippets for address facts" : "地址情報的公開網頁摘要"})</li>
+        <li>Bing ({english ? "optional public web snippets for address facts" : "選用的地址情報公開網頁摘要"})</li>
         <li>ATTOM ({english ? "US property facts when configured" : "美國物件資料（有設定時）"})</li>
         <li>PostHog（{english ? "United States" : "美國"}，{POSTHOG_HOST}）</li>
       </ul>

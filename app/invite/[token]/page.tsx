@@ -54,7 +54,7 @@ export default function AcceptInvitePage({
         setMessage(body.error || "邀請無法接受");
         return;
       }
-      router.replace(`/?thread=${body.viewingId}`);
+      router.replace(`/viewings/${body.viewingId}`);
     } catch {
       setStatus("error");
       setMessage("網路錯誤，請稍後再試");

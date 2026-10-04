@@ -55,7 +55,13 @@ const STREET_SUFFIX: Record<string, string> = {
   pl: "pl",
   crescent: "cres",
   cres: "cres",
+  hwy: "hwy",
+  highway: "hwy",
 };
+
+/** Token after a place name that means the place word is actually a street name. */
+const STREET_SUFFIX_AFTER_PLACE =
+  /^(?:street|st|avenue|ave|road|rd|drive|dr|boulevard|blvd|lane|ln|way|court|ct|place|pl|crescent|cres|hwy|highway)\b/i;
 
 export type SuggestBias = {
   latitude: number;
@@ -80,13 +86,78 @@ export function isPreciseHousePoint(row: {
 }
 
 export function queryNamesPlace(query: string): string | null {
-  const match = query.match(NAMED_CA_PLACE);
-  return match ? match[0].toLowerCase() : null;
+  const match = NAMED_CA_PLACE.exec(query);
+  if (!match || match.index == null) return null;
+  const after = query.slice(match.index + match[0].length).trimStart();
+  // "Alberta Street" / "Victoria Drive" are streets, not the city/province.
+  if (after && STREET_SUFFIX_AFTER_PLACE.test(after)) return null;
+  return match[0].toLowerCase();
 }
 
 export function parseHouseNumber(query: string): string | null {
   const match = query.trim().match(/^(\d+[a-z]?)\b/i);
   return match ? match[1].toLowerCase() : null;
+}
+
+const UNIT_TOKEN_RE =
+  /(\d+\s*[樓层層]|unit\s*#?\s*[\w-]+|apt\.?\s*#?\s*[\w-]+|suite\s*#?\s*[\w-]+|#\s*[\w-]+\b|之\d+|戶\s*[\w-]+)/i;
+
+/**
+ * Split a typed address into unit + street query so suggest ranking
+ * does not treat "#1202" or "Unit 5" as the civic house number.
+ */
+export function splitAddressQuery(query: string): {
+  unit: string | null;
+  streetQuery: string;
+  houseNumber: string | null;
+} {
+  const trimmed = query.trim().replace(/\s+/g, " ");
+  if (!trimmed) return { unit: null, streetQuery: "", houseNumber: null };
+
+  let unit: string | null = null;
+  let streetQuery = trimmed;
+
+  // Patterns like "1202-2143 Spring St", "#1202-2143 Spring St", or "1202 – 2143 Spring"
+  const dashed = trimmed.match(/^#?\s*(\d+[a-z]?)\s*[-–—]\s*(\d+[a-z]?\s+.+)$/i);
+  if (dashed) {
+    unit = dashed[1]!;
+    streetQuery = dashed[2]!.trim();
+  } else {
+    const unitMatch = trimmed.match(UNIT_TOKEN_RE);
+    if (unitMatch?.[0]) {
+      unit = unitMatch[0].trim();
+      streetQuery = trimmed
+        .replace(unitMatch[0], " ")
+        .replace(/^[,\s/-]+|[,\s/-]+$/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+  }
+
+  const houseNumber = parseHouseNumber(streetQuery);
+  return { unit, streetQuery: streetQuery || trimmed, houseNumber };
+}
+
+/** Prefixe a confirmed street address with a unit token. */
+export function withUnitLabel(streetAddress: string, unit: string | null | undefined): string {
+  const street = streetAddress.trim();
+  const u = (unit ?? "").trim();
+  if (!street || !u) return street;
+  if (street.toLowerCase().includes(u.toLowerCase())) return street;
+  // Chinese floor / 戶 tokens stay as-is; English unit forms normalize to "Unit N".
+  if (/[樓层層戶之]/.test(u)) return `${u}${street}`;
+  const normalized = /^unit\b/i.test(u)
+    ? u.replace(/^unit\s*#?\s*/i, "Unit ")
+    : /^#/.test(u)
+      ? `Unit ${u.replace(/^#\s*/, "")}`
+      : /^(apt|suite)\b/i.test(u)
+        ? u.replace(/^(apt|suite)\.?\s*#?\s*/i, (_, kind: string) =>
+            kind.toLowerCase().startsWith("apt") ? "Apt " : "Suite ",
+          )
+        : /^\d+[a-z]?$/i.test(u)
+          ? `Unit ${u}`
+          : u;
+  return `${normalized}, ${street}`;
 }
 
 export function streetKey(text: string): string {
@@ -99,6 +170,18 @@ export function streetKey(text: string): string {
     .map((word) => STREET_SUFFIX[word] ?? word)
     .join(" ")
     .trim();
+}
+
+/** Equal, substring, or first-token prefix (Albert → Alberta St). */
+export function streetNameMatches(wanted: string, candidate: string): boolean {
+  if (!wanted || !candidate) return false;
+  if (wanted === candidate) return true;
+  if (wanted.includes(candidate) || candidate.includes(wanted)) return true;
+  const wantedHead = wanted.split(/\s+/)[0] ?? "";
+  const candidateHead = candidate.split(/\s+/)[0] ?? "";
+  if (wantedHead.length >= 3 && candidateHead.startsWith(wantedHead)) return true;
+  if (candidateHead.length >= 3 && wantedHead.startsWith(candidateHead)) return true;
+  return false;
 }
 
 function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -152,13 +235,15 @@ export function rankCanadianSuggestions(
   bias: SuggestBias | undefined,
   limit: number,
 ): AddressSuggestion[] {
-  const houseNumber = parseHouseNumber(query);
-  const namedForStreet = queryNamesPlace(query);
+  const split = splitAddressQuery(query);
+  const houseNumber = split.houseNumber;
+  const rankQuery = split.streetQuery;
+  const namedForStreet = queryNamesPlace(rankQuery);
   const streetQuery = namedForStreet
-    ? query.replace(new RegExp(namedForStreet.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "ig"), " ")
-    : query;
+    ? rankQuery.replace(new RegExp(namedForStreet.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "ig"), " ")
+    : rankQuery;
   const wantedStreet = streetKey(streetQuery);
-  const named = queryNamesPlace(query);
+  const named = queryNamesPlace(rankQuery) || queryNamesPlace(query);
   let pool = rows.filter((row) => {
     if (bias && typeof row.lat === "number" && typeof row.lng === "number") {
       const radius = bias.radiusMeters ?? METRO_VANCOUVER_BIAS.radiusMeters;
@@ -181,29 +266,81 @@ export function rankCanadianSuggestions(
         : Number.POSITIVE_INFINITY;
     return leftDistance - rightDistance;
   };
+  const attachUnit = (row: AddressSuggestion): AddressSuggestion => {
+    if (!split.unit) return row;
+    const label = withUnitLabel(row.label, split.unit);
+    const formatted = withUnitLabel(row.formatted || row.label, split.unit);
+    const title = row.title ? withUnitLabel(row.title, split.unit) : row.title;
+    return { ...row, label, formatted, title };
+  };
   if (houseNumber) {
+    const rowStreetKey = (row: AddressSuggestion) => streetKey(row.street || row.title || row.label || "");
+    const hasStreetToken = wantedStreet.length > 0;
     const points = pool.filter(
       (row) => row.houseNumber?.toLowerCase() === houseNumber && !row.houseNumberRetained,
     );
-    if (points.length > 0) {
+    const streetMatchedPoints = hasStreetToken
+      ? points.filter((row) => streetNameMatches(wantedStreet, rowStreetKey(row)))
+      : points;
+    if (streetMatchedPoints.length > 0) {
+      return [...streetMatchedPoints]
+        .sort(sortByDistance)
+        .slice(0, limit)
+        .map((row) =>
+          attachUnit({
+            ...row,
+            locationPrecision: "civic" as const,
+            houseNumberRetained: undefined,
+          }),
+        );
+    }
+    // No street token typed: keep all civic house-number hits (biased pool).
+    if (!hasStreetToken && points.length > 0) {
       return [...points]
         .sort(sortByDistance)
         .slice(0, limit)
-        .map((row) => ({ ...row, locationPrecision: "civic" as const, houseNumberRetained: undefined }));
+        .map((row) =>
+          attachUnit({
+            ...row,
+            locationPrecision: "civic" as const,
+            houseNumberRetained: undefined,
+          }),
+        );
     }
     const streets = pool.filter((row) => {
       if (row.houseNumber) return false;
-      const street = streetKey(row.street || row.title || "");
-      return (
-        street.length > 0 &&
-        (street === wantedStreet || wantedStreet.includes(street) || street.includes(wantedStreet))
-      );
+      const street = rowStreetKey(row);
+      return street.length > 0 && streetNameMatches(wantedStreet, street);
     });
     const nearest = [...streets].sort(sortByDistance)[0];
-    return nearest ? [retainHouseNumber(nearest, houseNumber)] : [];
+    if (nearest) return [attachUnit(retainHouseNumber(nearest, houseNumber))];
+    // Street-related civic rows (wrong number) still beat unrelated soft noise.
+    if (hasStreetToken) {
+      const streetRelated = pool.filter((row) => streetNameMatches(wantedStreet, rowStreetKey(row)));
+      if (streetRelated.length > 0) {
+        return [...streetRelated]
+          .sort(sortByDistance)
+          .slice(0, limit)
+          .map((row) =>
+            attachUnit(
+              row.houseNumber?.toLowerCase() === houseNumber
+                ? {
+                    ...row,
+                    locationPrecision: "civic" as const,
+                    houseNumberRetained: undefined,
+                  }
+                : retainHouseNumber(row, houseNumber),
+            ),
+          );
+      }
+    }
+    // Soft fallback: nearest in-bias rows only when nothing street-related exists.
+    const soft = [...pool].sort(sortByDistance).slice(0, limit).map(attachUnit);
+    if (soft.length > 0) return soft;
+    return [];
   }
   pool = [...pool].sort(sortByDistance);
-  return pool.slice(0, limit);
+  return pool.slice(0, limit).map(attachUnit);
 }
 
 /**
@@ -362,6 +499,28 @@ export function detectSuggestRegion(query: string): SuggestRegion {
   return "OTHER";
 }
 
+/** Map Vercel / CDN IP country codes onto suggest routing regions. */
+export function regionFromIpCountry(country: string | null | undefined): SuggestRegion | null {
+  const code = (country ?? "").trim().toUpperCase();
+  if (code === "TW") return "TW";
+  if (code === "US") return "US";
+  if (code === "CA") return "CA";
+  return null;
+}
+
+/**
+ * Prefer explicit place cues in the query; otherwise fall back to IP country.
+ * Keeps short street-only queries on the right geocoder for local users.
+ */
+export function resolveSuggestRegion(
+  query: string,
+  ipCountry?: string | null,
+): SuggestRegion {
+  const fromText = detectSuggestRegion(query);
+  if (fromText !== "OTHER") return fromText;
+  return regionFromIpCountry(ipCountry) ?? "OTHER";
+}
+
 /** Normalize 台 → 臺 so Taipei/Taichung tokens compare consistently. */
 export function normalizeTwAdminText(text: string): string {
   return text.replace(/台/g, "臺");
@@ -499,62 +658,82 @@ export async function suggestAddresses(
     locale?: string;
     /** Null skips IP / Metro Vancouver bias. Omit to use Metro Vancouver for unnamed Canadian queries. */
     bias?: SuggestBias | null;
+    /** Pre-resolved region (query text + optional IP). Overrides detectSuggestRegion when set. */
+    regionHint?: SuggestRegion;
   },
 ): Promise<AddressSuggestion[]> {
   const trimmed = query.trim();
   if (trimmed.length < 3) return [];
   if (options?.signal?.aborted) return [];
 
+  const split = splitAddressQuery(trimmed);
+  const searchQuery = split.streetQuery.length >= 3 ? split.streetQuery : trimmed;
+
   const limit = Math.min(Math.max(options?.limit ?? 5, 1), 8);
-  const region = detectSuggestRegion(trimmed);
+  const region = options?.regionHint ?? detectSuggestRegion(searchQuery);
   const signal = options?.signal;
   const locale = options?.locale;
+
+  const attachUnitRows = (rows: AddressSuggestion[]) =>
+    split.unit
+      ? rows.map((row) => ({
+          ...row,
+          label: withUnitLabel(row.label, split.unit),
+          formatted: withUnitLabel(row.formatted || row.label, split.unit),
+          title: row.title ? withUnitLabel(row.title, split.unit) : row.title,
+        }))
+      : rows;
 
   // Taiwan stays on its own Google/Nominatim ranking — no Metro Vancouver bias.
   if (region === "TW") {
     if (googleKey()) {
       const google = await suggestViaGoogleAutocomplete(
-        trimmed,
+        searchQuery,
         limit,
         region,
         signal,
         locale,
       );
-      if (isReasonableGoogleAutocomplete(trimmed, google, region)) return google;
+      if (isReasonableGoogleAutocomplete(searchQuery, google, region)) {
+        return attachUnitRows(google);
+      }
 
-      const geocode = await suggestViaGoogleGeocode(trimmed, limit, region, signal, locale);
-      if (geocode.length > 0) return geocode;
+      const geocode = await suggestViaGoogleGeocode(searchQuery, limit, region, signal, locale);
+      if (geocode.length > 0) return attachUnitRows(geocode);
     }
-    return suggestViaNominatim(trimmed, limit, region, signal);
+    return attachUnitRows(await suggestViaNominatim(searchQuery, limit, region, signal));
   }
 
   if (region === "US") {
-    const google = await suggestViaGoogleAutocomplete(trimmed, limit, region, signal);
-    if (google.length > 0) return google;
+    const google = await suggestViaGoogleAutocomplete(searchQuery, limit, region, signal);
+    if (google.length > 0) return attachUnitRows(google);
 
-    const osm = await suggestViaNominatim(trimmed, limit, region, signal);
-    if (osm.length > 0) return osm;
+    const osm = await suggestViaNominatim(searchQuery, limit, region, signal);
+    if (osm.length > 0) return attachUnitRows(osm);
 
-    return suggestViaGoogleGeocode(trimmed, limit, region, signal);
+    return attachUnitRows(await suggestViaGoogleGeocode(searchQuery, limit, region, signal));
   }
 
   // CA and untagged open-house queries. Both sources always run.
   // A typed city wins over IP. Otherwise bias toward the request, or Metro Vancouver.
-  const namedPlace = queryNamesPlace(trimmed);
+  const namedPlace = queryNamesPlace(searchQuery) || queryNamesPlace(trimmed);
   const bias = namedPlace
     ? undefined
     : options?.bias === null
       ? undefined
       : (options?.bias ?? METRO_VANCOUVER_BIAS);
   const upstreamLimit = Math.max(limit, 8);
-  const places = await suggestViaPlacesNewCa(trimmed, upstreamLimit, signal, bias);
-  const photon = await suggestViaPhotonCa(trimmed, upstreamLimit, signal, bias);
+  const places = await suggestViaPlacesNewCa(searchQuery, upstreamLimit, signal, bias);
+  const photon = await suggestViaPhotonCa(searchQuery, upstreamLimit, signal, bias);
+  // Rank with the original query so unit reattach + house number from streetQuery apply.
   const ranked = rankCanadianSuggestions(trimmed, [...places, ...photon], bias, limit);
   if (ranked.some((row) => row.locationPrecision === "civic")) return ranked;
-  const civic = await suggestViaDataBcCivic(trimmed, signal, bias ?? METRO_VANCOUVER_BIAS);
+  const civic = await suggestViaDataBcCivic(searchQuery, signal, bias ?? METRO_VANCOUVER_BIAS);
   if (civic.length > 0) {
     const withCivic = rankCanadianSuggestions(trimmed, [...places, ...photon, ...civic], bias, limit);
-    if (withCivic.some((row) => row.locationPrecision === "civic")) return withCivic;
+    if (withCivic.some((row) => row.locationPrecision === "civic") || withCivic.length > 0) {
+      return withCivic;
+    }
   }
   return ranked;
 }

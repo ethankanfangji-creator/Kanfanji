@@ -15,13 +15,13 @@ import type { AddressService } from "./types";
 export function createServerAddressService(): AddressService {
   return {
     status: () => "ready",
-    async suggest(query, signal, locale, bias) {
+    async suggest(query, signal, locale, bias, regionHint) {
       if (signal?.aborted) {
         const err = new Error("ADDRESS_SUGGEST_ABORTED");
         err.name = "AbortError";
         throw err;
       }
-      return suggestAddresses(query, { limit: 5, signal, locale, bias });
+      return suggestAddresses(query, { limit: 5, signal, locale, bias, regionHint });
     },
     async lookupByAddress(address, signal) {
       if (signal?.aborted) {

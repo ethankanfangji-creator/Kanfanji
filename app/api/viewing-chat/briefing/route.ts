@@ -1,4 +1,3 @@
-import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import {
   AiInputError,
@@ -8,39 +7,23 @@ import {
   resolveAiLocale,
   validateConsent,
 } from "@/lib/ai-boundary/server-entry";
-import { getBriefingPrompt } from "@/lib/prompts/get-system-prompt";
 import { assemblePropertyFacts } from "@/lib/property-facts/orchestrator";
 import {
+  briefingHasContent,
+  coerceViewingBriefing,
   emptyBriefing,
-  isViewingBriefing,
   type ViewingBriefing,
-  type ViewingBriefingPoint,
 } from "@/lib/viewing-chat/briefing";
 import { extractBriefingFoundFacts } from "@/lib/viewing-chat/briefing-facts";
+import {
+  generateAddressBriefing,
+  isBriefingGenerateError,
+} from "@/lib/viewing-chat/generate-briefing";
 import { mergeChatState } from "@/lib/viewing-chat/chat-state";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
 
 export const runtime = "nodejs";
-
-function parsePoints(raw: unknown, allowedSources: Set<string>): ViewingBriefingPoint[] {
-  if (!Array.isArray(raw)) return [];
-  const points: ViewingBriefingPoint[] = [];
-  for (const item of raw) {
-    if (!item || typeof item !== "object") continue;
-    const text = typeof (item as { text?: unknown }).text === "string"
-      ? (item as { text: string }).text.trim()
-      : "";
-    const source = typeof (item as { source?: unknown }).source === "string"
-      ? (item as { source: string }).source.trim()
-      : "";
-    if (!text || !source) continue;
-    if (allowedSources.size > 0 && !allowedSources.has(source)) continue;
-    points.push({ text: text.slice(0, 280), source: source.slice(0, 120) });
-    if (points.length >= 5) break;
-  }
-  return points;
-}
 
 export async function POST(request: Request) {
   try {
@@ -60,80 +43,82 @@ export async function POST(request: Request) {
     let briefing: ViewingBriefing = emptyBriefing(address, sourcesQueried);
     const apiKey = process.env.OPENAI_API_KEY;
 
-    if (facts.length > 0 && apiKey) {
+    if (apiKey) {
       try {
-        const openai = new OpenAI({ apiKey });
-        const system = getBriefingPrompt(locale);
-        const completion = await openai.chat.completions.create(
-          {
-            model: "gpt-4o-mini",
-            temperature: 0.2,
-            response_format: { type: "json_object" },
-            max_tokens: 700,
-            messages: [
-              { role: "system", content: system },
-              {
-                role: "user",
-                content: `Address: ${address}
-locale: ${locale}
-
-FOUND_FACTS (only these may be used):
-${JSON.stringify(facts, null, 0)}
-
-Return JSON: {"points":[{"text":string,"source":string}]}`,
-              },
-            ],
-          },
-          { signal: AbortSignal.timeout(45_000) },
-        );
-        const raw = completion.choices[0]?.message?.content?.trim() || "{}";
-        const parsed = JSON.parse(raw) as Record<string, unknown>;
-        const allowed = new Set(facts.map((fact) => fact.source));
-        const points = parsePoints(parsed.points, allowed);
-        briefing = {
+        briefing = await generateAddressBriefing({
           address,
-          points,
+          locale,
+          facts,
+          listingFacts: [],
+          listingUrl: null,
           sourcesQueried,
-          generatedAt: new Date().toISOString(),
-        };
-      } catch {
-        briefing = emptyBriefing(address, sourcesQueried);
+          apiKey,
+          signal: AbortSignal.timeout(60_000),
+        });
+      } catch (error) {
+        if (isBriefingGenerateError(error)) {
+          // Do not persist empty shells; surface typed code for client retry.
+          return boundary.applyCookie(
+            NextResponse.json(
+              {
+                error: "AI request could not be completed.",
+                code: error.code,
+                briefing: emptyBriefing(address, [...sourcesQueried, "openai_web_search"]),
+              },
+              { status: error.status },
+            ),
+          );
+        }
+        console.error("[briefing/route] unexpected generate error", address, error);
+        throw error;
       }
     }
 
-    if (!isViewingBriefing(briefing)) {
-      briefing = emptyBriefing(address, sourcesQueried);
-    }
+    briefing = coerceViewingBriefing(briefing) ?? emptyBriefing(address, sourcesQueried);
 
-    if (viewingId) {
-      const supabase = await createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (user) {
-        const admin = createAdminClient();
-        const current = await admin
-          .from("viewings")
-          .select("revision, chat_state")
-          .eq("id", viewingId)
-          .eq("user_id", user.id)
-          .maybeSingle();
-        if (!current.error && current.data) {
-          const revision = Number(current.data.revision ?? 1);
-          await admin
+    // Only persist non-empty briefings. Empty shells used to stick in chat_state
+    // and block client retries because address still "matched".
+    // Persist failures must not hide a successful briefing from the client.
+    let savedRevision: number | undefined;
+    if (viewingId && briefingHasContent(briefing)) {
+      try {
+        const supabase = await createClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (user) {
+          const admin = createAdminClient();
+          const current = await admin
             .from("viewings")
-            .update({
-              chat_state: mergeChatState(current.data.chat_state, {
-                v: 1,
-                briefing,
-              }),
-              revision: revision + 1,
-              updated_at: new Date().toISOString(),
-              client_updated_at: new Date().toISOString(),
-            })
+            .select("revision, chat_state")
             .eq("id", viewingId)
-            .eq("user_id", user.id);
+            .eq("user_id", user.id)
+            .maybeSingle();
+          if (!current.error && current.data) {
+            const revision = Number(current.data.revision ?? 1);
+            savedRevision = revision + 1;
+            const { error: updateError } = await admin
+              .from("viewings")
+              .update({
+                chat_state: mergeChatState(current.data.chat_state, {
+                  v: 1,
+                  briefing,
+                }),
+                revision: savedRevision,
+                updated_at: new Date().toISOString(),
+                client_updated_at: new Date().toISOString(),
+              })
+              .eq("id", viewingId)
+              .eq("user_id", user.id);
+            if (updateError) {
+              console.error("[briefing/route] persist failed", viewingId, updateError);
+              savedRevision = undefined;
+            }
+          }
         }
+      } catch (error) {
+        console.error("[briefing/route] persist threw", viewingId, error);
+        savedRevision = undefined;
       }
     }
 
@@ -141,10 +126,12 @@ Return JSON: {"points":[{"text":string,"source":string}]}`,
       NextResponse.json({
         briefing,
         factsFound: facts.length,
-        sourcesQueried,
+        sourcesQueried: briefing.sourcesQueried,
+        revision: savedRevision,
       }),
     );
   } catch (error) {
+    console.error("[briefing/route] failed", error);
     return aiErrorResponse(error);
   }
 }

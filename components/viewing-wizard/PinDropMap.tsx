@@ -55,7 +55,7 @@ export function PinDropMap({
   const origin = worldPoint(view.lat, view.lng, view.zoom);
   const originTileX = Math.floor(origin.x / TILE);
   const originTileY = Math.floor(origin.y / TILE);
-  const mapHeight = 420;
+  const mapHeight = 160;
   const tiles = useMemo(() => {
     const cols = Math.ceil(width / TILE) + 2;
     const rows = Math.ceil(mapHeight / TILE) + 2;
@@ -124,7 +124,7 @@ export function PinDropMap({
       <div
         role="application"
         aria-label={label}
-        className="relative h-[420px] w-full cursor-grab touch-none overflow-hidden bg-[#E5E7EB] active:cursor-grabbing"
+        className="relative h-40 w-full cursor-grab touch-none overflow-hidden bg-[#E5E7EB] active:cursor-grabbing"
         ref={frameRef}
         onPointerDown={(event) => {
           if (event.button !== 0) return;

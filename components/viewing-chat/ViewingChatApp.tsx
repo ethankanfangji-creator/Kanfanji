@@ -39,8 +39,13 @@ import {
 } from "@/lib/ai-boundary/map-ai-error-ui";
 import { track } from "@/lib/analytics/client";
 import type { AddressSource, AnalyticsRegion } from "@/lib/analytics/events";
-import type { AddressSuggestion } from "@/lib/address-suggest";
 import {
+  splitAddressQuery,
+  withUnitLabel,
+  type AddressSuggestion,
+} from "@/lib/address-suggest";
+import {
+  buildAddressConfirmationCandidate,
   candidateFromSuggestion,
   type AddressConfirmationCandidate,
   type AddressLookupPayloadLike,
@@ -1225,14 +1230,20 @@ export function ViewingChatApp({
     index: number,
     region: AnalyticsRegion,
   ) {
-    const candidate = candidateFromSuggestion(suggestion, suggestion.label);
+    const split = splitAddressQuery(addressDraft || suggestion.label);
+    const labeled = {
+      ...suggestion,
+      label: withUnitLabel(suggestion.label, split.unit),
+      formatted: withUnitLabel(suggestion.formatted || suggestion.label, split.unit),
+    };
+    const candidate = candidateFromSuggestion(labeled, labeled.label);
     if (!candidate) {
       setStatus(t.address.suggestError);
       return;
     }
     const source = suggestion.source;
     const next = {
-      queryAddress: suggestion.label,
+      queryAddress: labeled.label,
       candidate,
       source,
       region,
@@ -1268,10 +1279,73 @@ export function ViewingChatApp({
     });
   }
 
-  function onCommitAddressDraft(label: string) {
+  async function onCommitAddressDraft(label: string) {
     const trimmed = label.trim();
     if (!trimmed) return;
-    setStatus(t.address.suggestEmpty);
+    setStatus(t.address.suggestLoading);
+    try {
+      const response = await fetch(
+        `/api/address-lookup?q=${encodeURIComponent(trimmed)}&locale=${encodeURIComponent(locale)}`,
+      );
+      const body = (await response.json().catch(() => ({}))) as AddressLookupPayloadLike & {
+        error?: string;
+        code?: string;
+      };
+      if (!response.ok) {
+        setStatus(t.address.suggestEmpty);
+        return;
+      }
+      const candidate = buildAddressConfirmationCandidate(body, trimmed);
+      if (!candidate || candidate.lat == null || candidate.lng == null) {
+        setStatus(t.address.suggestEmpty);
+        return;
+      }
+      const region: AnalyticsRegion =
+        candidate.market === "US" || candidate.market === "TW" || candidate.market === "CA"
+          ? candidate.market
+          : "OTHER";
+      const sourceRaw = (candidate.source || "").toLowerCase();
+      const source: AddressSource = sourceRaw.includes("nominatim") || sourceRaw.includes("osm")
+        ? "nominatim"
+        : sourceRaw.includes("photon")
+          ? "photon"
+          : sourceRaw.includes("bc")
+            ? "bc_geocoder"
+            : "google";
+      const next = {
+        queryAddress: trimmed,
+        candidate,
+        source,
+        region,
+        droppedPin: null,
+        payload: {
+          displayAddress: candidate.displayAddress,
+          propertyId: candidate.propertyId ?? undefined,
+          market: candidate.market ?? undefined,
+          source: candidate.source ?? undefined,
+          details: { lat: candidate.lat, lng: candidate.lng },
+        },
+      };
+      setPendingAddressConfirm(next);
+      if (candidate.needsMapPin) {
+        writeAddressPinDraft({
+          queryAddress: next.queryAddress,
+          displayAddress: candidate.displayAddress,
+          hintLat: candidate.lat ?? COQUITLAM_PORT_MOODY_CENTER.latitude,
+          hintLng: candidate.lng ?? COQUITLAM_PORT_MOODY_CENTER.longitude,
+          picked: null,
+          propertyId: candidate.propertyId,
+          source,
+          region,
+        });
+      } else {
+        clearAddressPinDraft();
+      }
+      setAddressDraft(candidate.displayAddress);
+      setStatus("");
+    } catch {
+      setStatus(t.address.suggestError);
+    }
   }
 
   async function submitTurn(payload: {
@@ -1934,7 +2008,7 @@ export function ViewingChatApp({
         }}
         onNew={() => {
           if (viewingId) {
-            router.push("/?new=1");
+            router.push("/");
             return;
           }
           setSearchOpen(false);
@@ -2506,7 +2580,7 @@ export function ViewingChatApp({
                   onClick={() => router.push("/")}
                   className="mt-4 text-[13px] font-bold underline"
                 >
-                  {c.historyTitle}
+                  {t.loginPage.backHome}
                 </button>
               ) : null}
             </div>
@@ -2514,15 +2588,6 @@ export function ViewingChatApp({
         ) : (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto overscroll-contain px-5 py-8 pt-[max(2rem,env(safe-area-inset-top))]">
             <div className="w-full max-w-md space-y-5">
-              {startOnly ? (
-                <button
-                  type="button"
-                  onClick={() => router.push("/")}
-                  className="text-[13px] font-bold text-[#6B7280] underline"
-                >
-                  {c.historyTitle}
-                </button>
-              ) : null}
               <div className="text-center">
                 <h1 className="text-[22px] font-black tracking-tight sm:text-[26px]">
                   {t.brand.name}
@@ -2649,7 +2714,7 @@ export function ViewingChatApp({
         maxItems={compareItemMax}
         onStartNew={() => {
           if (viewingId) {
-            router.push("/?new=1");
+            router.push("/");
             return;
           }
           closeMobileOverlays();

@@ -171,6 +171,8 @@ export type ViewingChatThread = {
   };
   /** Address-only prep product (smell / look / ask). Not a note. */
   briefing?: import("./briefing").ViewingBriefing | null;
+  /** Optional listing page URL used to ground property-specific briefing tips. */
+  listingUrl?: string | null;
   /** Fingerprint of notes that produced the current report, if any. */
   reportNotesFingerprint?: string | null;
 };

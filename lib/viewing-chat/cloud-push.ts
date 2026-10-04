@@ -23,6 +23,7 @@ export function buildChatStatePayload(thread: {
   pinned?: boolean;
   sitePin?: { lat: number; lng: number; source: "civic" | "map" } | null;
   briefing?: unknown;
+  listingUrl?: string | null;
   reportNotesFingerprint?: string | null;
 }) {
   return {
@@ -39,6 +40,7 @@ export function buildChatStatePayload(thread: {
     askedCount: thread.askedCount ?? {},
     pinned: Boolean(thread.pinned),
     briefing: thread.briefing ?? null,
+    listingUrl: thread.listingUrl?.trim() || null,
     reportNotesFingerprint: thread.reportNotesFingerprint ?? null,
     ...(thread.sitePin ? { sitePin: thread.sitePin } : {}),
   };

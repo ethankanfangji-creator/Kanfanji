@@ -2,18 +2,22 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ThumbsDown, ThumbsUp } from "lucide-react";
 import { useI18n } from "@/components/I18nProvider";
 import { ViewingChatComposer } from "@/components/viewing-chat/ViewingChatComposer";
 import { useChatMediaUrl } from "@/components/viewing-chat/useChatMediaUrl";
 import { AI_CONSENT_VERSION } from "@/lib/ai-boundary/client";
 import {
+  briefingDisplaySources,
+  briefingDisplaySummary,
+  briefingHasContent,
   briefingMatchesAddress,
+  coerceViewingBriefing,
   emptyBriefing,
-  isViewingBriefing,
   notesFingerprint,
   userNotesOnly,
   type ViewingBriefing,
+  type ViewingBriefingFeedback,
 } from "@/lib/viewing-chat/briefing";
 import { applyChatStateToLocal } from "@/lib/viewing-chat/chat-state";
 import { buildChatStatePayload, pushViewingThread } from "@/lib/viewing-chat/cloud-push";
@@ -136,8 +140,91 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
   function refresh() {
     const next = getLocalThread(viewingId);
     setThread(next);
-    if (next?.briefing && isViewingBriefing(next.briefing) && briefingMatchesAddress(next.briefing, next.address)) {
-      setBriefing(next.briefing);
+    if (next?.briefing) {
+      const coerced = coerceViewingBriefing(next.briefing);
+      if (
+        coerced &&
+        briefingMatchesAddress(coerced, next.address) &&
+        briefingHasContent(coerced)
+      ) {
+        setBriefing(coerced);
+      }
+    }
+  }
+
+  async function requestBriefing(args: {
+    address: string;
+    signal?: AbortSignal;
+  }) {
+    setBriefingBusy(true);
+    const postBriefing = () =>
+      fetch("/api/viewing-chat/briefing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          address: args.address,
+          locale,
+          viewingId,
+          consentVersion: AI_CONSENT_VERSION,
+          consentSessionId: consentSessionId(),
+          identityKind: userId ? "user" : "guest",
+        }),
+        signal: args.signal,
+      });
+    try {
+      let response = await postBriefing();
+      // One automatic retry on transient OpenAI upstream failures.
+      if (
+        (response.status === 502 || response.status === 504) &&
+        !args.signal?.aborted
+      ) {
+        response = await postBriefing();
+      }
+      if (args.signal?.aborted) return;
+      const body = (await response.json().catch(() => ({}))) as {
+        briefing?: ViewingBriefing;
+        revision?: number;
+        code?: string;
+      };
+      const coerced =
+        coerceViewingBriefing(body.briefing) ?? emptyBriefing(args.address);
+      // Fresh generation never carries over a prior like/dislike.
+      const next: ViewingBriefing = {
+        ...coerced,
+        feedback: null,
+        feedbackAt: null,
+      };
+      setBriefing(next);
+      if (briefingHasContent(next)) {
+        const cloudPatch =
+          typeof body.revision === "number"
+            ? {
+                briefing: next,
+                cloud: {
+                  state: "synced" as const,
+                  lastSyncedAt: new Date().toISOString(),
+                  revision: body.revision,
+                },
+              }
+            : { briefing: next };
+        patchLocalThread(viewingId, cloudPatch);
+        // Server already persisted briefing + bumped revision — skip a conflicting PUT.
+        if (typeof body.revision !== "number") queueSync();
+      } else {
+        // Keep local free of empty shells so a remount can retry.
+        patchLocalThread(viewingId, { briefing: null });
+        if (body.code) {
+          console.warn("[briefing]", body.code, args.address);
+        }
+      }
+      refresh();
+    } catch (error) {
+      if (args.signal?.aborted) return;
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      setBriefing(emptyBriefing(args.address));
+      patchLocalThread(viewingId, { briefing: null });
+    } finally {
+      if (!args.signal?.aborted) setBriefingBusy(false);
     }
   }
 
@@ -175,6 +262,20 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
     }, 600);
   }
 
+  function setBriefingFeedback(value: ViewingBriefingFeedback) {
+    if (!briefing || !briefingHasContent(briefing)) return;
+    const nextValue: ViewingBriefingFeedback | null =
+      briefing.feedback === value ? null : value;
+    const next: ViewingBriefing = {
+      ...briefing,
+      feedback: nextValue,
+      feedbackAt: nextValue ? new Date().toISOString() : null,
+    };
+    setBriefing(next);
+    patchLocalThread(viewingId, { briefing: next });
+    queueSync();
+  }
+
   useEffect(() => {
     const supabase = getSupabase();
     void (async () => {
@@ -204,12 +305,15 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
       }
       setThread(local);
       setReady(true);
-      if (
-        local.briefing &&
-        isViewingBriefing(local.briefing) &&
-        briefingMatchesAddress(local.briefing, local.address)
-      ) {
-        setBriefing(local.briefing);
+      if (local.briefing) {
+        const coerced = coerceViewingBriefing(local.briefing);
+        if (
+          coerced &&
+          briefingMatchesAddress(coerced, local.address) &&
+          briefingHasContent(coerced)
+        ) {
+          setBriefing(coerced);
+        }
       }
       // Restore a previously generated report product; never invent one without a press.
       if (local.report) {
@@ -225,47 +329,16 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
 
   useEffect(() => {
     if (!thread || !ready || missing) return;
-    if (briefing && briefingMatchesAddress(briefing, thread.address)) return;
-    let cancelled = false;
-    void (async () => {
-      setBriefingBusy(true);
-      try {
-        const response = await fetch("/api/viewing-chat/briefing", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            address: thread.address,
-            locale,
-            viewingId: thread.id,
-            consentVersion: AI_CONSENT_VERSION,
-            consentSessionId: consentSessionId(),
-            identityKind: userId ? "user" : "guest",
-          }),
-        });
-        const body = (await response.json().catch(() => ({}))) as {
-          briefing?: ViewingBriefing;
-        };
-        if (cancelled) return;
-        const next =
-          body.briefing && isViewingBriefing(body.briefing)
-            ? body.briefing
-            : emptyBriefing(thread.address);
-        setBriefing(next);
-        patchLocalThread(thread.id, { briefing: next });
-        queueSync();
-        refresh();
-      } catch {
-        if (cancelled) return;
-        const next = emptyBriefing(thread.address);
-        setBriefing(next);
-        patchLocalThread(thread.id, { briefing: next });
-      } finally {
-        if (!cancelled) setBriefingBusy(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    // Empty shells must not block regeneration (OpenAI blips used to stick forever).
+    if (briefingHasContent(briefing) && briefingMatchesAddress(briefing, thread.address)) {
+      return;
+    }
+    const controller = new AbortController();
+    void requestBriefing({
+      address: thread.address,
+      signal: controller.signal,
+    });
+    return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load once per address
   }, [thread?.id, thread?.address, ready, missing, locale, userId]);
 
@@ -431,7 +504,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
       <div className="flex min-h-[100svh] flex-col items-center justify-center gap-3 bg-[#FAF6F1] px-6 text-center">
         <p className="text-[15px] font-bold">找不到這則看房。</p>
         <Link href="/" className="text-[13px] font-bold underline">
-          {c.historyTitle}
+          {t.loginPage.backHome}
         </Link>
       </div>
     );
@@ -444,7 +517,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
           href="/"
           className="inline-flex items-center gap-1 text-[12px] font-medium text-[#6B7280]"
         >
-          <ArrowLeft className="h-3.5 w-3.5" /> {c.historyTitle}
+          <ArrowLeft className="h-3.5 w-3.5" /> {t.loginPage.backHome}
         </Link>
         <h1 className="mt-2 text-[18px] font-bold leading-snug">{thread.address}</h1>
       </header>
@@ -453,26 +526,54 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
         <h2 id="briefing-heading" className="text-[13px] font-bold tracking-wide">
           {c.briefingTitle}
         </h2>
-        <p className="mt-1 text-[12px] text-[#6B7280]">{c.briefingHint}</p>
-        {briefingBusy && !briefing ? (
+        {briefingBusy && !briefingHasContent(briefing) ? (
           <p className="mt-3 text-[13px] text-[#6B7280]">{c.briefingLoading}</p>
         ) : briefing ? (
-          briefing.points.length === 0 ? (
+          !briefingHasContent(briefing) ? (
             <p className="mt-3 text-[13px] text-[#6B7280]">{c.briefingEmpty}</p>
           ) : (
-            <ul className="mt-3 space-y-2">
-              {briefing.points.map((point) => (
-                <li
-                  key={`${point.source}-${point.text}`}
-                  className="rounded-2xl bg-white px-4 py-3 text-[14px] leading-snug shadow-[0_4px_16px_rgba(0,0,0,0.04)]"
+            <div className="mt-3 rounded-2xl bg-white px-4 py-3 shadow-[0_4px_16px_rgba(0,0,0,0.04)]">
+              <p className="text-[14px] leading-relaxed">
+                {briefingDisplaySummary(briefing)}
+              </p>
+              {briefingDisplaySources(briefing).length ? (
+                <p className="mt-2 text-[11px] font-semibold text-[#6B7280]">
+                  {c.briefingSource}: {briefingDisplaySources(briefing).join(" · ")}
+                </p>
+              ) : null}
+              <div
+                className="mt-3 flex items-center gap-2"
+                role="group"
+                aria-label={`${c.briefingLike} / ${c.briefingDislike}`}
+              >
+                <button
+                  type="button"
+                  onClick={() => setBriefingFeedback("like")}
+                  aria-pressed={briefing.feedback === "like"}
+                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-semibold transition ${
+                    briefing.feedback === "like"
+                      ? "bg-[#1A1A1A] text-white"
+                      : "bg-black/5 text-[#374151] hover:bg-black/10"
+                  }`}
                 >
-                  <p>{point.text}</p>
-                  <p className="mt-1.5 text-[11px] font-semibold text-[#6B7280]">
-                    {c.briefingSource}: {point.source}
-                  </p>
-                </li>
-              ))}
-            </ul>
+                  <ThumbsUp className="h-3.5 w-3.5" aria-hidden />
+                  {c.briefingLike}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBriefingFeedback("dislike")}
+                  aria-pressed={briefing.feedback === "dislike"}
+                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-semibold transition ${
+                    briefing.feedback === "dislike"
+                      ? "bg-[#1A1A1A] text-white"
+                      : "bg-black/5 text-[#374151] hover:bg-black/10"
+                  }`}
+                >
+                  <ThumbsDown className="h-3.5 w-3.5" aria-hidden />
+                  {c.briefingDislike}
+                </button>
+              </div>
+            </div>
           )
         ) : null}
       </section>

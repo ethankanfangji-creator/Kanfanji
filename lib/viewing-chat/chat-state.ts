@@ -15,6 +15,7 @@ const STATE_KEYS = [
   "pinned",
   "sitePin",
   "briefing",
+  "listingUrl",
   "reportNotesFingerprint",
 ] as const;
 
@@ -54,6 +55,11 @@ export function mergeChatState(existing: unknown, incoming: Record<string, unkno
       if (typeof value === "boolean") next.pinned = value;
       continue;
     }
+    if (key === "listingUrl") {
+      if (value === null) next.listingUrl = null;
+      else if (typeof value === "string") next.listingUrl = value.trim() || null;
+      continue;
+    }
     if (value == null) continue;
     next[key] = value;
   }
@@ -69,6 +75,15 @@ export function applyChatStateToLocal(
   const patch: Partial<ViewingChatThread> = {};
   for (const key of STATE_KEYS) {
     if (state[key] !== undefined) patch[key] = state[key] as never;
+  }
+  // Drop empty briefing shells so the session UI can regenerate.
+  if (patch.briefing != null) {
+    const row = patch.briefing as { summary?: unknown; points?: unknown };
+    const summary = typeof row.summary === "string" ? row.summary.trim() : "";
+    const points = Array.isArray(row.points) ? row.points : [];
+    if (!summary && points.length === 0) {
+      delete patch.briefing;
+    }
   }
   return { ...thread, ...patch };
 }

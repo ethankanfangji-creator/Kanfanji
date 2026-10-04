@@ -814,10 +814,15 @@ export type Messages = {
     generateReport: string;
     generatingReport: string;
     briefingTitle: string;
-    briefingHint: string;
     briefingLoading: string;
     briefingEmpty: string;
+    briefingListingCta: string;
+    briefingListingUrlLabel: string;
+    briefingListingUrlPlaceholder: string;
+    briefingListingUrlApply: string;
     briefingSource: string;
+    briefingLike: string;
+    briefingDislike: string;
     notesTitle: string;
     notesEmpty: string;
     reportTitle: string;

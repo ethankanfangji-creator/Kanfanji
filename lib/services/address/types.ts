@@ -3,7 +3,7 @@
  * Real adapter: `createServerAddressService` — used by /api/address-suggest.
  */
 
-import type { AddressSuggestion, SuggestBias } from "@/lib/address-suggest";
+import type { AddressSuggestion, SuggestBias, SuggestRegion } from "@/lib/address-suggest";
 import type { AddressLookupResult } from "@/lib/address-lookup";
 
 export type AddressServiceStatus = "ready" | "degraded" | "unconfigured" | "error";
@@ -15,6 +15,7 @@ export type AddressService = {
     signal?: AbortSignal,
     locale?: string,
     bias?: SuggestBias | null,
+    regionHint?: SuggestRegion,
   ): Promise<AddressSuggestion[]>;
   lookupByAddress(address: string, signal?: AbortSignal): Promise<AddressLookupResult>;
   lookupByPlaceId(placeId: string, signal?: AbortSignal): Promise<AddressLookupResult>;

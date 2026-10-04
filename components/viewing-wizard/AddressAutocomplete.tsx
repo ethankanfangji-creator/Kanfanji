@@ -20,7 +20,7 @@ export type AddressAutocompleteCopy = {
 type SuggestState =
   | { status: "idle" }
   | { status: "loading" }
-  | { status: "ready"; items: AddressSuggestion[] }
+  | { status: "ready"; items: AddressSuggestion[]; refreshing?: boolean }
   | { status: "empty" }
   | { status: "error"; message: string };
 
@@ -38,7 +38,7 @@ export function AddressAutocomplete({
   onChange: (value: string) => void;
   onSelect: (suggestion: AddressSuggestion, index: number, region: AnalyticsRegion) => void;
   /** Enter / search icon with no highlighted suggestion — commit free-typed address. */
-  onCommit?: (value: string) => void;
+  onCommit?: (value: string) => void | Promise<void>;
   disabled?: boolean;
   copy: AddressAutocompleteCopy;
   confirmed?: boolean;
@@ -71,7 +71,11 @@ export function AddressAutocomplete({
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       const requestId = ++requestIdRef.current;
-      setSuggest({ status: "loading" });
+      setSuggest((current) =>
+        current.status === "ready" && current.items.length > 0
+          ? { status: "ready", items: current.items, refreshing: true }
+          : { status: "loading" },
+      );
       setOpen(true);
       void fetch(
         `/api/address-suggest?q=${encodeURIComponent(q)}&locale=${encodeURIComponent(locale)}`,
@@ -123,6 +127,7 @@ export function AddressAutocomplete({
   }, [value, confirmed, copy.error, locale]);
 
   const items = suggest.status === "ready" ? suggest.items : [];
+  const refreshing = suggest.status === "ready" && Boolean(suggest.refreshing);
 
   function selectIndex(index: number) {
     const item = items[index];
@@ -182,6 +187,9 @@ export function AddressAutocomplete({
 
   const canSearch = Boolean(value.trim()) && !disabled;
   const searchLabel = copy.search || "Search";
+  // Suggestions are the primary action — hide magnifier so users tap a result
+  // instead of pressing search again after results appear (including while refreshing).
+  const showSearchButton = canSearch && !(showList && suggest.status === "ready");
 
   return (
     <div className="mt-[var(--space-2)] min-w-0 flex-1">
@@ -218,32 +226,37 @@ export function AddressAutocomplete({
           placeholder={copy.placeholder}
           autoComplete="off"
           maxLength={200}
-          className={`w-full min-w-0 max-w-full min-h-[var(--touch-target)] box-border rounded-full border bg-[var(--color-surface-muted)] pl-9 pr-12 text-[16px] font-medium text-[var(--color-text)] outline-none focus:ring-2 focus:ring-[var(--color-focus)]/20 sm:text-[var(--font-size-sm)] disabled:opacity-60 ${
+          className={`w-full min-w-0 max-w-full min-h-[var(--touch-target)] box-border rounded-full border bg-[var(--color-surface-muted)] pl-9 text-[16px] font-medium text-[var(--color-text)] outline-none focus:ring-2 focus:ring-[var(--color-focus)]/20 sm:text-[var(--font-size-sm)] disabled:opacity-60 ${
+            showSearchButton ? "pr-12" : "pr-4"
+          } ${
             emphasize
               ? "border-[#2563EB] ring-2 ring-[#2563EB]/40"
               : "border-[var(--color-border)]"
           }`}
         />
-        <button
-          type="button"
-          tabIndex={-1}
-          disabled={!canSearch}
-          aria-label={searchLabel}
-          title={searchLabel}
-          onMouseDown={(event) => {
-            event.preventDefault();
-            commitSearch();
-          }}
-          className="absolute right-1.5 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full text-[#374151] transition-colors hover:bg-black/5 disabled:opacity-40"
-        >
-          <Search className="h-4 w-4" strokeWidth={2.25} />
-        </button>
+        {showSearchButton ? (
+          <button
+            type="button"
+            tabIndex={-1}
+            disabled={!canSearch}
+            aria-label={searchLabel}
+            title={searchLabel}
+            onMouseDown={(event) => {
+              event.preventDefault();
+              commitSearch();
+            }}
+            className="absolute right-1.5 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full text-[#374151] transition-colors hover:bg-black/5 disabled:opacity-40"
+          >
+            <Search className="h-4 w-4" strokeWidth={2.25} />
+          </button>
+        ) : null}
 
         {showList ? (
           <ul
             id={listId}
             role="listbox"
             aria-label={copy.listLabel}
+            aria-busy={suggest.status === "loading" || refreshing}
             className="absolute z-30 mt-1.5 max-h-56 w-full overflow-auto rounded-xl border border-black/8 bg-white py-0.5 shadow-[0_8px_24px_rgba(0,0,0,0.1)]"
           >
             {suggest.status === "loading" ? (
@@ -252,6 +265,15 @@ export function AddressAutocomplete({
                 className="flex items-center gap-2 px-3 py-3 text-[13px] text-[#6B7280]"
               >
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                {copy.loading}
+              </li>
+            ) : null}
+            {refreshing ? (
+              <li
+                role="presentation"
+                className="flex items-center gap-2 border-b border-black/5 px-3 py-2 text-[12px] text-[#6B7280]"
+              >
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
                 {copy.loading}
               </li>
             ) : null}
@@ -272,31 +294,33 @@ export function AddressAutocomplete({
                   ? item.secondary.trim()
                   : null;
               return (
-              <li
-                key={item.id}
-                id={`${listId}-option-${index}`}
-                role="option"
-                aria-selected={highlight === index}
-                className={`cursor-pointer px-3 py-2 text-left ${
-                  highlight === index ? "bg-[#111] text-white" : "text-[#1A1A1A] hover:bg-[#F5F3F0]"
-                }`}
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  selectIndex(index);
-                }}
-                onMouseEnter={() => setHighlight(index)}
-              >
-                <p className="truncate text-[13px] font-medium leading-snug">{title}</p>
-                {secondary ? (
-                  <p
-                    className={`truncate text-[11px] leading-snug ${
-                      highlight === index ? "text-white/70" : "text-[#6B7280]"
-                    }`}
-                  >
-                    {secondary}
-                  </p>
-                ) : null}
-              </li>
+                <li
+                  key={item.id}
+                  id={`${listId}-option-${index}`}
+                  role="option"
+                  aria-selected={highlight === index}
+                  className={`cursor-pointer px-3 py-2 text-left ${
+                    refreshing ? "opacity-70 " : ""
+                  }${
+                    highlight === index ? "bg-[#111] text-white" : "text-[#1A1A1A] hover:bg-[#F5F3F0]"
+                  }`}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    selectIndex(index);
+                  }}
+                  onMouseEnter={() => setHighlight(index)}
+                >
+                  <p className="truncate text-[13px] font-medium leading-snug">{title}</p>
+                  {secondary ? (
+                    <p
+                      className={`truncate text-[11px] leading-snug ${
+                        highlight === index ? "text-white/70" : "text-[#6B7280]"
+                      }`}
+                    >
+                      {secondary}
+                    </p>
+                  ) : null}
+                </li>
               );
             })}
           </ul>

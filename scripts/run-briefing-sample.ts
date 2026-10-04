@@ -1,60 +1,52 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import OpenAI from "openai";
 import { assemblePropertyFacts } from "../lib/property-facts/orchestrator";
 import { extractBriefingFoundFacts } from "../lib/viewing-chat/briefing-facts";
+import { extractBriefingListingFacts } from "../lib/viewing-chat/briefing-listing";
+import {
+  BriefingGenerateError,
+  generateAddressBriefing,
+} from "../lib/viewing-chat/generate-briefing";
 
-const prompt = readFileSync(path.join(process.cwd(), "prompts/briefing.md"), "utf8").trim();
-
-const addresses = [
-  "2143 Spring Street, Port Moody",
-  "350 W Georgia St, Vancouver, BC",
-];
+const address = process.argv[2] || "2143 Spring Street, Port Moody, BC";
+const listingUrl = process.argv[3] || "";
 
 async function run() {
-  console.log("===== BRIEFING PROMPT (prompts/briefing.md) =====\n");
-  console.log(prompt);
-  console.log("\n");
-
   const apiKey = process.env.OPENAI_API_KEY;
-  for (const address of addresses) {
-    console.log(`===== ${address} =====`);
-    const card = await assemblePropertyFacts({ address });
-    const { facts, sourcesQueried } = extractBriefingFoundFacts(card);
-    console.log("sourcesQueried:", JSON.stringify(sourcesQueried, null, 2));
-    console.log("factsFound:", facts.length);
-    console.log("FOUND_FACTS:", JSON.stringify(facts, null, 2));
+  if (!apiKey) {
+    console.error("OPENAI_API_KEY missing");
+    process.exit(1);
+  }
 
-    if (!facts.length || !apiKey) {
-      console.log("points: [] (no facts or no OPENAI_API_KEY)\n");
-      continue;
-    }
+  console.log(`===== ${address} =====`);
+  if (listingUrl) console.log("listingUrl:", listingUrl);
 
-    const openai = new OpenAI({ apiKey });
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      temperature: 0.2,
-      response_format: { type: "json_object" },
-      max_tokens: 700,
-      messages: [
-        {
-          role: "system",
-          content: `${prompt}\n\nRespond in Traditional Chinese.`,
-        },
-        {
-          role: "user",
-          content: `Address: ${address}
-locale: zh-Hant
+  const card = await assemblePropertyFacts({ address });
+  const { facts, sourcesQueried } = extractBriefingFoundFacts(card);
+  let listingFacts: Awaited<ReturnType<typeof extractBriefingListingFacts>>["facts"] = [];
+  if (listingUrl) {
+    const extracted = await extractBriefingListingFacts({ listingUrl, apiKey });
+    listingFacts = extracted.facts;
+    console.log("listingFacts:", JSON.stringify(listingFacts, null, 2));
+  }
 
-FOUND_FACTS (only these may be used):
-${JSON.stringify(facts, null, 0)}
-
-Return JSON: {"points":[{"text":string,"source":string}]}`,
-        },
-      ],
+  try {
+    const briefing = await generateAddressBriefing({
+      address,
+      locale: "zh-Hant",
+      facts,
+      listingFacts,
+      listingUrl: listingUrl || null,
+      sourcesQueried,
+      apiKey,
     });
-    console.log("points:", completion.choices[0]?.message?.content?.trim() || "{}");
-    console.log("");
+    console.log("sourcesQueried:", briefing.sourcesQueried);
+    console.log("summary:", briefing.summary);
+    console.log("sources:", briefing.sources);
+  } catch (error) {
+    if (error instanceof BriefingGenerateError) {
+      console.error("briefing failed:", error.code, error.status, error.message);
+      process.exit(1);
+    }
+    throw error;
   }
 }
 

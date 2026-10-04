@@ -107,7 +107,10 @@ describe("AddressAutocomplete", () => {
 
   it("keeps previous suggestions visible while a refined query loads", async () => {
     const user = userEvent.setup();
-    let resolveSecond: ((value: Response) => void) | null = null;
+    let resolveSecond!: (value: Response) => void;
+    const secondResponse = new Promise<Response>((resolve) => {
+      resolveSecond = resolve;
+    });
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -121,12 +124,7 @@ describe("AddressAutocomplete", () => {
           ],
         }),
       )
-      .mockImplementationOnce(
-        () =>
-          new Promise<Response>((resolve) => {
-            resolveSecond = resolve;
-          }),
-      );
+      .mockImplementationOnce(() => secondResponse);
     vi.stubGlobal("fetch", fetchMock);
 
     const onChange = vi.fn();
@@ -171,7 +169,7 @@ describe("AddressAutocomplete", () => {
     expect(screen.getByText("1200 Westwood St, Coquitlam, BC")).toBeTruthy();
     expect(screen.getByText("Loading")).toBeTruthy();
 
-    resolveSecond?.(
+    resolveSecond(
       Response.json({
         suggestions: [
           {

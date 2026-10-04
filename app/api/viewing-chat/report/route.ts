@@ -104,6 +104,7 @@ export async function POST(request: Request) {
 
     let persisted = false;
     let version: number | null = null;
+    let savedRevision: number | undefined;
     if (viewingId) {
       if (user) {
         let chatState: Record<string, unknown> | undefined;
@@ -134,18 +135,20 @@ export async function POST(request: Request) {
             report = { ...builtReport, version };
           }
           const revision = Number(current.data.revision ?? 1);
+          const nextRevision = revision + 1;
           const { error } = await admin
             .from("viewings")
             .update({
               report,
               chat_state: mergeChatState(current.data.chat_state, withFingerprint),
-              revision: revision + 1,
+              revision: nextRevision,
               updated_at: new Date().toISOString(),
               client_updated_at: new Date().toISOString(),
             })
             .eq("id", viewingId)
             .eq("user_id", user.id);
           persisted = !error;
+          if (!error) savedRevision = nextRevision;
         }
       }
     }
@@ -156,6 +159,7 @@ export async function POST(request: Request) {
         notesFingerprint: fingerprint,
         version,
         persisted,
+        revision: savedRevision,
       }),
     );
   } catch (error) {

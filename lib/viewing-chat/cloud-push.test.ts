@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { pushViewingThread, syncedThreadIdsMissingFromCloud } from "./cloud-push";
+import {
+  pushViewingThread,
+  pushViewingThreadWithConflictRetry,
+  syncedThreadIdsMissingFromCloud,
+} from "./cloud-push";
 
 describe("pushViewingThread", () => {
   it("creates an unsynced thread with POST then PUT and does not GET", async () => {
@@ -64,6 +68,43 @@ describe("pushViewingThread", () => {
     });
     expect(result.deleted).toBe(true);
     expect(calls).toEqual(["PUT"]);
+  });
+});
+
+describe("pushViewingThreadWithConflictRetry", () => {
+  it("retries the PUT with the remote revision after a briefing/report bump", async () => {
+    const calls: string[] = [];
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      calls.push(`${method} ${url}`);
+      if (method === "PUT") {
+        const body = JSON.parse(String(init?.body)) as { baseRevision?: number };
+        if (body.baseRevision === 5) {
+          return new Response(JSON.stringify({ code: "stale", serverRevision: 6 }), { status: 409 });
+        }
+        expect(body.baseRevision).toBe(6);
+        expect(body.messages).toEqual([{ id: "note-1", text: "漏水" }]);
+        return new Response(JSON.stringify({ revision: 7 }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ revision: 6, messages: [] }), { status: 200 });
+    });
+    const result = await pushViewingThreadWithConflictRetry({
+      threadId: "thread-1",
+      address: "1 Main",
+      baseRevision: 5,
+      previouslySynced: true,
+      messages: [{ id: "note-1", text: "漏水" }],
+      chatState: { v: 1 },
+      clientUpdatedAt: "2026-10-04T12:00:00.000Z",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(result.status).toBe(200);
+    expect(result.revision).toBe(7);
+    expect(calls).toEqual([
+      "PUT /api/viewing-chat/threads/thread-1",
+      "GET /api/viewing-chat/threads/thread-1",
+      "PUT /api/viewing-chat/threads/thread-1",
+    ]);
   });
 });
 

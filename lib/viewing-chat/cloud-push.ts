@@ -131,3 +131,16 @@ export async function pushViewingThread(input: {
   }
   return finish(response);
 }
+
+/** Retry once after a revision bump (briefing/report persist) so notes are not dropped. */
+export async function pushViewingThreadWithConflictRetry(
+  input: Parameters<typeof pushViewingThread>[0],
+): ReturnType<typeof pushViewingThread> {
+  const first = await pushViewingThread(input);
+  if (first.status !== 409 || typeof first.revision !== "number") return first;
+  return pushViewingThread({
+    ...input,
+    baseRevision: first.revision,
+    previouslySynced: true,
+  });
+}

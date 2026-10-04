@@ -27,8 +27,8 @@ import {
 } from "@/lib/viewing-chat/briefing";
 import { localPreferenceBlock } from "@/lib/viewing-chat/ai-preferences";
 import { applyChatStateToLocal } from "@/lib/viewing-chat/chat-state";
-import { buildChatStatePayload, pushViewingThread } from "@/lib/viewing-chat/cloud-push";
-import { appendChatMessages } from "@/lib/viewing-chat/append-messages";
+import { buildChatStatePayload, pushViewingThreadWithConflictRetry } from "@/lib/viewing-chat/cloud-push";
+import { hydrateThreadMessages, localNotesAreAuthoritative } from "@/lib/viewing-chat/merge-messages";
 import {
   getLocalThread,
   patchLocalThread,
@@ -60,9 +60,12 @@ function consentSessionId(): string {
   return next;
 }
 
-async function hydrateViewingThread(threadId: string, ownerUserId: string) {
+async function hydrateViewingThread(
+  threadId: string,
+  ownerUserId: string,
+): Promise<{ ok: boolean; needsSync: boolean }> {
   const detail = await fetch(`/api/viewing-chat/threads/${threadId}`);
-  if (!detail.ok) return false;
+  if (!detail.ok) return { ok: false, needsSync: false };
   const row = (await detail.json()) as {
     id: string;
     address: string;
@@ -86,21 +89,39 @@ async function hydrateViewingThread(threadId: string, ownerUserId: string) {
     pinned: false,
   };
   const restored = applyChatStateToLocal(base, row.chat_state);
+  const keepLocalNotes = localNotesAreAuthoritative({
+    hasLocalMessages: Boolean(local),
+    localUpdatedAt: local?.updatedAt,
+    remoteUpdatedAt: row.updated_at,
+    localCloudState: local?.cloud?.state,
+  });
   upsertLocalThread({
     ...restored,
     address: row.address || restored.address,
-    messages: appendChatMessages(restored.messages ?? [], row.messages ?? []),
+    messages: hydrateThreadMessages({
+      localMessages: local?.messages,
+      remoteMessages: row.messages ?? [],
+      localUpdatedAt: local?.updatedAt,
+      remoteUpdatedAt: row.updated_at,
+      localCloudState: local?.cloud?.state,
+    }),
     report: row.report ?? restored.report,
     metadata: row.metadata ?? restored.metadata,
-    updatedAt: row.updated_at,
+    updatedAt: keepLocalNotes && local ? local.updatedAt : row.updated_at,
     ownerUserId,
-    cloud: {
-      state: "synced",
-      lastSyncedAt: row.updated_at,
-      revision: row.revision,
-    },
+    cloud: keepLocalNotes
+      ? {
+          state: "syncing",
+          lastSyncedAt: local?.cloud?.lastSyncedAt ?? null,
+          revision: row.revision,
+        }
+      : {
+          state: "synced",
+          lastSyncedAt: row.updated_at,
+          revision: row.revision,
+        },
   });
-  return true;
+  return { ok: true, needsSync: keepLocalNotes };
 }
 
 function NoteMedia({ message }: { message: ChatMessage }) {
@@ -279,37 +300,45 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
     }
   }
 
+  async function flushCloudSync(ownerId: string | null) {
+    if (!ownerId) return false;
+    const current = getLocalThread(viewingId);
+    if (!current) return false;
+    const pushed = await pushViewingThreadWithConflictRetry({
+      threadId: viewingId,
+      address: current.address,
+      baseRevision: current.cloud?.revision,
+      previouslySynced:
+        current.cloud?.state === "synced" || typeof current.cloud?.revision === "number",
+      messages: current.messages,
+      chatState: buildChatStatePayload(current),
+      clientUpdatedAt: new Date().toISOString(),
+      report: current.report,
+      metadata: current.metadata,
+    });
+    if (pushed.status >= 200 && pushed.status < 300) {
+      patchLocalThread(viewingId, {
+        ownerUserId: ownerId,
+        cloud: {
+          state: "synced",
+          lastSyncedAt: new Date().toISOString(),
+          revision: pushed.revision,
+        },
+      });
+      refresh();
+      return true;
+    }
+    if (pushed.status === 409) {
+      patchLocalThread(viewingId, { cloud: { state: "failed" } });
+    }
+    return false;
+  }
+
   function queueSync() {
     if (!userId) return;
     window.clearTimeout(syncTimer.current);
     syncTimer.current = window.setTimeout(() => {
-      void (async () => {
-        const current = getLocalThread(viewingId);
-        if (!current) return;
-        const pushed = await pushViewingThread({
-          threadId: viewingId,
-          address: current.address,
-          baseRevision: current.cloud?.revision,
-          previouslySynced:
-            current.cloud?.state === "synced" || typeof current.cloud?.revision === "number",
-          messages: current.messages,
-          chatState: buildChatStatePayload(current),
-          clientUpdatedAt: new Date().toISOString(),
-          report: current.report,
-          metadata: current.metadata,
-        });
-        if (pushed.status >= 200 && pushed.status < 300) {
-          patchLocalThread(viewingId, {
-            ownerUserId: userId,
-            cloud: {
-              state: "synced",
-              lastSyncedAt: new Date().toISOString(),
-              revision: pushed.revision,
-            },
-          });
-          refresh();
-        }
-      })();
+      void flushCloudSync(userId);
     }, 600);
   }
 
@@ -318,7 +347,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
     if (!current) return false;
     if (current.cloud?.state === "synced") return true;
     const previouslySynced = typeof current.cloud?.revision === "number";
-    const pushed = await pushViewingThread({
+    const pushed = await pushViewingThreadWithConflictRetry({
       threadId: viewingId,
       address: current.address,
       baseRevision: current.cloud?.revision,
@@ -434,11 +463,16 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
         setUserId(uid);
       }
       if (uid) {
-        const ok = await hydrateViewingThread(viewingId, uid);
-        if (!ok && !getLocalThread(viewingId)) {
+        const hydrated = await hydrateViewingThread(viewingId, uid);
+        if (!hydrated.ok && !getLocalThread(viewingId)) {
           setMissing(true);
           setReady(true);
           return;
+        }
+        if (hydrated.needsSync) {
+          window.setTimeout(() => {
+            void flushCloudSync(uid);
+          }, 0);
         }
       } else if (!getLocalThread(viewingId)) {
         setMissing(true);
@@ -718,6 +752,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
       const data = (await response.json()) as {
         report?: ChatReportSnapshot;
         notesFingerprint?: string;
+        revision?: number;
         error?: string;
       };
       if (!response.ok || !data.report) {
@@ -728,6 +763,15 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
       patchLocalThread(viewingId, {
         report: data.report,
         reportNotesFingerprint: fingerprintNext,
+        ...(typeof data.revision === "number"
+          ? {
+              cloud: {
+                state: "synced" as const,
+                lastSyncedAt: new Date().toISOString(),
+                revision: data.revision,
+              },
+            }
+          : {}),
       });
       // Keep report as a product — do not append AI report bubbles into the notes stream.
       setShownReport({ ...data.report, notesFingerprint: fingerprintNext });

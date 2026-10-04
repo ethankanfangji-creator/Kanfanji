@@ -10,10 +10,11 @@ import {
   LogIn,
   LogOut,
   Check,
+  MessageSquareText,
   PanelLeft,
   Pin,
   Plus,
-  Search,
+  Share2,
   Trash2,
   UserRound,
 } from "lucide-react";
@@ -104,9 +105,7 @@ export function IconRail({
   sidebarOpen,
   onToggleSidebar,
   onNew,
-  onOpenSearch,
   onOpenMedia,
-  searchOpen,
   mediaOpen,
   threads,
   activeId,
@@ -122,9 +121,7 @@ export function IconRail({
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
   onNew: () => void;
-  onOpenSearch: () => void;
   onOpenMedia: () => void;
-  searchOpen?: boolean;
   mediaOpen?: boolean;
   threads: ViewingChatThread[];
   activeId: string | null;
@@ -151,8 +148,7 @@ export function IconRail({
   }
   const profileRef = useRef<HTMLDivElement>(null);
   const expanded = sidebarOpen;
-  const [historyQuery, setHistoryQuery] = useState("");
-  const recent = filterHistoryThreads(threads, searchOpen ? historyQuery : "").slice(0, 20);
+  const recent = filterHistoryThreads(threads, "").slice(0, 20);
 
   useEffect(() => {
     const supabase = getSupabase();
@@ -213,12 +209,11 @@ export function IconRail({
           <Plus className="h-5 w-5" strokeWidth={2.25} />
         </RailButton>
         <RailButton
-          label={messages.chat.searchRecords}
-          active={searchOpen}
+          label={messages.portfolio.tabAsk}
+          href="/ask"
           expanded={expanded}
-          onClick={onOpenSearch}
         >
-          <Search className="h-5 w-5" strokeWidth={2} />
+          <MessageSquareText className="h-5 w-5" strokeWidth={2} />
         </RailButton>
         <RailButton
           label={messages.chat.mediaLibrary}
@@ -228,8 +223,15 @@ export function IconRail({
         >
           <Database className="h-5 w-5" strokeWidth={2} />
         </RailButton>
-        <RailButton label="看房列表" href="/viewings" expanded={expanded}>
+        <RailButton label={messages.viewings.navLabel} href="/viewings" expanded={expanded}>
           <List className="h-5 w-5" strokeWidth={2} />
+        </RailButton>
+        <RailButton
+          label={messages.nav.sharesHub}
+          href="/shares"
+          expanded={expanded}
+        >
+          <Share2 className="h-5 w-5" strokeWidth={2} />
         </RailButton>
       </div>
 
@@ -240,14 +242,6 @@ export function IconRail({
               {messages.chat.historyTitle}
             </p>
           </div>
-          {searchOpen ? (
-            <input
-              value={historyQuery}
-              onChange={(event) => setHistoryQuery(event.target.value)}
-              placeholder={messages.chat.searchPlaceholder}
-              className="mx-3 mb-2 h-9 rounded-full border border-black/10 px-3 text-[13px]"
-            />
-          ) : null}
           {compareMode && maxHintShown ? (
             <p className="px-3 pb-1 text-[12px] font-semibold text-[#92400E]" role="status">
               {maxItems <= 2 ? messages.compare.gateTooManyFree : messages.compare.gateTooManyPro}
@@ -443,6 +437,14 @@ export function IconRail({
 
                   <div className="my-1 border-t border-black/8" />
 
+                  <Link
+                    href="/shares"
+                    onClick={() => setProfileOpen(false)}
+                    className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-[12px] font-bold hover:bg-[#FAF6F1]"
+                  >
+                    <Share2 className="h-3.5 w-3.5 shrink-0" />
+                    {messages.nav.sharesHub}
+                  </Link>
                   <a
                     href={supportMailto(locale, user?.email)}
                     onClick={() => setProfileOpen(false)}

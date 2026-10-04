@@ -1,12 +1,18 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ThumbsDown, ThumbsUp } from "lucide-react";
+import { ArrowLeft, Check, Pencil, Share2, ThumbsDown, ThumbsUp, Trash2, X } from "lucide-react";
 import { useI18n } from "@/components/I18nProvider";
+import { DecisionStatusPicker } from "@/components/portfolio/DecisionStatusPicker";
+import { ReportSectionsView } from "@/components/viewing-chat/ReportSectionsView";
+import { ShareReportCommentsPanel } from "@/components/viewing-chat/ShareReportCommentsPanel";
+import { ShareReportDialog } from "@/components/viewing-chat/ShareReportDialog";
 import { ViewingChatComposer } from "@/components/viewing-chat/ViewingChatComposer";
 import { useChatMediaUrl } from "@/components/viewing-chat/useChatMediaUrl";
 import { AI_CONSENT_VERSION } from "@/lib/ai-boundary/client";
+import type { DecisionStatus } from "@/lib/portfolio";
 import {
   briefingDisplaySources,
   briefingDisplaySummary,
@@ -19,6 +25,7 @@ import {
   type ViewingBriefing,
   type ViewingBriefingFeedback,
 } from "@/lib/viewing-chat/briefing";
+import { localPreferenceBlock } from "@/lib/viewing-chat/ai-preferences";
 import { applyChatStateToLocal } from "@/lib/viewing-chat/chat-state";
 import { buildChatStatePayload, pushViewingThread } from "@/lib/viewing-chat/cloud-push";
 import { appendChatMessages } from "@/lib/viewing-chat/append-messages";
@@ -29,11 +36,13 @@ import {
   upsertLocalThread,
 } from "@/lib/viewing-chat/local-store";
 import { addMediaFile } from "@/lib/viewing-chat/media-library";
+import { submitAiFeedback } from "@/lib/viewing-chat/submit-ai-feedback";
 import { uploadViewingFile, appendViewingPath } from "@/lib/media";
 import { getSupabase } from "@/lib/supabase";
 import {
   createUserMessage,
   type ChatMessage,
+  type ChatReportFeedback,
   type ChatReportSnapshot,
   type ViewingChatThread,
 } from "@/lib/viewing-chat/types";
@@ -97,9 +106,13 @@ async function hydrateViewingThread(threadId: string, ownerUserId: string) {
 function NoteMedia({ message }: { message: ChatMessage }) {
   const ref = message.media?.[0] ?? null;
   const { url } = useChatMediaUrl(ref);
-  if (message.type === "photo" && url) {
+  const kind = ref?.kind;
+  if ((message.type === "photo" || kind === "image") && url) {
     // eslint-disable-next-line @next/next/no-img-element
     return <img src={url} alt="" className="mt-2 max-h-56 w-full rounded-xl object-cover" />;
+  }
+  if (kind === "video" && url) {
+    return <video className="mt-2 max-h-56 w-full rounded-xl" controls preload="metadata" src={url} />;
   }
   if (message.type === "audio" && url) {
     return <audio className="mt-2 w-full" controls src={url} />;
@@ -107,7 +120,34 @@ function NoteMedia({ message }: { message: ChatMessage }) {
   return null;
 }
 
+function ReportGallery({ refs }: { refs: NonNullable<ChatReportSnapshot["mediaRefs"]> }) {
+  return (
+    <div className="flex gap-2 overflow-x-auto pb-1">
+      {refs.map((item) => (
+        <ReportGalleryItem key={item.path || item.id} item={item} />
+      ))}
+    </div>
+  );
+}
+
+function ReportGalleryItem({ item }: { item: NonNullable<ChatReportSnapshot["mediaRefs"]>[number] }) {
+  const { url } = useChatMediaUrl(item);
+  if (!url) {
+    return (
+      <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-lg bg-black/5 text-[11px] text-[#6B7280]">
+        {item.kind === "video" ? "▶" : "…"}
+      </div>
+    );
+  }
+  if (item.kind === "video") {
+    return <video src={url} controls preload="metadata" className="h-20 w-28 shrink-0 rounded-lg object-cover" />;
+  }
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={url} alt="" className="h-20 w-20 shrink-0 rounded-lg object-cover" />;
+}
+
 export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
+  const router = useRouter();
   const { messages: t, locale } = useI18n();
   const c = t.chat;
   const [thread, setThread] = useState<ViewingChatThread | null>(null);
@@ -119,6 +159,16 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
   const [reportBusy, setReportBusy] = useState(false);
   const [shownReport, setShownReport] = useState<ChatReportSnapshot | null>(null);
   const [status, setStatus] = useState("");
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState("");
+  const [feedbackPrompt, setFeedbackPrompt] = useState<null | "briefing" | "report">(null);
+  const [feedbackReasonDraft, setFeedbackReasonDraft] = useState("");
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [shareLinkId, setShareLinkId] = useState<string | null>(null);
+  const [shareNeedsRegenerate, setShareNeedsRegenerate] = useState(false);
+  const [shareExpires, setShareExpires] = useState<string | null>(null);
+  const [shareError, setShareError] = useState<string | null>(null);
   const syncTimer = useRef(0);
   const notesEndRef = useRef<HTMLDivElement>(null);
 
@@ -165,6 +215,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
           address: args.address,
           locale,
           viewingId,
+          preferenceBlock: !userId ? localPreferenceBlock("briefing") : undefined,
           consentVersion: AI_CONSENT_VERSION,
           consentSessionId: consentSessionId(),
           identityKind: userId ? "user" : "guest",
@@ -262,18 +313,115 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
     }, 600);
   }
 
+  async function ensureSyncedForShare(): Promise<boolean> {
+    const current = getLocalThread(viewingId);
+    if (!current) return false;
+    if (current.cloud?.state === "synced") return true;
+    const previouslySynced = typeof current.cloud?.revision === "number";
+    const pushed = await pushViewingThread({
+      threadId: viewingId,
+      address: current.address,
+      baseRevision: current.cloud?.revision,
+      previouslySynced,
+      messages: current.messages,
+      chatState: buildChatStatePayload(current),
+      clientUpdatedAt: new Date().toISOString(),
+      report: current.report,
+      metadata: current.metadata,
+    });
+    if (pushed.status < 200 || pushed.status >= 300) {
+      setStatus(pushed.status === 403 ? c.shareBlockedLimit : c.shareSyncing);
+      return false;
+    }
+    patchLocalThread(viewingId, {
+      ownerUserId: userId ?? undefined,
+      cloud: {
+        state: "synced",
+        lastSyncedAt: new Date().toISOString(),
+        revision: pushed.revision,
+      },
+    });
+    refresh();
+    return true;
+  }
+
+  async function requestShare() {
+    if (!shownReport) {
+      setStatus(c.shareNoReportYet);
+      return;
+    }
+    if (!getSupabase() || !userId) {
+      router.push(`/login?next=${encodeURIComponent(`/viewings/${viewingId}`)}`);
+      return;
+    }
+    if (!(await ensureSyncedForShare())) return;
+    setShareError(null);
+    setShareOpen(true);
+    void fetch(`/api/share/links?viewingId=${encodeURIComponent(viewingId)}`).then(
+      async (response) => {
+        if (!response.ok) return;
+        const data = (await response.json()) as {
+          url?: string | null;
+          needsRegenerate?: boolean;
+          link?: { id?: string; expiresAt?: string | null };
+        };
+        setShareLinkId(data.link?.id ?? null);
+        setShareNeedsRegenerate(Boolean(data.needsRegenerate));
+        setShareExpires(data.link?.expiresAt ?? null);
+        setShareUrl(data.url ? `${window.location.origin}${data.url}` : null);
+      },
+    );
+  }
+
   function setBriefingFeedback(value: ViewingBriefingFeedback) {
     if (!briefing || !briefingHasContent(briefing)) return;
-    const nextValue: ViewingBriefingFeedback | null =
-      briefing.feedback === value ? null : value;
+    if (briefing.feedback === value) {
+      const next: ViewingBriefing = {
+        ...briefing,
+        feedback: null,
+        feedbackAt: null,
+        feedbackReason: null,
+      };
+      setBriefing(next);
+      patchLocalThread(viewingId, { briefing: next });
+      setFeedbackPrompt(null);
+      setFeedbackReasonDraft("");
+      queueSync();
+      return;
+    }
+    if (value === "dislike") {
+      setFeedbackPrompt("briefing");
+      setFeedbackReasonDraft("");
+      return;
+    }
+    void commitBriefingFeedback("like", null);
+  }
+
+  async function commitBriefingFeedback(
+    rating: ViewingBriefingFeedback,
+    reason: string | null,
+  ) {
+    if (!briefing || !briefingHasContent(briefing)) return;
     const next: ViewingBriefing = {
       ...briefing,
-      feedback: nextValue,
-      feedbackAt: nextValue ? new Date().toISOString() : null,
+      feedback: rating,
+      feedbackAt: new Date().toISOString(),
+      feedbackReason: rating === "dislike" ? reason : null,
     };
     setBriefing(next);
     patchLocalThread(viewingId, { briefing: next });
+    setFeedbackPrompt(null);
+    setFeedbackReasonDraft("");
     queueSync();
+    await submitAiFeedback({
+      kind: "briefing",
+      rating,
+      reason,
+      artifactExcerpt: next.summary,
+      viewingId,
+      generatedAt: next.generatedAt,
+      identityKind: userId ? "user" : "guest",
+    });
   }
 
   useEffect(() => {
@@ -446,6 +594,107 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
     queueSync();
   }
 
+  function markReportStaleFromNotes() {
+    if (!thread || !shownReport) return;
+    patchLocalThread(viewingId, {
+      reportNotesFingerprint: shownReport.notesFingerprint ?? thread.reportNotesFingerprint,
+    });
+  }
+
+  function deleteNote(noteId: string) {
+    if (!thread) return;
+    if (!window.confirm(c.noteDeleteConfirm)) return;
+    const nextMessages = thread.messages.filter((message) => message.id !== noteId);
+    saveLocalMessages(viewingId, nextMessages);
+    markReportStaleFromNotes();
+    if (editingNoteId === noteId) {
+      setEditingNoteId(null);
+      setEditingText("");
+    }
+    refresh();
+    queueSync();
+  }
+
+  function beginEditNote(note: ChatMessage) {
+    const body = note.transcript?.trim() || note.text?.trim() || "";
+    setEditingNoteId(note.id);
+    setEditingText(body);
+  }
+
+  function saveEditNote() {
+    if (!thread || !editingNoteId) return;
+    const nextText = editingText.trim();
+    if (!nextText) return;
+    const nextMessages = thread.messages.map((message) => {
+      if (message.id !== editingNoteId) return message;
+      if (message.type === "audio" || message.transcript != null) {
+        return { ...message, transcript: nextText, text: nextText };
+      }
+      return { ...message, text: nextText };
+    });
+    saveLocalMessages(viewingId, nextMessages);
+    markReportStaleFromNotes();
+    setEditingNoteId(null);
+    setEditingText("");
+    refresh();
+    queueSync();
+  }
+
+  function canEditNote(note: ChatMessage): boolean {
+    return Boolean(note.text?.trim() || note.transcript?.trim());
+  }
+
+  function setReportFeedback(value: ChatReportFeedback) {
+    if (!shownReport) return;
+    if (shownReport.feedback === value) {
+      const next: ChatReportSnapshot = {
+        ...shownReport,
+        followUps: shownReport.followUps ?? [],
+        feedback: null,
+        feedbackAt: null,
+        feedbackReason: null,
+      };
+      setShownReport(next);
+      patchLocalThread(viewingId, { report: next });
+      setFeedbackPrompt(null);
+      setFeedbackReasonDraft("");
+      queueSync();
+      return;
+    }
+    if (value === "dislike") {
+      setFeedbackPrompt("report");
+      setFeedbackReasonDraft("");
+      return;
+    }
+    void commitReportFeedback("like", null);
+  }
+
+  async function commitReportFeedback(rating: ChatReportFeedback, reason: string | null) {
+    if (!shownReport) return;
+    const next: ChatReportSnapshot = {
+      ...shownReport,
+      followUps: shownReport.followUps ?? [],
+      feedback: rating,
+      feedbackAt: new Date().toISOString(),
+      feedbackReason: rating === "dislike" ? reason : null,
+    };
+    setShownReport(next);
+    patchLocalThread(viewingId, { report: next });
+    setFeedbackPrompt(null);
+    setFeedbackReasonDraft("");
+    queueSync();
+    await submitAiFeedback({
+      kind: "report",
+      rating,
+      reason,
+      artifactExcerpt: next.summary,
+      viewingId,
+      notesFingerprint: next.notesFingerprint,
+      generatedAt: next.generatedAt,
+      identityKind: userId ? "user" : "guest",
+    });
+  }
+
   async function generateReport() {
     if (!thread) return;
     setReportBusy(true);
@@ -460,6 +709,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
           viewingId: thread.id,
           messages: userNotesOnly(thread.messages),
           chatState: buildChatStatePayload(thread),
+          preferenceBlock: !userId ? localPreferenceBlock("report") : undefined,
           consentVersion: AI_CONSENT_VERSION,
           consentSessionId: consentSessionId(),
           identityKind: userId ? "user" : "guest",
@@ -520,6 +770,24 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
           <ArrowLeft className="h-3.5 w-3.5" /> {t.loginPage.backHome}
         </Link>
         <h1 className="mt-2 text-[18px] font-bold leading-snug">{thread.address}</h1>
+        <div className="mt-3">
+          <DecisionStatusPicker
+            value={thread.decisionStatus ?? null}
+            labels={{
+              label: t.portfolio.decisionLabel,
+              none: t.portfolio.decisionNone,
+              liked: t.portfolio.decisionLiked,
+              shortlist: t.portfolio.decisionShortlist,
+              passed: t.portfolio.decisionPassed,
+              revisit: t.portfolio.decisionRevisit,
+            }}
+            onChange={(next: DecisionStatus | null) => {
+              patchLocalThread(viewingId, { decisionStatus: next });
+              queueSync();
+              refresh();
+            }}
+          />
+        </div>
       </header>
 
       <section className="border-b border-black/8 px-4 py-4" aria-labelledby="briefing-heading">
@@ -542,37 +810,67 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
                 </p>
               ) : null}
               <div
-                className="mt-3 flex items-center gap-2"
+                className="mt-3 flex items-center gap-1"
                 role="group"
                 aria-label={`${c.briefingLike} / ${c.briefingDislike}`}
               >
                 <button
                   type="button"
                   onClick={() => setBriefingFeedback("like")}
+                  aria-label={c.briefingLike}
+                  title={c.briefingLike}
                   aria-pressed={briefing.feedback === "like"}
-                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-semibold transition ${
+                  className={`inline-flex h-8 w-8 items-center justify-center rounded-full transition ${
                     briefing.feedback === "like"
                       ? "bg-[#1A1A1A] text-white"
-                      : "bg-black/5 text-[#374151] hover:bg-black/10"
+                      : "text-[#6B7280] hover:bg-black/5 hover:text-[#1A1A1A]"
                   }`}
                 >
                   <ThumbsUp className="h-3.5 w-3.5" aria-hidden />
-                  {c.briefingLike}
                 </button>
                 <button
                   type="button"
                   onClick={() => setBriefingFeedback("dislike")}
+                  aria-label={c.briefingDislike}
+                  title={c.briefingDislike}
                   aria-pressed={briefing.feedback === "dislike"}
-                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-semibold transition ${
+                  className={`inline-flex h-8 w-8 items-center justify-center rounded-full transition ${
                     briefing.feedback === "dislike"
                       ? "bg-[#1A1A1A] text-white"
-                      : "bg-black/5 text-[#374151] hover:bg-black/10"
+                      : "text-[#6B7280] hover:bg-black/5 hover:text-[#1A1A1A]"
                   }`}
                 >
                   <ThumbsDown className="h-3.5 w-3.5" aria-hidden />
-                  {c.briefingDislike}
                 </button>
               </div>
+              {feedbackPrompt === "briefing" ? (
+                <div className="mt-3 space-y-2 rounded-xl bg-[#FAF6F1] px-3 py-3">
+                  <textarea
+                    value={feedbackReasonDraft}
+                    onChange={(event) => setFeedbackReasonDraft(event.target.value)}
+                    rows={2}
+                    maxLength={280}
+                    placeholder={c.feedbackReasonPlaceholder}
+                    className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-[13px] outline-none focus:border-black/30"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void commitBriefingFeedback("dislike", feedbackReasonDraft.trim() || null)}
+                      className="rounded-full bg-black px-3 py-1.5 text-[12px] font-bold text-white"
+                    >
+                      {c.feedbackReasonSubmit}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void commitBriefingFeedback("dislike", null)}
+                      className="rounded-full bg-black/5 px-3 py-1.5 text-[12px] font-semibold text-[#374151]"
+                    >
+                      {c.feedbackReasonSkip}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           )
         ) : null}
@@ -591,13 +889,78 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
                 key={note.id}
                 className="rounded-2xl bg-white px-4 py-3 shadow-[0_4px_16px_rgba(0,0,0,0.04)]"
               >
-                <p className="whitespace-pre-wrap text-[14px] leading-relaxed">
-                  {note.transcript || note.text || (note.type === "photo" ? "📷" : note.fileName) || "…"}
-                </p>
-                <NoteMedia message={note} />
-                <p className="mt-2 text-[10px] text-[#9CA3AF]">
-                  {new Date(note.timestamp).toLocaleString()}
-                </p>
+                {editingNoteId === note.id ? (
+                  <div className="space-y-2">
+                    <textarea
+                      value={editingText}
+                      onChange={(event) => setEditingText(event.target.value)}
+                      rows={3}
+                      className="w-full rounded-xl border border-black/10 bg-[#FAF6F1] px-3 py-2 text-[14px] leading-relaxed outline-none focus:border-black/30"
+                    />
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={saveEditNote}
+                        aria-label={c.noteSave}
+                        title={c.noteSave}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-black text-white hover:bg-black/85"
+                      >
+                        <Check className="h-3.5 w-3.5" aria-hidden />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingNoteId(null);
+                          setEditingText("");
+                        }}
+                        aria-label={c.noteCancel}
+                        title={c.noteCancel}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[#6B7280] hover:bg-black/5 hover:text-[#1A1A1A]"
+                      >
+                        <X className="h-3.5 w-3.5" aria-hidden />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <p className="whitespace-pre-wrap text-[14px] leading-relaxed">
+                      {note.transcript ||
+                        note.text ||
+                        (note.type === "photo" ? "📷" : note.fileName) ||
+                        "…"}
+                    </p>
+                    <NoteMedia message={note} />
+                  </>
+                )}
+                <div className="mt-2 flex flex-wrap items-center gap-3">
+                  <p className="text-[10px] text-[#9CA3AF]">
+                    {new Date(note.timestamp).toLocaleString()}
+                  </p>
+                  {editingNoteId !== note.id ? (
+                    <div className="ml-auto flex items-center gap-1">
+                      {canEditNote(note) ? (
+                        <button
+                          type="button"
+                          onClick={() => beginEditNote(note)}
+                          aria-label={c.noteEdit}
+                          title={c.noteEdit}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[#6B7280] hover:bg-black/5 hover:text-[#1A1A1A]"
+                        >
+                          <Pencil className="h-3.5 w-3.5" aria-hidden />
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => deleteNote(note.id)}
+                        aria-label={c.noteDelete}
+                        title={c.noteDelete}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[#9CA3AF] hover:bg-[#FEE2E2] hover:text-[#991B1B]"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               </article>
             ))
           )}
@@ -618,44 +981,135 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
                 {c.reportStale}
               </p>
             ) : null}
-            {shownReport.summary ? (
-              <p className="whitespace-pre-wrap text-[14px] leading-relaxed">{shownReport.summary}</p>
+            {shownReport.version != null ? (
+              <p className="text-[11px] text-[#6B7280]">
+                {c.reportVersion.replace("{n}", String(shownReport.version))}
+                {shownReport.generatedAt
+                  ? ` · ${new Date(shownReport.generatedAt).toLocaleString()}`
+                  : null}
+              </p>
+            ) : shownReport.generatedAt ? (
+              <p className="text-[11px] text-[#6B7280]">
+                {new Date(shownReport.generatedAt).toLocaleString()}
+              </p>
             ) : null}
-            {shownReport.pros.length ? (
+            <ReportSectionsView
+              report={shownReport}
+              labels={{
+                overview: c.reportOverview,
+                interior: c.reportInterior,
+                outdoorLand: c.reportOutdoorLand,
+                transitLifestyle: c.reportTransitLifestyle,
+                pricing: c.reportPricing,
+                pros: c.reportPros,
+                risks: c.reportRisks,
+                scores: c.reportScores,
+                highlight: c.reportHighlight,
+                biggestQuestion: c.reportBiggestQuestion,
+                overall: c.reportOverall,
+                verdict: c.reportVerdict,
+                nextSteps: c.reportNextSteps,
+                meta: {
+                  viewingDate: c.reportMetaViewingDate,
+                  propertyType: c.reportMetaPropertyType,
+                  yearBuilt: c.reportMetaYearBuilt,
+                  askingPrice: c.reportMetaAskingPrice,
+                  lotSize: c.reportMetaLotSize,
+                  interiorSize: c.reportMetaInteriorSize,
+                  layout: c.reportMetaLayout,
+                  neighborhood: c.reportMetaNeighborhood,
+                },
+              }}
+              className="text-[14px]"
+            />
+            {(shownReport.mediaRefs?.length ?? 0) > 0 ? (
               <div>
-                <p className="text-[12px] font-bold text-[#166534]">優點</p>
-                <ul className="mt-1 list-disc pl-4 text-[13px]">
-                  {shownReport.pros.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
+                <p className="mb-1 text-[12px] font-bold text-[#374151]">{c.reportMedia}</p>
+                <ReportGallery refs={shownReport.mediaRefs ?? []} />
               </div>
             ) : null}
-            {shownReport.risks.length ? (
-              <div>
-                <p className="text-[12px] font-bold text-[#991B1B]">風險</p>
-                <ul className="mt-1 list-disc pl-4 text-[13px]">
-                  {shownReport.risks.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
+            <div className="flex items-center gap-1 pt-1">
+              <div
+                className="flex items-center gap-1"
+                role="group"
+                aria-label={`${c.reportLike} / ${c.reportDislike}`}
+              >
+                <button
+                  type="button"
+                  onClick={() => setReportFeedback("like")}
+                  aria-label={c.reportLike}
+                  title={c.reportLike}
+                  aria-pressed={shownReport.feedback === "like"}
+                  className={`inline-flex h-8 w-8 items-center justify-center rounded-full transition ${
+                    shownReport.feedback === "like"
+                      ? "bg-[#1A1A1A] text-white"
+                      : "text-[#6B7280] hover:bg-black/5 hover:text-[#1A1A1A]"
+                  }`}
+                >
+                  <ThumbsUp className="h-3.5 w-3.5" aria-hidden />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReportFeedback("dislike")}
+                  aria-label={c.reportDislike}
+                  title={c.reportDislike}
+                  aria-pressed={shownReport.feedback === "dislike"}
+                  className={`inline-flex h-8 w-8 items-center justify-center rounded-full transition ${
+                    shownReport.feedback === "dislike"
+                      ? "bg-[#1A1A1A] text-white"
+                      : "text-[#6B7280] hover:bg-black/5 hover:text-[#1A1A1A]"
+                  }`}
+                >
+                  <ThumbsDown className="h-3.5 w-3.5" aria-hidden />
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => void requestShare()}
+                aria-label={c.shareReport}
+                title={c.shareReport}
+                className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-full bg-black text-white hover:bg-black/85"
+              >
+                <Share2 className="h-3.5 w-3.5" aria-hidden />
+              </button>
+            </div>
+            {feedbackPrompt === "report" ? (
+              <div className="space-y-2 rounded-xl bg-[#FAF6F1] px-3 py-3">
+                <textarea
+                  value={feedbackReasonDraft}
+                  onChange={(event) => setFeedbackReasonDraft(event.target.value)}
+                  rows={2}
+                  maxLength={280}
+                  placeholder={c.feedbackReasonPlaceholder}
+                  className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-[13px] outline-none focus:border-black/30"
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void commitReportFeedback("dislike", feedbackReasonDraft.trim() || null)}
+                    className="rounded-full bg-black px-3 py-1.5 text-[12px] font-bold text-white"
+                  >
+                    {c.feedbackReasonSubmit}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void commitReportFeedback("dislike", null)}
+                    className="rounded-full bg-black/5 px-3 py-1.5 text-[12px] font-semibold text-[#374151]"
+                  >
+                    {c.feedbackReasonSkip}
+                  </button>
+                </div>
               </div>
             ) : null}
-            {shownReport.checklist.length ? (
-              <div>
-                <p className="text-[12px] font-bold">檢查</p>
-                <ul className="mt-1 space-y-1 text-[13px]">
-                  {shownReport.checklist.map((row) => (
-                    <li key={row.id}>
-                      {row.question}：
-                      {row.status === "unknown"
-                        ? c.reportUnseen
-                        : row.answer || c.reportUnseen}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
+            <ShareReportCommentsPanel
+              viewingId={viewingId}
+              labels={{
+                title: c.shareCommentsTitle,
+                empty: c.shareCommentsEmpty,
+                guestDefault: c.shareCommentsGuestDefault,
+                loadFailed: c.shareCommentsLoadFailed,
+              }}
+            />
           </div>
         )}
         <button
@@ -701,6 +1155,109 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
           }}
         />
       </div>
+      <ShareReportDialog
+        open={shareOpen}
+        url={shareUrl}
+        needsRegenerate={shareNeedsRegenerate}
+        error={shareError}
+        labels={{
+          title: c.shareNoticeTitle,
+          body: shareExpires
+            ? c.shareExisting.replace("{date}", shareExpires.slice(0, 10))
+            : c.shareNoticeBody,
+          point1: c.shareNoticePoint1,
+          point2: c.shareNoticePoint2,
+          point3: c.shareNoticePoint3,
+          acknowledge: c.shareAcknowledge,
+          create: c.shareCreate,
+          revoke: c.shareRevoke,
+          regenerate: c.shareRegenerate,
+          regenerateConfirm: c.shareRegenerateConfirm,
+          copy: c.shareCopy,
+          copyFailed: c.shareCopyFailed,
+          unavailable: c.shareUnavailable,
+          needsRegenerate: c.shareNeedsRegenerate,
+          close: c.shareClose,
+        }}
+        onClose={() => setShareOpen(false)}
+        onCreate={() => {
+          void fetch("/api/share/links", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ viewingId }),
+          }).then(async (response) => {
+            const data = (await response.json()) as {
+              urlPath?: string;
+              error?: string;
+              code?: string;
+              link?: { id?: string; expiresAt?: string | null };
+            };
+            if (response.status === 429) setShareError(c.shareRateLimited);
+            else if (response.status === 503) setShareError(c.shareUnavailable);
+            else if (data.code === "VIEWING_NOT_FOUND" || response.status === 404) {
+              setShareError(c.viewingNotFound);
+            } else if (response.status === 409) setShareError(c.shareNoReportYet);
+            else if (!response.ok) setShareError(c.shareUnavailable);
+            else {
+              setShareError(null);
+              setShareLinkId(data.link?.id ?? null);
+              setShareExpires(data.link?.expiresAt ?? null);
+              setShareNeedsRegenerate(false);
+              setShareUrl(data.urlPath ? `${window.location.origin}${data.urlPath}` : null);
+            }
+          });
+        }}
+        onCopy={async () => {
+          if (!shareUrl) return false;
+          try {
+            await navigator.clipboard.writeText(shareUrl);
+            return true;
+          } catch {
+            return false;
+          }
+        }}
+        onRevoke={() => {
+          if (!shareLinkId) return;
+          const previous = shareUrl;
+          void fetch(`/api/share/links/${shareLinkId}/revoke`, { method: "POST" }).then(
+            async (response) => {
+              if (!response.ok) {
+                setShareUrl(previous);
+                setShareError(c.shareUnavailable);
+                return;
+              }
+              setShareUrl(null);
+              setShareLinkId(null);
+              setShareError(null);
+              setStatus(c.shareRevoked);
+            },
+          );
+        }}
+        onRegenerate={() => {
+          if (!shareLinkId) return;
+          void fetch(`/api/share/links/${shareLinkId}/rotate`, { method: "POST" }).then(
+            async (response) => {
+              const data = (await response.json()) as {
+                urlPath?: string;
+                code?: string;
+                link?: { id?: string; expiresAt?: string | null };
+              };
+              if (response.status === 429) {
+                setShareError(c.shareRateLimited);
+                return;
+              }
+              if (!response.ok || !data.urlPath) {
+                setShareError(c.shareUnavailable);
+                return;
+              }
+              setShareError(null);
+              setShareLinkId(data.link?.id ?? null);
+              setShareExpires(data.link?.expiresAt ?? null);
+              setShareUrl(`${window.location.origin}${data.urlPath}`);
+            },
+          );
+        }}
+      />
     </div>
   );
 }

@@ -206,18 +206,13 @@ Address confirm → property basics → Start viewing → Step 2 one text input 
 
 Contract tests: `lib/viewing-wizard/vertical-slice.test.ts`.
 
-## Viewing Chat Thread (2026-09-19; A path 2026-09-22)
+## Notes session + Ask (2026-10-04)
 
-Home UI is Meta-AI style chat (`ViewingChatApp`):
-
-- Default (Option A): address → `viewing_preparation` → on-site text/voice/photo → `/api/viewing-chat/report`
-- Optional listing intake: “Advanced: add listing” → `property-source/ingest` chips
-- `viewings.messages` JSONB + `viewings.report` JSONB (migration `viewing_chat_messages`)
-- Guest threads in `localStorage`; authenticated can persist via `/api/viewing-chat/*`
-- Question bank = read-only projection from messages (`lib/viewing-chat/project-bank.ts`)
-- APIs: `POST /api/viewing-chat/turn` (Whisper + fill/new_card), `POST /api/viewing-chat/report`
-
-Legacy wizard `ClientPage` remains in repo but is no longer the home route.
+- Home shell (`ViewingChatApp`): address create + history / compare / media / ask nav only
+- Capture: `ViewingSessionApp` at `/viewings/[id]` — user notes timeline (`role===user` messages) + briefing + report
+- Second act: `/ask` Portfolio Q&A (`components/portfolio/PortfolioAskApp.tsx`)
+- Storage: `viewings.messages` JSONB + `viewings.report` JSONB + `chat_state` (notes fields + `decisionStatus`)
+- APIs: `POST /api/viewing-chat/report`, `POST /api/viewing-chat/briefing`, `POST /api/portfolio/ask` — **no** on-site `/api/viewing-chat/turn`
 
 Scope: `docs/product-scope-a.md`.
 

@@ -26,7 +26,11 @@ describe("VIEWING_RECORDER_SYSTEM_PROMPT", () => {
 
   it("exports polish and report variants with grounding rules", () => {
     expect(VIEWING_RECORDER_POLISH_RULES).toMatch(/不可新增事實/);
-    expect(VIEWING_RECORDER_REPORT_RULES).toMatch(/不要說資料已經完整/);
+    expect(VIEWING_RECORDER_REPORT_RULES).toMatch(/BRIEFING_INTRO/);
+    expect(VIEWING_RECORDER_REPORT_RULES).toMatch(/"scores"/);
+    expect(VIEWING_RECORDER_REPORT_RULES).toMatch(/biggestQuestion/);
+    expect(VIEWING_RECORDER_REPORT_RULES).toMatch(/outdoorLand/);
+    expect(VIEWING_RECORDER_REPORT_RULES).not.toMatch(/whatsStoppingYou/);
     expect(viewingRecorderReportRules("en")).toMatch(/English/);
   });
 });

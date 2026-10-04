@@ -104,11 +104,95 @@ export function buildSharePublication(
   };
 }
 
-function scrubShareText(value: string): string {
-  return value.replace(/[\u0000-\u001F]/g, "").slice(0, 300);
+const SHARE_REPORT_PHOTO_LIMIT = 24;
+const SHARE_SUMMARY_MAX_CHARS = 12_000;
+const SHARE_SECTION_MAX_CHARS = 8_000;
+const SHARE_LIST_LIMIT = 20;
+
+function scrubShareText(value: string, max = 300): string {
+  return value.replace(/[\u0000-\u001F]/g, "").slice(0, max);
 }
 
-export const ChatReportShareSnapshotSchema = z
+function scrubOptionalSection(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const scrubbed = scrubShareText(value, SHARE_SECTION_MAX_CHARS).trim();
+  return scrubbed || undefined;
+}
+
+function scrubStringList(value: unknown, limit = SHARE_LIST_LIMIT): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => scrubShareText(item))
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
+function chatReportImageManifest(
+  viewing: {
+    id: string;
+    user_id: string;
+    photo_urls?: string[] | null;
+    report: unknown;
+  },
+): PublishedShareMediaItem[] {
+  const report = (
+    viewing.report && typeof viewing.report === "object" ? viewing.report : {}
+  ) as {
+    mediaRefs?: Array<{ id?: string; kind?: string; path?: string | null }>;
+  };
+  const refs = Array.isArray(report.mediaRefs) ? report.mediaRefs : [];
+  const seen = new Set<string>();
+  const mediaManifest: PublishedShareMediaItem[] = [];
+  for (const ref of refs) {
+    if (ref?.kind !== "image") continue;
+    const path = ownedViewingPhotoPath(ref.path, {
+      id: viewing.id,
+      user_id: viewing.user_id,
+      photo_urls: viewing.photo_urls ?? null,
+    });
+    if (!path || seen.has(path)) continue;
+    seen.add(path);
+    mediaManifest.push({
+      id: scrubShareText(String(ref.id || path), 80) || path,
+      path,
+    });
+    if (mediaManifest.length >= SHARE_REPORT_PHOTO_LIMIT) break;
+  }
+  return mediaManifest;
+}
+
+const ShareReportMetaSchema = z
+  .object({
+    viewingDate: z.string().nullable().optional(),
+    propertyType: z.string().nullable().optional(),
+    yearBuilt: z.string().nullable().optional(),
+    askingPrice: z.string().nullable().optional(),
+    lotSize: z.string().nullable().optional(),
+    interiorSize: z.string().nullable().optional(),
+    layout: z.string().nullable().optional(),
+    neighborhood: z.string().nullable().optional(),
+  })
+  .strict();
+
+const ShareReportScoresSchema = z
+  .object({
+    items: z
+      .array(
+        z.object({
+          label: z.string(),
+          score: z.number(),
+        }),
+      )
+      .max(16),
+    overall: z.string().optional(),
+    highlight: z.string().optional(),
+    biggestQuestion: z.string().optional(),
+  })
+  .strict();
+
+/** Legacy frozen chat-report snapshots (pre sectioned notes reports). */
+export const ChatReportShareSnapshotV2Schema = z
   .object({
     version: z.literal(2),
     kind: z.literal("chat_report"),
@@ -119,6 +203,7 @@ export const ChatReportShareSnapshotSchema = z
     summary: z.string().nullable(),
     pros: z.array(z.string()).max(3),
     risks: z.array(z.string()).max(3),
+    followUps: z.array(z.string()).max(3).default([]),
     checklist: z
       .array(
         z.object({
@@ -138,7 +223,33 @@ export const ChatReportShareSnapshotSchema = z
   })
   .strict();
 
+/** Sectioned notes-report snapshot aligned with ReportSectionsView. */
+export const ChatReportShareSnapshotSchema = z
+  .object({
+    version: z.literal(3),
+    kind: z.literal("chat_report"),
+    title: z.string(),
+    address: z.string(),
+    publishedAt: z.string(),
+    reportGeneratedAt: z.string(),
+    summary: z.string().nullable(),
+    meta: ShareReportMetaSchema.optional(),
+    overview: z.string().optional(),
+    interior: z.string().optional(),
+    outdoorLand: z.string().optional(),
+    transitLifestyle: z.string().optional(),
+    pricing: z.string().optional(),
+    pros: z.array(z.string()).max(SHARE_LIST_LIMIT),
+    risks: z.array(z.string()).max(SHARE_LIST_LIMIT),
+    scores: ShareReportScoresSchema.optional(),
+    verdict: z.string().optional(),
+    nextSteps: z.array(z.string()).max(SHARE_LIST_LIMIT).optional(),
+  })
+  .strict();
+
+export type ChatReportShareSnapshotV2 = z.infer<typeof ChatReportShareSnapshotV2Schema>;
 export type ChatReportShareSnapshot = z.infer<typeof ChatReportShareSnapshotSchema>;
+export type AnyChatReportShareSnapshot = ChatReportShareSnapshot | ChatReportShareSnapshotV2;
 
 export class ReportNotReadyError extends Error {
   constructor() {
@@ -154,61 +265,165 @@ export function buildChatReportPublication(viewing: {
   report: unknown;
   chat_state: unknown;
   updated_at: string;
-}): { snapshot: ChatReportShareSnapshot; mediaManifest: [] } {
+  photo_urls?: string[] | null;
+}): { snapshot: ChatReportShareSnapshot; mediaManifest: PublishedShareMediaItem[] } {
+  void viewing.chat_state;
   const report = (
     viewing.report && typeof viewing.report === "object" ? viewing.report : {}
   ) as {
+    title?: string;
     summary?: string;
+    meta?: unknown;
+    overview?: string;
+    interior?: string;
+    outdoorLand?: string;
+    transitLifestyle?: string;
+    pricing?: string;
     pros?: string[];
     risks?: string[];
-    checklist?: Array<{ question?: string; answer?: string; status?: string }>;
+    scores?: unknown;
+    verdict?: string;
+    nextSteps?: string[];
     generatedAt?: string;
   };
-  const fieldsRecord = (
-    viewing.chat_state as {
-      propertyRecord?: { fields?: Record<string, { value?: unknown; status?: string }> };
-    } | null
-  )?.propertyRecord?.fields;
-  const fields = Object.entries(fieldsRecord ?? {})
-    .filter(([, field]) => {
-      const status = String(field?.status ?? "");
-      return field?.value != null && status !== "unknown" && status !== "skipped";
-    })
-    .map(([fieldId, field]) => ({
-      fieldId,
-      value: scrubShareText(String(field.value)),
-      status: field.status as "confirmed" | "subjective" | "inferred" | "corrected",
-    }));
+
+  const metaRaw =
+    report.meta && typeof report.meta === "object" && !Array.isArray(report.meta)
+      ? (report.meta as Record<string, unknown>)
+      : null;
+  const meta = metaRaw
+    ? ShareReportMetaSchema.safeParse({
+        viewingDate:
+          typeof metaRaw.viewingDate === "string"
+            ? scrubShareText(metaRaw.viewingDate, 120) || null
+            : metaRaw.viewingDate === null
+              ? null
+              : undefined,
+        propertyType:
+          typeof metaRaw.propertyType === "string"
+            ? scrubShareText(metaRaw.propertyType, 120) || null
+            : metaRaw.propertyType === null
+              ? null
+              : undefined,
+        yearBuilt:
+          typeof metaRaw.yearBuilt === "string"
+            ? scrubShareText(metaRaw.yearBuilt, 80) || null
+            : metaRaw.yearBuilt === null
+              ? null
+              : undefined,
+        askingPrice:
+          typeof metaRaw.askingPrice === "string"
+            ? scrubShareText(metaRaw.askingPrice, 120) || null
+            : metaRaw.askingPrice === null
+              ? null
+              : undefined,
+        lotSize:
+          typeof metaRaw.lotSize === "string"
+            ? scrubShareText(metaRaw.lotSize, 120) || null
+            : metaRaw.lotSize === null
+              ? null
+              : undefined,
+        interiorSize:
+          typeof metaRaw.interiorSize === "string"
+            ? scrubShareText(metaRaw.interiorSize, 120) || null
+            : metaRaw.interiorSize === null
+              ? null
+              : undefined,
+        layout:
+          typeof metaRaw.layout === "string"
+            ? scrubShareText(metaRaw.layout, 120) || null
+            : metaRaw.layout === null
+              ? null
+              : undefined,
+        neighborhood:
+          typeof metaRaw.neighborhood === "string"
+            ? scrubShareText(metaRaw.neighborhood, 160) || null
+            : metaRaw.neighborhood === null
+              ? null
+              : undefined,
+      }).data
+    : undefined;
+
+  let scores: z.infer<typeof ShareReportScoresSchema> | undefined;
+  if (report.scores && typeof report.scores === "object" && !Array.isArray(report.scores)) {
+    const row = report.scores as Record<string, unknown>;
+    const items = Array.isArray(row.items)
+      ? row.items.flatMap((item) => {
+          if (!item || typeof item !== "object") return [];
+          const label = scrubShareText(String((item as { label?: unknown }).label ?? ""), 80);
+          const scoreRaw = (item as { score?: unknown }).score;
+          const score = typeof scoreRaw === "number" ? scoreRaw : Number(scoreRaw);
+          if (!label || !Number.isFinite(score)) return [];
+          return [{ label, score }];
+        }).slice(0, 16)
+      : [];
+    const overall =
+      typeof row.overall === "string" ? scrubShareText(row.overall, 80) || undefined : undefined;
+    const highlight =
+      typeof row.highlight === "string"
+        ? scrubShareText(row.highlight, 500) || undefined
+        : undefined;
+    const biggestQuestion =
+      typeof row.biggestQuestion === "string"
+        ? scrubShareText(row.biggestQuestion, 500) || undefined
+        : undefined;
+    if (items.length || overall || highlight || biggestQuestion) {
+      scores = { items, overall, highlight, biggestQuestion };
+    }
+  }
+
+  const reportTitle = scrubOptionalSection(report.title);
   const snapshot = ChatReportShareSnapshotSchema.parse({
-    version: 2,
+    version: 3,
     kind: "chat_report",
-    title: "看房報告",
+    title: reportTitle || "看房報告",
     address: scrubShareText(viewing.address),
     publishedAt: new Date().toISOString(),
     reportGeneratedAt: report.generatedAt ?? viewing.updated_at,
-    summary: report.summary ? scrubShareText(report.summary) : null,
-    pros: (report.pros ?? []).slice(0, 3).map(scrubShareText),
-    risks: (report.risks ?? []).slice(0, 3).map(scrubShareText),
-    checklist: (report.checklist ?? []).slice(0, 20).map((item) => ({
-      question: scrubShareText(item.question ?? ""),
-      answer: scrubShareText(item.answer ?? ""),
-      status: item.status === "ok" || item.status === "risk" ? item.status : "unknown",
-    })),
-    fields,
+    summary: report.summary
+      ? scrubShareText(report.summary, SHARE_SUMMARY_MAX_CHARS)
+      : null,
+    ...(meta ? { meta } : {}),
+    ...(scrubOptionalSection(report.overview)
+      ? { overview: scrubOptionalSection(report.overview) }
+      : {}),
+    ...(scrubOptionalSection(report.interior)
+      ? { interior: scrubOptionalSection(report.interior) }
+      : {}),
+    ...(scrubOptionalSection(report.outdoorLand)
+      ? { outdoorLand: scrubOptionalSection(report.outdoorLand) }
+      : {}),
+    ...(scrubOptionalSection(report.transitLifestyle)
+      ? { transitLifestyle: scrubOptionalSection(report.transitLifestyle) }
+      : {}),
+    ...(scrubOptionalSection(report.pricing)
+      ? { pricing: scrubOptionalSection(report.pricing) }
+      : {}),
+    pros: scrubStringList(report.pros),
+    risks: scrubStringList(report.risks),
+    ...(scores ? { scores } : {}),
+    ...(scrubOptionalSection(report.verdict)
+      ? { verdict: scrubOptionalSection(report.verdict) }
+      : {}),
+    ...(scrubStringList(report.nextSteps).length
+      ? { nextSteps: scrubStringList(report.nextSteps) }
+      : {}),
   });
+  const mediaManifest = chatReportImageManifest(viewing);
   const encoded = JSON.stringify(snapshot);
   if (encoded.includes(viewing.id) || encoded.includes(viewing.user_id)) {
     throw new Error("SHARE_SNAPSHOT_LEAK");
   }
-  return { snapshot, mediaManifest: [] };
+  return { snapshot, mediaManifest };
 }
 
 export function isPublishedShareSnapshot(
   value: unknown,
-): value is PublishedShareSnapshot | ChatReportShareSnapshot {
+): value is PublishedShareSnapshot | AnyChatReportShareSnapshot {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const row = value as Record<string, unknown>;
-  if (row.version === 2) return ChatReportShareSnapshotSchema.safeParse(value).success;
+  if (row.version === 3) return ChatReportShareSnapshotSchema.safeParse(value).success;
+  if (row.version === 2) return ChatReportShareSnapshotV2Schema.safeParse(value).success;
   return (
     row.version === 1 &&
     typeof row.title === "string" &&

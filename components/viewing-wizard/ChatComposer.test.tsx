@@ -118,7 +118,7 @@ describe("ChatComposer media adapter", () => {
     expect(await screen.findByText(copy.micDenied)).toBeTruthy();
   });
 
-  it("explains why mic is needed before requesting getUserMedia", async () => {
+  it("asks the browser for the microphone on the first tap", async () => {
     const user = userEvent.setup();
     const adapter = createMockMediaPermissionAdapter({
       statuses: { microphone: "prompt" },
@@ -139,13 +139,7 @@ describe("ChatComposer media adapter", () => {
       />,
     );
     await user.click(screen.getByRole("button", { name: copy.recording }));
-    expect(requestSpy).not.toHaveBeenCalled();
-    expect(
-      await screen.findByRole("dialog", { name: permissionCopy.titleMic }),
-    ).toBeTruthy();
-    expect(screen.getByText(permissionCopy.bodyMic)).toBeTruthy();
-
-    await user.click(screen.getByRole("button", { name: permissionCopy.continue }));
+    expect(screen.queryByRole("dialog", { name: permissionCopy.titleMic })).toBeNull();
     expect(requestSpy).toHaveBeenCalled();
   });
 

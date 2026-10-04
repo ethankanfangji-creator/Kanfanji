@@ -160,8 +160,21 @@ export async function resolvePublicShare(
     }
 
     const published = row.snapshot;
-    if (published.version === 2) {
-      void touchShareResolved(admin, row).catch(() => undefined);
+    if (published.version === 2 || published.version === 3) {
+      const photoUrls = await signPublishedPaths(
+        row.mediaManifest.map((item) => item.path),
+        row.ownerId,
+        row.shareLink.viewing_id,
+      );
+      const finalRow = await fetchViewingByShareTokenAdmin(admin, token);
+      if (!finalRow || !sameRelease(row, finalRow)) {
+        const finalGateRow = await fetchShareGateByTokenAdmin(admin, token);
+        const finalGate = gateFromViewing(finalGateRow, false);
+        return finalGate === "revoked" || finalGate === "expired"
+          ? mapStatusToFailure(finalGate)
+          : mapStatusToFailure("forbidden");
+      }
+      void touchShareResolved(admin, finalRow).catch(() => undefined);
       return {
         version: 1,
         capability: "read",
@@ -170,11 +183,11 @@ export async function resolvePublicShare(
         address: published.address,
         updatedAt: published.reportGeneratedAt,
         decisionSummary: null,
-        photoUrls: [],
+        photoUrls,
         chatReport: published,
         meta: {
-          passwordProtected: Boolean(row.shareLink.password_hash),
-          expiresAt: row.shareLink.expires_at,
+          passwordProtected: Boolean(finalRow.shareLink.password_hash),
+          expiresAt: finalRow.shareLink.expires_at,
           snapshotUpdatedAt: published.publishedAt,
         },
       };

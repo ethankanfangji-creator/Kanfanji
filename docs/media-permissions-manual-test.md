@@ -5,11 +5,11 @@ Cross-browser checks for mic / camera / photo / video. Prefer real devices for i
 ## Shared rules (all browsers)
 
 - [ ] Cold start the app — **no** mic/camera prompt appears until a capture control is tapped.
-- [ ] **Audio / video:** first tap in a session may show a short explain sheet (1–2 sentences why the permission is needed); Continue hands off to the **native** OS/browser permission prompt (or opens the video file picker).
-- [ ] **Wizard chat Mic:** first tap shows the same why-permission sheet before `getUserMedia`; Deny keeps text-note (and Cancel) — no live mic required.
-- [ ] **After mic is granted** (or the explain was already shown), later Record taps **start recording directly** — no custom permission dialog every time.
+- [ ] **Audio / camera / video:** first tap hands off to the **native** OS/browser permission prompt (or opens the file / camera picker). No custom in-app “why permission” sheet.
+- [ ] **Wizard / viewing chat Mic:** first tap calls `getUserMedia` so the browser can ask; Deny keeps text-note — no live mic required.
+- [ ] **After mic is granted**, later Record taps **start recording directly** — no custom permission dialog every time.
 - [ ] **Photos (wizard Add):** use the native file picker (`accept="image/*" capture="environment"`) with **no** in-app permission dialog.
-- [ ] **Viewing chat Camera:** first tap may show a short camera explain sheet; Continue opens capture input; Deny / Block shows settings guidance **and** gallery (`image/*`) import; typed composer notes stay intact.
+- [ ] **Viewing chat Camera:** tap opens capture input immediately so the browser/OS can ask; Deny / Block shows settings guidance **and** gallery (`image/*`) import; typed composer notes stay intact.
 - [ ] **Viewing chat Mic:** Deny shows banner with **Import audio** (`audio/*`) into the same turn pipeline; composer text is not cleared.
 - [ ] Only one capture path can run at a time (audio vs photo/video picker); double-tapping Record must not start two MediaRecorders.
 - [ ] After **Stop**, the file is in IndexedDB immediately (reload within seconds still shows media / pending process).
@@ -58,13 +58,13 @@ Security regression checks:
 - [ ] Mic: Allow → record → stop → timer accurate → transcript pipeline runs.
 - [ ] Mic: Block → banner shows denied/blocked → import **and** text-note still work.
 - [ ] Revoke mic mid-recording (site settings) → recording stops; blob saved if any data existed.
-- [ ] Camera file input for video: one-shot explain (first time) then OS picker; cancel picker does not lock UI.
+- [ ] Camera file input: opens OS picker / permission prompt directly; cancel picker does not lock UI.
 - [ ] Photo Add: opens native picker immediately (no in-app permission sheet).
 
 ## Android Chrome
 
 - **Release status: PENDING physical-device verification; not passed.**
-- [ ] Mic permission prompt only after Continue on preflight.
+- [ ] Mic permission prompt appears on Record tap (browser/OS).
 - [ ] Background the app mid-recording (home / switch app) → recording stops and is saved locally.
 - [ ] Incoming call / screen lock mid-recording → local save (or pending process after return).
 - [ ] Video via native camera (`capture=environment`): stop in camera app → file returns and persists to IndexedDB.
@@ -73,7 +73,7 @@ Security regression checks:
 ## iOS Safari
 
 - **Release status: PENDING physical-device verification; not passed.**
-- [ ] Mic: first Continue triggers Safari prompt; Deny → settings hint + import `.m4a` / voice memo.
+- [ ] Mic: Record tap triggers Safari prompt; Deny → settings hint + import `.m4a` / voice memo.
 - [ ] Mic: Allow → record → Stop/Cancel visible; timer updates while recording.
 - [ ] Leave Safari mid-recording (app switcher) → on return, either saved pending audio or clear idle (no stuck “recording” UI).
 - [ ] Reload mid/after stop → pending audio resumes Whisper if blob was saved.

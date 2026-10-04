@@ -37,10 +37,18 @@ export async function PUT(
     const raw = await request.text();
     assertChatBodySize(raw);
     const body = await readJsonObject(new Request(request.url, { method: "PUT", body: raw }));
-    assertAllowedKeys(body, ["clientUpdatedAt", "baseRevision", "messages", "chatState"]);
+    assertAllowedKeys(body, ["clientUpdatedAt", "baseRevision", "messages", "chatState", "report"]);
     const clientUpdatedAt = parseClientUpdatedAt(body.clientUpdatedAt);
     const messages = body.messages === undefined ? undefined : parseChatMessages(body.messages);
     const chatState = body.chatState === undefined ? undefined : parseChatState(body.chatState);
+    const report =
+      body.report === undefined
+        ? undefined
+        : body.report === null || (typeof body.report === "object" && !Array.isArray(body.report))
+          ? body.report
+          : (() => {
+              throw new RequestValidationError("INVALID_FIELD_TYPE", "report");
+            })();
     const baseRevision = body.baseRevision;
     if (baseRevision !== undefined && (!Number.isInteger(baseRevision) || Number(baseRevision) < 1)) {
       throw new RequestValidationError("INVALID_FIELD_TYPE", "baseRevision");
@@ -83,6 +91,7 @@ export async function PUT(
       .update({
         ...(merged ? { messages: merged } : {}),
         ...(isOwner && chatState ? { chat_state: mergeChatState(current.data.chat_state, chatState) } : {}),
+        ...(isOwner && report !== undefined ? { report } : {}),
         ...(clientUpdatedAt ? { client_updated_at: clientUpdatedAt } : {}),
         revision: revision + 1,
         updated_at: new Date().toISOString(),

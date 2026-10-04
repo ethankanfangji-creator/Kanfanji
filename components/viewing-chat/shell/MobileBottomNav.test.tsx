@@ -8,6 +8,7 @@ import { MobileBottomNav } from "./MobileBottomNav";
 
 const shortLabels = {
   nav: "Primary navigation",
+  ask: "Ask",
   history: "History",
   search: "Search",
   media: "Media",
@@ -17,7 +18,7 @@ const shortLabels = {
 afterEach(() => cleanup());
 
 describe("MobileBottomNav", () => {
-  it("renders four tabs without a New property entry", async () => {
+  it("renders ask/history/media/account without a New property entry", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
     render(
@@ -30,13 +31,14 @@ describe("MobileBottomNav", () => {
 
     expect(screen.getByRole("navigation", { name: "Primary navigation" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /New/i })).toBeNull();
+    expect(screen.getByRole("button", { name: "Ask" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "History" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Search" })).toBeNull();
     expect(screen.getByRole("button", { name: "Media" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Account" })).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "Media" }));
-    expect(onSelect).toHaveBeenCalledWith("media");
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+    expect(onSelect).toHaveBeenCalledWith("ask");
   });
 
   it("marks the selected tab for sighted and assistive users", () => {

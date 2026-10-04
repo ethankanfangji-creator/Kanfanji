@@ -14,6 +14,7 @@ import {
   canCreateCloudViewing,
   FREE_VIEWING_LIMIT,
 } from "@/lib/viewing-wizard/free-tier";
+import { toViewingListItem } from "@/lib/viewings/list-item";
 
 export const runtime = "nodejs";
 
@@ -48,7 +49,18 @@ export async function GET() {
       viewings: ids.flatMap((id, index) => {
         const row = byId.get(id);
         const role = roles[index];
-        return row && role ? [projectViewingForRole(row, role)] : [];
+        if (!row || !role) return [];
+        // Project for authz (owner gets chat_state); then lean-list for browse UI.
+        const projected = projectViewingForRole(row, role) as Record<string, unknown>;
+        // Non-owners may lack chat_state on the DTO — fall back to raw row for enrichment.
+        if (!("chat_state" in projected) && "chat_state" in row) {
+          projected.chat_state = row.chat_state;
+        }
+        if (!("report" in projected) && "report" in row) {
+          projected.report = row.report;
+        }
+        const item = toViewingListItem(projected);
+        return item ? [item] : [];
       }),
     });
   } catch (error) {

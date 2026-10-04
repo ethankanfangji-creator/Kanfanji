@@ -57,6 +57,7 @@ describe("ViewingChatApp address analytics", () => {
                   id: "place-1",
                   label: "100 Example Ave",
                   formatted: "100 Example Ave",
+                  houseNumber: "100",
                   lat: 49.28,
                   lng: -123.12,
                   source: "google",

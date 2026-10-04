@@ -1,22 +1,20 @@
+import { coerceDecisionStatus } from "@/lib/portfolio/decision-status";
 import type { ViewingChatThread } from "./types";
 import { buildChatStatePayload } from "./cloud-push";
 
+/** Persisted notes-session fields. Coach-only keys (agenda/askedCount/…) are no longer written. */
 const STATE_KEYS = [
   "normalizedAddress",
   "propertyRecord",
   "propertyEvidence",
-  "agendaActiveId",
-  "agendaSkippedIds",
   "collectionSkippedFields",
-  "collectionFocusFieldIds",
   "conversationStatus",
-  "pendingConfirm",
-  "askedCount",
   "pinned",
   "sitePin",
   "briefing",
   "listingUrl",
   "reportNotesFingerprint",
+  "decisionStatus",
 ] as const;
 
 type StateKey = (typeof STATE_KEYS)[number];
@@ -58,6 +56,10 @@ export function mergeChatState(existing: unknown, incoming: Record<string, unkno
     if (key === "listingUrl") {
       if (value === null) next.listingUrl = null;
       else if (typeof value === "string") next.listingUrl = value.trim() || null;
+      continue;
+    }
+    if (key === "decisionStatus") {
+      next.decisionStatus = coerceDecisionStatus(value);
       continue;
     }
     if (value == null) continue;

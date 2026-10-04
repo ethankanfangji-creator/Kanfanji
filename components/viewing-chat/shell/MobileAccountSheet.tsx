@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { LifeBuoy, LogIn, LogOut } from "lucide-react";
+import { LifeBuoy, LogIn, LogOut, Share2 } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
 import { AnalyticsToggle } from "@/components/analytics/AnalyticsToggle";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
@@ -77,6 +77,14 @@ export function MobileAccountSheet({
           <>
             <LanguageSwitcher className="w-full" />
             <AnalyticsToggle />
+            <Link
+              href="/shares"
+              onClick={onClose}
+              className="flex min-h-[var(--touch-target)] w-full items-center gap-2 rounded-2xl px-3 text-left text-[13px] font-bold hover:bg-[#FAF6F1]"
+            >
+              <Share2 className="h-4 w-4 shrink-0" />
+              {messages.nav.sharesHub}
+            </Link>
             <a
               href={supportMailto(locale, user?.email)}
               onClick={onClose}

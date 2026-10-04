@@ -168,3 +168,18 @@ export type GetNextQuestionsInput = {
   /** Optional market / locale for question copy */
   locale?: string;
 };
+
+/** Persisted turn delta (legacy chat summary; still on thread chat_state). */
+export type RecordChange = {
+  fieldId: PropertyFieldId;
+  kind: "added" | "updated" | "corrected" | "conflict" | "skipped" | "unknown";
+  nextValue?: string | number | boolean | null;
+  previousValue?: string | number | boolean | null;
+  rawText?: string;
+};
+
+export type ConversationStatus =
+  | "collecting"
+  | "reviewing"
+  | "completed"
+  | "idle";

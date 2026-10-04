@@ -13,35 +13,27 @@ export function buildChatStatePayload(thread: {
   normalizedAddress?: string | null;
   propertyRecord?: unknown;
   propertyEvidence?: unknown;
-  agendaActiveId?: string | null;
-  agendaSkippedIds?: string[];
   collectionSkippedFields?: unknown;
-  collectionFocusFieldIds?: unknown;
   conversationStatus?: string;
-  pendingConfirm?: unknown;
-  askedCount?: Record<string, number>;
   pinned?: boolean;
   sitePin?: { lat: number; lng: number; source: "civic" | "map" } | null;
   briefing?: unknown;
   listingUrl?: string | null;
   reportNotesFingerprint?: string | null;
+  decisionStatus?: string | null;
 }) {
   return {
     v: 1 as const,
     normalizedAddress: thread.normalizedAddress ?? thread.address,
     propertyRecord: thread.propertyRecord ?? null,
     propertyEvidence: thread.propertyEvidence ?? [],
-    agendaActiveId: thread.agendaActiveId ?? null,
-    agendaSkippedIds: thread.agendaSkippedIds ?? [],
     collectionSkippedFields: thread.collectionSkippedFields ?? [],
-    collectionFocusFieldIds: thread.collectionFocusFieldIds ?? [],
     conversationStatus: thread.conversationStatus ?? "collecting",
-    pendingConfirm: thread.pendingConfirm ?? null,
-    askedCount: thread.askedCount ?? {},
     pinned: Boolean(thread.pinned),
     briefing: thread.briefing ?? null,
     listingUrl: thread.listingUrl?.trim() || null,
     reportNotesFingerprint: thread.reportNotesFingerprint ?? null,
+    decisionStatus: thread.decisionStatus ?? null,
     ...(thread.sitePin ? { sitePin: thread.sitePin } : {}),
   };
 }
@@ -84,6 +76,7 @@ export async function pushViewingThread(input: {
         messages: input.messages,
         chatState: input.chatState,
         clientUpdatedAt: input.clientUpdatedAt,
+        ...(input.report !== undefined ? { report: input.report } : {}),
       }),
     });
   const createRow = () =>

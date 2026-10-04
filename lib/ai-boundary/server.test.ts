@@ -56,7 +56,7 @@ describe("authorizeAiRequest without a guest signing secret", () => {
     delete process.env.AI_GUEST_COOKIE_SECRET;
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const request = new Request("http://localhost/api/viewing-chat/turn");
+    const request = new Request("http://localhost/api/viewing-chat/report");
     await expect(
       authorizeAiRequest(
         request,

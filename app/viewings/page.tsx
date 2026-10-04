@@ -3,26 +3,18 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ArrowLeft, Camera, MapPin, Video } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { ClientAuthBar } from "@/components/ClientAuthBar";
 import { useI18n } from "@/components/I18nProvider";
 import { PageContainer } from "@/components/ui/primitives";
+import { ViewingsIndex } from "@/components/viewings/ViewingsIndex";
+import type { ViewingListItem } from "@/lib/viewings/list-item";
 import { createClient } from "@/utils/supabase/client";
-import type { Viewing } from "@/lib/types";
-
-function formatWhen(iso: string, locale: string) {
-  return new Intl.DateTimeFormat(locale === "en" ? "en-CA" : locale === "th" ? "th-TH" : "zh-TW", {
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(iso));
-}
 
 export default function ViewingsPage() {
-  const { locale, messages } = useI18n();
+  const { messages } = useI18n();
   const router = useRouter();
-  const [viewings, setViewings] = useState<Viewing[]>([]);
+  const [viewings, setViewings] = useState<ViewingListItem[]>([]);
   const [email, setEmail] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -40,108 +32,41 @@ export default function ViewingsPage() {
       setEmail(user.email ?? "");
       const response = await fetch("/api/viewings");
       const body = (await response.json()) as {
-        viewings?: Viewing[];
+        viewings?: ViewingListItem[];
         error?: string;
       };
       if (!response.ok) setError(body.error || "讀取案件失敗");
-      setViewings(body.viewings ?? []);
+      setViewings(Array.isArray(body.viewings) ? body.viewings : []);
       setLoading(false);
     })();
   }, [router]);
 
   return (
-    <div className="min-h-screen w-full flex justify-center bg-[var(--color-canvas)] text-[var(--color-text)]">
-      <PageContainer narrow className="pt-6 pb-28">
-        <div className="flex items-start justify-between mb-5">
-          <div>
+    <div className="flex min-h-screen w-full justify-center bg-[var(--color-canvas)] text-[var(--color-text)]">
+      <PageContainer className="pb-28 pt-6">
+        <div className="mb-5 flex items-start justify-between gap-3">
+          <div className="min-w-0">
             <Link
               href="/"
-              className="inline-flex min-h-[var(--touch-target)] items-center gap-1 text-[var(--font-size-xs)] font-medium text-[var(--color-text-muted)] mb-2"
+              className="mb-2 inline-flex min-h-[var(--touch-target)] items-center gap-1 text-[var(--font-size-xs)] font-medium text-[var(--color-text-muted)]"
             >
-              <ArrowLeft className="w-3.5 h-3.5" /> {messages.viewings.back}
+              <ArrowLeft className="h-3.5 w-3.5" /> {messages.viewings.back}
             </Link>
-            <h1 className="text-[20px] font-[800] tracking-tight leading-[1.1]">
+            <h1 className="text-[22px] font-[800] leading-[1.15] tracking-tight">
               {messages.viewings.title}
-              <br />
-              <span className="text-[11px] font-[700] tracking-[0.18em] opacity-60">
-                VIEWINGS · {email}
-              </span>
             </h1>
+            {email ? (
+              <p className="mt-1 truncate text-[11px] font-semibold tracking-wide text-[#9CA3AF]">
+                {email}
+              </p>
+            ) : null}
           </div>
-          <div className="mt-1.5 flex flex-col items-end gap-2">
+          <div className="mt-1.5 shrink-0">
             <ClientAuthBar />
           </div>
         </div>
 
-        {error && (
-          <div className="rounded-[18px] bg-[#FEF2F2] border border-[#FECACA] p-4 mb-4 text-[13px] text-[#991B1B]">
-            {error}
-          </div>
-        )}
-
-        {!loading && !error && viewings.length === 0 && (
-          <div className="rounded-[22px] bg-white border border-black/[0.05] shadow-[0_4px_20px_rgba(0,0,0,0.04)] p-6 text-center">
-            <p className="text-[15px] font-bold">{messages.viewings.empty}</p>
-            <Link
-              href="/"
-              className="inline-flex mt-4 h-10 px-4 rounded-full bg-black text-white text-[13px] font-bold items-center"
-            >
-              {messages.brand.name}
-            </Link>
-          </div>
-        )}
-
-        <div className="space-y-3">
-          {viewings.map((viewing) => {
-            const cover = viewing.photo_urls[0];
-            const photoCount = viewing.photo_urls?.length ?? 0;
-            const videoCount = viewing.video_urls?.length ?? 0;
-            const body = (
-              <div className="flex gap-3 p-3">
-                <div className="w-[72px] h-[72px] rounded-xl overflow-hidden bg-[#F5F3F0] shrink-0">
-                  {cover ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={cover}
-                      alt={viewing.address}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <MapPin className="w-5 h-5 text-[#9CA3AF]" />
-                    </div>
-                  )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-[14px] font-bold leading-[1.3] line-clamp-2">
-                    {viewing.address}
-                  </p>
-                  <p className="text-[11px] text-[#8A8A8A] mt-1">
-                    {formatWhen(viewing.updated_at, locale)}
-                  </p>
-                  <div className="mt-2 flex items-center gap-3 text-[11px] text-[#6B7280]">
-                    <span className="inline-flex items-center gap-1">
-                      <Camera className="w-3 h-3" /> {photoCount}
-                    </span>
-                    <span className="inline-flex items-center gap-1">
-                      <Video className="w-3 h-3" /> {videoCount}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            );
-
-            return (
-              <Link
-                key={viewing.id}
-                href={`/viewings/${viewing.id}`}
-                className="block bg-white rounded-[22px] border border-black/[0.05] shadow-[0_4px_20px_rgba(0,0,0,0.04)] overflow-hidden"
-              >
-                {body}
-              </Link>
-            );
-          })}
-        </div>
+        <ViewingsIndex viewings={viewings} loading={loading} error={error} />
       </PageContainer>
     </div>
   );

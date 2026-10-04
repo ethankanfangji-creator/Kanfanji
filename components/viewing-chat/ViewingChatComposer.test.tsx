@@ -176,23 +176,30 @@ describe("ViewingChatComposer permission onboarding", () => {
     expect(screen.getByRole("button", { name: labels.stop })).toBeTruthy();
   });
 
-  it("shows camera preflight then opens gallery import on deny", async () => {
+  it("opens the camera capture input so the browser can ask for permission", async () => {
     const user = userEvent.setup();
     const adapter = createMockMediaPermissionAdapter({
       statuses: { camera: "prompt" },
     });
     renderComposer(adapter);
 
+    const camera = screen.getByTestId("camera-capture-input") as HTMLInputElement;
+    const clickSpy = vi.spyOn(camera, "click");
+
     await user.click(screen.getByRole("button", { name: labels.attach }));
     await user.click(screen.getByRole("menuitem", { name: labels.camera }));
 
-    expect(await screen.findByText(permissionCopy.titleCamera)).toBeTruthy();
+    expect(screen.queryByText(permissionCopy.titleCamera)).toBeNull();
+    await waitFor(() => expect(clickSpy).toHaveBeenCalled());
+  });
 
-    await user.click(
-      screen.getByRole("button", { name: permissionCopy.cancel }),
-    );
+  it("offers gallery import when the camera is already blocked", async () => {
+    const user = userEvent.setup();
+    const adapter = createMockMediaPermissionAdapter({
+      statuses: { camera: "blocked" },
+    });
+    renderComposer(adapter);
 
-    adapter.setStatus("camera", "blocked");
     await user.click(screen.getByRole("button", { name: labels.attach }));
     await user.click(screen.getByRole("menuitem", { name: labels.camera }));
 

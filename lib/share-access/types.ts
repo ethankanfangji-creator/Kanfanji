@@ -32,6 +32,23 @@ export type ShareLinkRecord = {
   accessVersion: number;
 };
 
+/** Cross-viewing row for the owner shares hub (never includes raw token). */
+export type OwnerShareLinkListItem = Omit<ShareLinkRecord, "token"> & {
+  address: string;
+  urlPath: string;
+  needsRegenerate: boolean;
+};
+
+export type OwnerShareCommentListItem = {
+  id: string;
+  viewingId: string;
+  address: string;
+  authorLabel: string;
+  body: string;
+  createdAt: string;
+  shareLinkId: string;
+};
+
 export type PublicShareTextItem = {
   id: string;
   text: string;
@@ -85,18 +102,55 @@ export type PublicSharePayload = {
     pros: string[];
     risks: string[];
   };
-  chatReport?: {
-    version: 2;
-    title: string;
-    address: string;
-    summary: string | null;
-    pros: string[];
-    risks: string[];
-    reportGeneratedAt: string;
-    publishedAt: string;
-    checklist: Array<{ question: string; answer: string; status: "ok" | "risk" | "unknown" }>;
-    fields: Array<{ fieldId: string; value: string; status: string }>;
-  };
+  chatReport?:
+    | {
+        version: 3;
+        kind: "chat_report";
+        title: string;
+        address: string;
+        summary: string | null;
+        reportGeneratedAt: string;
+        publishedAt: string;
+        meta?: {
+          viewingDate?: string | null;
+          propertyType?: string | null;
+          yearBuilt?: string | null;
+          askingPrice?: string | null;
+          lotSize?: string | null;
+          interiorSize?: string | null;
+          layout?: string | null;
+          neighborhood?: string | null;
+        };
+        overview?: string;
+        interior?: string;
+        outdoorLand?: string;
+        transitLifestyle?: string;
+        pricing?: string;
+        pros: string[];
+        risks: string[];
+        scores?: {
+          items: Array<{ label: string; score: number }>;
+          overall?: string;
+          highlight?: string;
+          biggestQuestion?: string;
+        };
+        verdict?: string;
+        nextSteps?: string[];
+      }
+    | {
+        version: 2;
+        kind: "chat_report";
+        title: string;
+        address: string;
+        summary: string | null;
+        pros: string[];
+        risks: string[];
+        followUps: string[];
+        reportGeneratedAt: string;
+        publishedAt: string;
+        checklist: Array<{ question: string; answer: string; status: "ok" | "risk" | "unknown" }>;
+        fields: Array<{ fieldId: string; value: string; status: string }>;
+      };
   /** Honest flags for the viewer. */
   meta: {
     passwordProtected: boolean;

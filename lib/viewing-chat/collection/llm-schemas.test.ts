@@ -25,6 +25,38 @@ describe("parseLlmJson", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.raw).toBe("not-json");
   });
+
+  it("accepts ChatGPT-template sectioned report JSON with scores", () => {
+    const raw = JSON.stringify({
+      title: "1167 Victory Drive — 看房評估報告",
+      meta: { askingPrice: "$1.5M", yearBuilt: null },
+      overview: "Land-forward.",
+      interior: "Kitchen ok.",
+      outdoorLand: "Big lot.",
+      transitLifestyle: "Bus.",
+      pricing: "Negotiate.",
+      pros: ["Land"],
+      risks: ["Age"],
+      scores: {
+        items: [
+          { label: "土地", score: 5 },
+          { label: "交通", score: 3.5 },
+        ],
+        overall: "約 8/10",
+        highlight: "土地大",
+        biggestQuestion: "價格合理嗎",
+      },
+      verdict: "Diligence first.",
+      nextSteps: ["Pull comps"],
+    });
+    const result = parseLlmJson(raw, ChatReportLlmSchema);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.scores?.items?.[0]?.score).toBe(5);
+      expect(result.data.scores?.biggestQuestion).toMatch(/價格/);
+      expect(result.data.outdoorLand).toMatch(/Big lot/);
+    }
+  });
 });
 
 describe("resolveFieldDisplayStatus", () => {

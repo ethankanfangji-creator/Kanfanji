@@ -48,16 +48,6 @@ export type ChatReplyRef = {
   preview: string;
 };
 
-export type ChatReportSnapshot = {
-  pros: string[];
-  risks: string[];
-  checklist: Array<{ id: string; question: string; answer: string; status: "ok" | "risk" | "unknown" }>;
-  summary?: string;
-  generatedAt: string;
-  /** Fingerprint of user notes used to build this report — mismatch means stale. */
-  notesFingerprint?: string;
-};
-
 export type ChatMediaRef = {
   id: string;
   kind: "image" | "video" | "audio" | "file";
@@ -65,6 +55,71 @@ export type ChatMediaRef = {
   mime: string;
   size: number;
   path?: string | null;
+};
+
+export type ChatReportFeedback = "like" | "dislike";
+
+/** Property glance row for ChatGPT-style decision reports. */
+export type ChatReportMeta = {
+  viewingDate?: string | null;
+  propertyType?: string | null;
+  yearBuilt?: string | null;
+  askingPrice?: string | null;
+  lotSize?: string | null;
+  interiorSize?: string | null;
+  layout?: string | null;
+  neighborhood?: string | null;
+};
+
+/** Category scores (1–5, half-steps) + overall / highlight / biggest question. */
+export type ChatReportScores = {
+  items: Array<{ label: string; score: number }>;
+  overall?: string;
+  highlight?: string;
+  biggestQuestion?: string;
+};
+
+export type ChatReportSnapshot = {
+  /** Report title, e.g. "1167 Victory Drive — 看房評估報告". */
+  title?: string;
+  meta?: ChatReportMeta;
+  /** Markdown sections (ChatGPT template). */
+  overview?: string;
+  interior?: string;
+  outdoorLand?: string;
+  transitLifestyle?: string;
+  pricing?: string;
+  pros: string[];
+  risks: string[];
+  /** Preliminary scorecard from the ChatGPT template. */
+  scores?: ChatReportScores;
+  /**
+   * @deprecated Not in ChatGPT template; kept for old snapshots only (UI ignores).
+   */
+  whatsStoppingYou?: string[];
+  /** Buy judgment markdown. */
+  verdict?: string;
+  nextSteps?: string[];
+  /**
+   * Legacy share field. New path maps nextSteps (or biggestQuestion) into this.
+   */
+  followUps: string[];
+  /** Legacy coach checklist — unused by notes report path (always []). */
+  checklist: Array<{ id: string; question: string; answer: string; status: "ok" | "risk" | "unknown" }>;
+  /** Assembled markdown of sections (share / portfolio / old UI fallback). */
+  summary?: string;
+  generatedAt: string;
+  /** Fingerprint of user notes used to build this report — mismatch means stale. */
+  notesFingerprint?: string;
+  /** Image/video refs from notes at generation time (for report gallery). */
+  mediaRefs?: ChatMediaRef[];
+  /** Monotonic version written to viewing_report_versions when persisted. */
+  version?: number;
+  /** User rating for this generated report. */
+  feedback?: ChatReportFeedback | null;
+  feedbackAt?: string | null;
+  /** Optional reason captured on dislike (B); empty when skipped (A). */
+  feedbackReason?: string | null;
 };
 
 export type ChatMessage = {
@@ -175,6 +230,11 @@ export type ViewingChatThread = {
   listingUrl?: string | null;
   /** Fingerprint of notes that produced the current report, if any. */
   reportNotesFingerprint?: string | null;
+  /**
+   * Decision bucket for portfolio Q&A scope (liked / shortlist / passed / revisit).
+   * Not freeform feature tags — those stay in notes for AI to extract.
+   */
+  decisionStatus?: import("@/lib/portfolio/types").DecisionStatus | null;
 };
 
 export const DEFAULT_QUESTION_BANK: Array<Omit<QuestionBankItem, "answer" | "justDiscussed">> = [

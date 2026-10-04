@@ -253,7 +253,9 @@ export function ChatComposer({
       explained: hasCaptureExplained("audio"),
     });
 
-    if (decision.action === "show-reauth" || decision.action === "show-preflight") {
+    // Only surface our sheet when permission is already blocked; otherwise
+    // let getUserMedia trigger the browser/OS prompt.
+    if (decision.action === "show-reauth") {
       setPreflightStatus(decision.status);
       setPreflightOpen(true);
       return;

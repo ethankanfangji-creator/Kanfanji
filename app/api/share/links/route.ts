@@ -4,6 +4,7 @@ import {
   ensureOwnerShareLink,
   getOwnerShareLink,
   listOwnerShareLinks,
+  listOwnerShareLinksAcrossViewings,
 } from "@/lib/share-access/server";
 import type { CreateShareLinkRequest } from "@/lib/share-access/types";
 import { createAdminClient } from "@/utils/supabase/admin";
@@ -28,11 +29,30 @@ export async function GET(req: Request) {
     if (!user) {
       return NextResponse.json({ error: "請先登入" }, { status: 401 });
     }
-    const viewingId = new URL(req.url).searchParams.get("viewingId")?.trim();
-    if (!viewingId) {
-      return NextResponse.json({ error: "缺少 viewingId" }, { status: 400 });
-    }
+    const url = new URL(req.url);
+    const viewingId = url.searchParams.get("viewingId")?.trim();
     const admin = createAdminClient();
+
+    if (!viewingId) {
+      const statusParam = url.searchParams.get("status")?.trim();
+      const status =
+        statusParam === "revoked" || statusParam === "all" || statusParam === "open"
+          ? statusParam
+          : "open";
+      const q = url.searchParams.get("q")?.trim() || undefined;
+      const limitRaw = Number(url.searchParams.get("limit") ?? 100);
+      const limit = Number.isFinite(limitRaw) ? limitRaw : 100;
+      const items = await listOwnerShareLinksAcrossViewings(admin, user.id, {
+        status,
+        q,
+        limit,
+      });
+      return NextResponse.json(
+        { items },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
     const { link, viewing, urlPath, needsRegenerate } = await getOwnerShareLink(admin, user.id, viewingId);
     if (!viewing) {
       return NextResponse.json(

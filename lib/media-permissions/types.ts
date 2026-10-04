@@ -30,7 +30,7 @@ export type MediaPermissionAdapter = {
   isMediaRecorderSupported(): boolean;
   query(name: MediaPermissionName): Promise<MediaPermissionStatus>;
   /**
-   * Request mic/camera via getUserMedia. Call only after user gesture + preflight.
+   * Request mic/camera via getUserMedia. Call only after a user gesture.
    * Caller owns the stream and must release tracks when done.
    */
   request(

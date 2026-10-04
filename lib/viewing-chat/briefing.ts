@@ -23,6 +23,8 @@ export type ViewingBriefing = {
   /** User rating for this generated intro (per viewing briefing). */
   feedback?: ViewingBriefingFeedback | null;
   feedbackAt?: string | null;
+  /** Optional reason captured on dislike (B); empty when skipped (A). */
+  feedbackReason?: string | null;
 };
 
 const SUMMARY_MAX_CHARS = 600;
@@ -106,6 +108,7 @@ export function isViewingBriefing(value: unknown): value is ViewingBriefing {
   }
   if (row.feedback != null && row.feedback !== "like" && row.feedback !== "dislike") return false;
   if (row.feedbackAt != null && typeof row.feedbackAt !== "string") return false;
+  if (row.feedbackReason != null && typeof row.feedbackReason !== "string") return false;
   return true;
 }
 
@@ -132,6 +135,12 @@ export function coerceViewingBriefing(value: unknown): ViewingBriefing | null {
     feedback && typeof value.feedbackAt === "string" && value.feedbackAt.trim()
       ? value.feedbackAt
       : null;
+  const feedbackReason =
+    feedback === "dislike" &&
+    typeof value.feedbackReason === "string" &&
+    value.feedbackReason.trim()
+      ? value.feedbackReason.trim().slice(0, 280)
+      : null;
   return {
     address: value.address,
     listingUrl: value.listingUrl ?? null,
@@ -142,6 +151,7 @@ export function coerceViewingBriefing(value: unknown): ViewingBriefing | null {
     generatedAt: value.generatedAt,
     feedback,
     feedbackAt,
+    feedbackReason,
   };
 }
 
@@ -182,6 +192,7 @@ export function emptyBriefing(
     generatedAt: new Date().toISOString(),
     feedback: null,
     feedbackAt: null,
+    feedbackReason: null,
   };
 }
 

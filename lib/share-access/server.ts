@@ -9,7 +9,7 @@ import {
 import { decryptShareToken, encryptShareToken } from "./token-vault";
 import { assertChatShareExpiry } from "./chat-share-expiry";
 import { chatShareExpiresAt, consumeShareCreateRateLimit } from "./share-rate-limit.server";
-import type { ShareLinkRecord } from "./types";
+import type { OwnerShareLinkListItem, ShareLinkRecord } from "./types";
 import { resolveShareLinkGate } from "./public-dto";
 import {
   buildChatReportPublication,
@@ -64,7 +64,7 @@ const LINK_GATE_COLUMNS =
 
 export type PublishedShareRow = {
   shareLink: ShareLinkRow;
-  snapshot: PublishedShareSnapshot | import("./publication").ChatReportShareSnapshot;
+  snapshot: PublishedShareSnapshot | import("./publication").AnyChatReportShareSnapshot;
   mediaManifest: PublishedShareMediaItem[];
   ownerId: string;
 };
@@ -165,6 +165,63 @@ export async function listOwnerShareLinks(
   return ((data ?? []) as ShareLinkRow[]).map(toShareLinkRecord);
 }
 
+export type OwnerShareLinksFilter = {
+  /** open = active+expired (not revoked); revoked; all */
+  status?: "open" | "revoked" | "all";
+  q?: string;
+  limit?: number;
+};
+
+/** Owner-wide share links joined to viewing address (for /shares hub). */
+export async function listOwnerShareLinksAcrossViewings(
+  supabase: SupabaseClient,
+  userId: string,
+  options?: OwnerShareLinksFilter,
+): Promise<OwnerShareLinkListItem[]> {
+  const status = options?.status ?? "open";
+  const limit = Math.min(Math.max(options?.limit ?? 100, 1), 200);
+  const q = (options?.q ?? "").trim();
+
+  let query = supabase
+    .from("share_links")
+    .select(
+      "id, viewing_id, token, token_ciphertext, capability, status, expires_at, password_hash, access_version, created_at, updated_at, revoked_at, last_resolved_at, published_snapshot, media_manifest, viewings!inner(id, user_id, address)",
+    )
+    .eq("viewings.user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (status === "open") {
+    query = query.eq("status", "active").is("revoked_at", null);
+  } else if (status === "revoked") {
+    query = query.eq("status", "revoked");
+  }
+
+  if (q) {
+    query = query.ilike("viewings.address", `%${q}%`);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  type ViewingJoin = { id: string; user_id: string; address: string };
+  return ((data ?? []) as unknown as Array<
+    ShareLinkRow & { viewings: ViewingJoin | ViewingJoin[] | null }
+  >).map((row) => {
+    const viewing = Array.isArray(row.viewings) ? row.viewings[0] : row.viewings;
+    const record = toShareLinkRecord(row);
+    const path = publicPathForRow(row);
+    const { token: _token, ...rest } = record;
+    void _token;
+    return {
+      ...rest,
+      address: (viewing?.address ?? "").trim() || "—",
+      urlPath: path.urlPath,
+      needsRegenerate: path.needsRegenerate,
+    };
+  });
+}
+
 export async function ensureOwnerShareLink(
   supabase: SupabaseClient,
   userId: string,
@@ -208,7 +265,8 @@ export async function ensureOwnerShareLink(
   } catch {
     throw new Error("SHARE_UNAVAILABLE");
   }
-  const publication = viewing.chat_state
+  const useChatReport = Boolean(viewing.report || viewing.chat_state);
+  const publication = useChatReport
     ? buildChatReportPublication({
         id: viewing.id,
         user_id: viewing.user_id,
@@ -216,10 +274,11 @@ export async function ensureOwnerShareLink(
         report: viewing.report,
         chat_state: viewing.chat_state,
         updated_at: viewing.updated_at,
+        photo_urls: viewing.photo_urls,
       })
       : { snapshot: buildSharePublication(viewing).snapshot, mediaManifest: buildSharePublication(viewing).mediaManifest };
   if (!(await consumeShareCreateRateLimit(userId))) throw new Error("SHARE_RATE_LIMITED");
-  const chatExpiry = viewing.chat_state ? chatShareExpiresAt() : null;
+  const chatExpiry = useChatReport ? chatShareExpiresAt() : null;
   const { data, error } = await supabase
     .from("share_links")
     .insert({
@@ -344,7 +403,8 @@ export async function rotateOwnerShareLink(
   } catch {
     throw new Error("SHARE_UNAVAILABLE");
   }
-  const publication = viewing.chat_state
+  const useChatReport = Boolean(viewing.report || viewing.chat_state);
+  const publication = useChatReport
     ? buildChatReportPublication({
         id: viewing.id,
         user_id: viewing.user_id,
@@ -352,6 +412,7 @@ export async function rotateOwnerShareLink(
         report: viewing.report,
         chat_state: viewing.chat_state,
         updated_at: viewing.updated_at,
+        photo_urls: viewing.photo_urls,
       })
     : buildSharePublication(viewing);
   if (!(await consumeShareCreateRateLimit(userId))) throw new Error("SHARE_RATE_LIMITED");
@@ -361,7 +422,10 @@ export async function rotateOwnerShareLink(
     p_new_id: nextId,
     p_token_hash: hashShareToken(token),
     p_token_ciphertext: tokenCiphertext,
-    p_expires_at: nextChatShareExpiry(viewing.chat_state, row.expires_at),
+    p_expires_at: nextChatShareExpiry(
+      useChatReport ? viewing.chat_state ?? {} : null,
+      row.expires_at,
+    ),
     p_snapshot: publication.snapshot,
     p_manifest: publication.mediaManifest,
   });

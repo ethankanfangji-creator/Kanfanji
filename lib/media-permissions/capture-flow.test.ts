@@ -7,7 +7,7 @@ import { createMockMediaPermissionAdapter } from "./mock-adapter";
  * mocked hardware adapter (no real getUserMedia / MediaRecorder).
  */
 describe("audio & photo capture flow (mocked hardware)", () => {
-  it("requests getUserMedia only after the user continues from prompt", async () => {
+  it("starts audio directly so the browser can ask via getUserMedia", async () => {
     const adapter = createMockMediaPermissionAdapter({
       statuses: { microphone: "prompt" },
     });
@@ -17,20 +17,12 @@ describe("audio & photo capture flow (mocked hardware)", () => {
       status: await adapter.query("microphone"),
       explained: false,
     });
-    expect(first).toEqual({ action: "show-preflight", status: "prompt" });
+    expect(first).toEqual({ action: "start-direct" });
     expect(adapter.requestCount()).toBe(0);
 
-    // User confirms the one-shot explain → native / adapter request.
     const result = await adapter.request("microphone", { audio: true });
     expect(result.ok).toBe(true);
     expect(adapter.requestCount()).toBe(1);
-
-    const later = decideCaptureStart({
-      kind: "audio",
-      status: await adapter.query("microphone"),
-      explained: true,
-    });
-    expect(later).toEqual({ action: "start-direct" });
   });
 
   it("skips the custom dialog when mic is already granted", async () => {

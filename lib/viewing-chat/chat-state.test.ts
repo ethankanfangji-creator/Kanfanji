@@ -14,12 +14,8 @@ const thread = {
   metadata: null,
   propertyRecord: { fields: { price: { value: "1500" }, floor: { value: "5" } } },
   propertyEvidence: [],
-  agendaActiveId: "price",
-  agendaSkippedIds: [],
   collectionSkippedFields: [],
-  collectionFocusFieldIds: [],
   conversationStatus: "collecting",
-  pendingConfirm: null,
   pinned: false,
 } as unknown as ViewingChatThread;
 
@@ -57,5 +53,17 @@ describe("chat state round trip", () => {
     const fields = (merged.propertyRecord as { fields: Record<string, { value: string }> }).fields;
     expect(fields.price.value).toBe("1500");
     expect(fields.floor.value).toBe("5");
+  });
+
+  it("round-trips decisionStatus and clears invalid values", () => {
+    const withStatus = { ...thread, decisionStatus: "shortlist" as const };
+    const saved = buildChatStatePayload(withStatus);
+    expect(saved.decisionStatus).toBe("shortlist");
+    const loaded = applyChatStateToLocal(thread, saved);
+    expect(loaded.decisionStatus).toBe("shortlist");
+    const cleared = mergeChatState(saved, { v: 1, decisionStatus: null });
+    expect(cleared.decisionStatus).toBeNull();
+    const invalid = mergeChatState(saved, { v: 1, decisionStatus: "damp" });
+    expect(invalid.decisionStatus).toBeNull();
   });
 });

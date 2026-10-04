@@ -33,6 +33,7 @@ export function AddressAutocomplete({
   copy,
   confirmed,
   emphasize,
+  focusToken,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -43,6 +44,8 @@ export function AddressAutocomplete({
   copy: AddressAutocompleteCopy;
   confirmed?: boolean;
   emphasize?: boolean;
+  /** Increment to focus the input (same as tapping the field). */
+  focusToken?: number;
 }) {
   const listId = useId();
   const locale = useLocale();
@@ -55,9 +58,9 @@ export function AddressAutocomplete({
   const regionRef = useRef<AnalyticsRegion>("OTHER");
 
   useEffect(() => {
-    if (!emphasize) return;
+    if (!emphasize && !focusToken) return;
     inputRef.current?.focus();
-  }, [emphasize]);
+  }, [emphasize, focusToken]);
 
   useEffect(() => {
     const q = value.trim();

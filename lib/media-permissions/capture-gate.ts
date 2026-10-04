@@ -15,42 +15,23 @@ export type CaptureStartDecision =
  * Decide whether to open the native picker, start capture directly, show a
  * one-shot explain sheet, or surface re-auth guidance.
  *
- * Photos never use an in-app permission dialog — they go straight to the
- * native file picker. Video uses `<input capture>` (no getUserMedia), so after
- * a one-shot explain it always opens the picker. Audio shows a short explain
- * only while status is still `prompt` and the session has not explained yet;
- * after grant (or once explained), later taps start the recorder without the
- * custom sheet. Denied / revoked audio shows re-auth guidance.
+ * Photos and video never use an in-app permission dialog — they go straight to
+ * the native file / camera picker so the browser/OS can ask for camera access.
+ * Audio also starts directly (browser getUserMedia prompt); denied / revoked
+ * audio shows re-auth guidance. The `explained` flag is kept for session
+ * bookkeeping but no longer gates a custom sheet for audio/video.
  */
 export function decideCaptureStart(input: {
   kind: CaptureKind;
   status: MediaPermissionStatus;
   explained: boolean;
 }): CaptureStartDecision {
-  if (input.kind === "photo") {
+  if (input.kind === "photo" || input.kind === "video") {
     return { action: "open-picker" };
-  }
-
-  if (input.kind === "video") {
-    if (!input.explained) {
-      return {
-        action: "show-preflight",
-        status: input.status === "granted" ? "prompt" : input.status,
-      };
-    }
-    return { action: "start-direct" };
   }
 
   if (isBlockingPermissionStatus(input.status)) {
     return { action: "show-reauth", status: input.status };
-  }
-
-  if (input.status === "granted") {
-    return { action: "start-direct" };
-  }
-
-  if (!input.explained) {
-    return { action: "show-preflight", status: input.status };
   }
 
   return { action: "start-direct" };

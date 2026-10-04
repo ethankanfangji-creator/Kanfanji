@@ -464,8 +464,11 @@ export async function generateAddressBriefing(args: {
   sourcesQueried: string[];
   apiKey: string;
   signal?: AbortSignal;
+  /** Soft style preferences from prior like/dislike (+ optional reasons). */
+  preferenceBlock?: string;
 }): Promise<ViewingBriefing> {
   const { address, locale, facts, apiKey, signal } = args;
+  const preferenceBlock = args.preferenceBlock?.trim() || "";
   const listingFacts = args.listingFacts ?? [];
   const listingUrl = args.listingUrl?.trim() || null;
   const sourcesQueried = [
@@ -478,7 +481,9 @@ export async function generateAddressBriefing(args: {
 
   try {
     const openai = new OpenAI({ apiKey });
-    const system = readBriefingPrompt(locale);
+    const system = preferenceBlock
+      ? `${readBriefingPrompt(locale)}\n\n${preferenceBlock}`
+      : readBriefingPrompt(locale);
 
     const research = await openai.responses.create(
       {

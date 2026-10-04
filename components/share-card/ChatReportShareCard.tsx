@@ -1,70 +1,94 @@
+"use client";
+
 import type { ReactNode } from "react";
+import {
+  ReportSectionsView,
+  type ReportSectionLabels,
+} from "@/components/viewing-chat/ReportSectionsView";
+import type { PublicSharePayload } from "@/lib/share-access/types";
+
+type ChatReportPayload = NonNullable<PublicSharePayload["chatReport"]>;
 
 export function ChatReportShareCard({
-  address,
+  report,
   generatedAt,
-  summary,
-  pros,
-  risks,
-  checklist,
-  fields,
+  photoUrls = [],
   labels,
 }: {
-  address: string;
+  report: ChatReportPayload;
   generatedAt: ReactNode;
-  summary: string | null;
-  pros: string[];
-  risks: string[];
-  checklist: Array<{ question: string; answer: string; status: string }>;
-  fields: Array<{ fieldId: string; value: string; status: string }>;
+  photoUrls?: string[];
   labels: {
-    pros: string;
-    risks: string;
-    checkedFields: string;
     empty: string;
     caution: string;
-    fieldName: (fieldId: string) => string;
-    statusName: (status: string) => string;
+    photos?: string;
+    sections: ReportSectionLabels;
   };
 }) {
+  const sectionReport =
+    report.version === 3
+      ? {
+          title: report.title,
+          meta: report.meta,
+          overview: report.overview,
+          interior: report.interior,
+          outdoorLand: report.outdoorLand,
+          transitLifestyle: report.transitLifestyle,
+          pricing: report.pricing,
+          pros: report.pros,
+          risks: report.risks,
+          scores: report.scores,
+          verdict: report.verdict,
+          nextSteps: report.nextSteps,
+          summary: report.summary ?? undefined,
+        }
+      : {
+          title: report.title,
+          pros: report.pros,
+          risks: report.risks,
+          nextSteps: report.followUps,
+          summary: report.summary ?? undefined,
+        };
+
+  const hasBody =
+    Boolean(sectionReport.summary?.trim()) ||
+    Boolean(("overview" in sectionReport && sectionReport.overview?.trim()) || false) ||
+    Boolean(("interior" in sectionReport && sectionReport.interior?.trim()) || false) ||
+    (sectionReport.pros?.length ?? 0) > 0 ||
+    (sectionReport.risks?.length ?? 0) > 0;
+
   return (
     <article className="rounded-[28px] bg-white p-6">
-      <h1 className="text-[20px] font-bold">{address || "—"}</h1>
+      <h1 className="text-[20px] font-bold">{report.address || "—"}</h1>
       <p className="mt-1 text-[12px] text-[#6B7280]">{generatedAt || "—"}</p>
-      <p className="mt-3 whitespace-pre-wrap text-[14px]">{summary || "—"}</p>
-      <h2 className="mt-4 text-[13px] font-bold text-[#166534]">{labels.pros}</h2>
-      <ul className="list-disc pl-5 text-[13px]">
-        {pros.length ? pros.map((item) => <li key={item}>{item}</li>) : <li>{labels.empty}</li>}
-      </ul>
-      <h2 className="mt-4 text-[13px] font-bold text-[#991B1B]">{labels.risks}</h2>
-      <ul className="list-disc pl-5 text-[13px]">
-        {risks.length ? risks.map((item) => <li key={item}>{item}</li>) : <li>{labels.empty}</li>}
-      </ul>
-      <h2 className="mt-4 text-[13px] font-bold">{labels.checkedFields}</h2>
-      <ul className="mt-1 space-y-1 text-[13px]">
-        {fields.length ? (
-          fields.map((field) => (
-            <li key={field.fieldId} className="flex flex-wrap items-center gap-2">
-              <span>
-                {labels.fieldName(field.fieldId)}: {field.value}
-              </span>
-              <span className="rounded-full bg-[#F3F4F6] px-2 py-0.5 text-[11px] text-[#374151]">
-                {labels.statusName(field.status)}
-              </span>
-            </li>
-          ))
-        ) : (
-          <li>{labels.empty}</li>
-        )}
-      </ul>
-      {checklist.length ? (
-        <ul className="mt-3 text-[12px] text-[#4B5563]">
-          {checklist.map((item) => (
-            <li key={item.question}>
-              {item.question}: {item.answer || "—"}
-            </li>
-          ))}
-        </ul>
+      {hasBody ? (
+        <div className="mt-3">
+          <ReportSectionsView
+            report={sectionReport}
+            labels={labels.sections}
+            className="text-[14px]"
+          />
+        </div>
+      ) : (
+        <p className="mt-4 text-[13px] text-[#6B7280]">{labels.empty}</p>
+      )}
+      {photoUrls.length > 0 ? (
+        <div className="mt-4">
+          {labels.photos ? (
+            <h2 className="text-[13px] font-bold">{labels.photos}</h2>
+          ) : null}
+          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {photoUrls.map((url) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={url}
+                src={url}
+                alt=""
+                className="aspect-[4/3] rounded-xl object-cover bg-[#F5F3F0]"
+              />
+            ))}
+          </div>
+        </div>
       ) : null}
       <p className="mt-4 text-[11px] text-[#6B7280]">{labels.caution}</p>
     </article>

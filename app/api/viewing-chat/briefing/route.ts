@@ -19,6 +19,7 @@ import {
   generateAddressBriefing,
   isBriefingGenerateError,
 } from "@/lib/viewing-chat/generate-briefing";
+import { preferenceBlockForUser } from "@/lib/viewing-chat/ai-preferences-server";
 import { mergeChatState } from "@/lib/viewing-chat/chat-state";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
@@ -43,6 +44,15 @@ export async function POST(request: Request) {
     let briefing: ViewingBriefing = emptyBriefing(address, sourcesQueried);
     const apiKey = process.env.OPENAI_API_KEY;
 
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const clientPreferenceBlock =
+      typeof body.preferenceBlock === "string" ? body.preferenceBlock.trim() : "";
+    const preferenceBlock =
+      (await preferenceBlockForUser(user?.id, "briefing")) || clientPreferenceBlock;
+
     if (apiKey) {
       try {
         briefing = await generateAddressBriefing({
@@ -54,6 +64,7 @@ export async function POST(request: Request) {
           sourcesQueried,
           apiKey,
           signal: AbortSignal.timeout(60_000),
+          preferenceBlock,
         });
       } catch (error) {
         if (isBriefingGenerateError(error)) {
@@ -82,10 +93,6 @@ export async function POST(request: Request) {
     let savedRevision: number | undefined;
     if (viewingId && briefingHasContent(briefing)) {
       try {
-        const supabase = await createClient();
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
         if (user) {
           const admin = createAdminClient();
           const current = await admin

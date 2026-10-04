@@ -107,6 +107,134 @@ grant select (
 ) on table public.viewings to authenticated;
 grant all privileges on table public.viewings to service_role;
 
+create table if not exists public.viewing_report_versions (
+  id uuid primary key default gen_random_uuid(),
+  viewing_id uuid not null references public.viewings (id) on delete cascade,
+  version integer not null check (version > 0),
+  snapshot jsonb not null,
+  notes_fingerprint text not null,
+  source text not null default 'notes_report',
+  created_by uuid references auth.users (id) on delete set null,
+  created_at timestamptz not null default now(),
+  unique (viewing_id, version)
+);
+
+create index if not exists viewing_report_versions_viewing_created_idx
+  on public.viewing_report_versions (viewing_id, created_at desc);
+
+alter table public.viewing_report_versions enable row level security;
+
+drop policy if exists "owners can read report versions" on public.viewing_report_versions;
+create policy "owners can read report versions"
+  on public.viewing_report_versions for select to authenticated
+  using (
+    exists (
+      select 1
+      from public.viewings v
+      where v.id = viewing_id
+        and v.user_id = (select auth.uid())
+    )
+  );
+
+revoke all on table public.viewing_report_versions from public, anon, authenticated;
+grant select on table public.viewing_report_versions to authenticated;
+grant all on table public.viewing_report_versions to service_role;
+
+create table if not exists public.ai_generation_feedback (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  viewing_id uuid references public.viewings (id) on delete set null,
+  kind text not null check (kind in ('briefing', 'report', 'portfolio')),
+  rating text not null check (rating in ('like', 'dislike')),
+  reason text,
+  artifact_excerpt text,
+  notes_fingerprint text,
+  generated_at timestamptz,
+  created_at timestamptz not null default now(),
+  constraint ai_generation_feedback_reason_len check (reason is null or char_length(reason) <= 280),
+  constraint ai_generation_feedback_excerpt_len check (
+    artifact_excerpt is null or char_length(artifact_excerpt) <= 200
+  )
+);
+
+create index if not exists ai_generation_feedback_user_kind_created_idx
+  on public.ai_generation_feedback (user_id, kind, created_at desc);
+
+alter table public.ai_generation_feedback enable row level security;
+
+drop policy if exists "users can select own ai feedback" on public.ai_generation_feedback;
+create policy "users can select own ai feedback"
+  on public.ai_generation_feedback for select to authenticated
+  using ((select auth.uid()) = user_id);
+
+drop policy if exists "users can insert own ai feedback" on public.ai_generation_feedback;
+create policy "users can insert own ai feedback"
+  on public.ai_generation_feedback for insert to authenticated
+  with check ((select auth.uid()) = user_id);
+
+revoke all on table public.ai_generation_feedback from public, anon, authenticated;
+grant select, insert on table public.ai_generation_feedback to authenticated;
+grant all on table public.ai_generation_feedback to service_role;
+
+create table if not exists public.portfolio_ask_sessions (
+  id uuid primary key,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  title text not null default 'Ask',
+  scope jsonb not null default '{"mode":"all"}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint portfolio_ask_sessions_title_len check (char_length(title) between 1 and 120),
+  constraint portfolio_ask_sessions_scope_size check (pg_column_size(scope) <= 8192)
+);
+
+create index if not exists portfolio_ask_sessions_user_updated_idx
+  on public.portfolio_ask_sessions (user_id, updated_at desc);
+
+create table if not exists public.portfolio_ask_turns (
+  id uuid primary key,
+  session_id uuid not null references public.portfolio_ask_sessions (id) on delete cascade,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  role text not null check (role in ('user', 'assistant')),
+  content text not null,
+  matched_ids text[] not null default '{}',
+  citations jsonb not null default '[]'::jsonb,
+  suggest_compare boolean not null default false,
+  feedback text check (feedback is null or feedback in ('like', 'dislike')),
+  feedback_reason text,
+  sort_index integer not null default 0,
+  created_at timestamptz not null default now(),
+  constraint portfolio_ask_turns_content_len check (char_length(content) between 1 and 8000),
+  constraint portfolio_ask_turns_reason_len check (
+    feedback_reason is null or char_length(feedback_reason) <= 280
+  ),
+  constraint portfolio_ask_turns_citations_size check (pg_column_size(citations) <= 16384)
+);
+
+create index if not exists portfolio_ask_turns_session_sort_idx
+  on public.portfolio_ask_turns (session_id, sort_index asc);
+
+alter table public.portfolio_ask_sessions enable row level security;
+alter table public.portfolio_ask_turns enable row level security;
+
+revoke all on table public.portfolio_ask_sessions from public, anon, authenticated;
+revoke all on table public.portfolio_ask_turns from public, anon, authenticated;
+grant select, insert, update, delete on table public.portfolio_ask_sessions to authenticated;
+grant select, insert, update, delete on table public.portfolio_ask_turns to authenticated;
+grant all on table public.portfolio_ask_sessions to service_role;
+grant all on table public.portfolio_ask_turns to service_role;
+
+drop policy if exists "owners manage portfolio ask sessions" on public.portfolio_ask_sessions;
+create policy "owners manage portfolio ask sessions"
+  on public.portfolio_ask_sessions for all to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+
+drop policy if exists "owners manage portfolio ask turns" on public.portfolio_ask_turns;
+create policy "owners manage portfolio ask turns"
+  on public.portfolio_ask_turns for all to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+
 create table if not exists public.share_links (
   id uuid primary key default gen_random_uuid(),
   viewing_id uuid not null references public.viewings (id) on delete cascade,
@@ -124,6 +252,57 @@ create table if not exists public.share_links (
   revoked_at timestamptz,
   last_resolved_at timestamptz
 );
+
+create table if not exists public.share_comment_limits (
+  key_hash text primary key,
+  window_started_at timestamptz not null,
+  attempts integer not null default 0 check (attempts >= 0),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.share_report_comments (
+  id uuid primary key default gen_random_uuid(),
+  viewing_id uuid not null references public.viewings (id) on delete cascade,
+  share_link_id uuid not null references public.share_links (id) on delete cascade,
+  author_label text not null default '訪客',
+  body text not null,
+  client_hash text,
+  created_at timestamptz not null default now(),
+  constraint share_report_comments_author_len check (
+    char_length(author_label) between 1 and 40
+  ),
+  constraint share_report_comments_body_len check (
+    char_length(body) between 1 and 500
+  ),
+  constraint share_report_comments_client_hash_len check (
+    client_hash is null or char_length(client_hash) = 64
+  )
+);
+
+create index if not exists share_report_comments_viewing_created_idx
+  on public.share_report_comments (viewing_id, created_at desc);
+
+create index if not exists share_report_comments_share_link_created_idx
+  on public.share_report_comments (share_link_id, created_at desc);
+
+alter table public.share_report_comments enable row level security;
+alter table public.share_comment_limits enable row level security;
+
+revoke all on table public.share_report_comments from public, anon, authenticated;
+revoke all on table public.share_comment_limits from public, anon, authenticated;
+grant select on table public.share_report_comments to authenticated;
+grant all on table public.share_report_comments to service_role;
+grant all on table public.share_comment_limits to service_role;
+
+drop policy if exists "owners select share report comments" on public.share_report_comments;
+create policy "owners select share report comments"
+  on public.share_report_comments for select to authenticated
+  using (
+    exists (
+      select 1 from public.viewings v
+      where v.id = viewing_id and v.user_id = (select auth.uid())
+    )
+  );
 
 create index if not exists share_links_viewing_id_idx
   on public.share_links (viewing_id);
@@ -298,6 +477,49 @@ $$;
 revoke all on function public.consume_share_unlock_attempt(text) from public;
 revoke all on function public.consume_share_unlock_attempt(text) from anon, authenticated;
 grant execute on function public.consume_share_unlock_attempt(text) to service_role;
+
+create or replace function public.consume_share_comment_attempt(p_key text)
+returns table (allowed boolean, retry_after_seconds integer)
+language plpgsql
+security definer
+set search_path = pg_catalog, public
+as $$
+declare
+  v_now timestamptz := clock_timestamp();
+  v_window constant interval := interval '1 minute';
+  v_limit constant integer := 5;
+  v_row public.share_comment_limits;
+begin
+  if p_key is null or length(p_key) <> 64 then
+    raise exception 'invalid rate-limit key';
+  end if;
+  insert into public.share_comment_limits (key_hash, window_started_at, attempts, updated_at)
+  values (p_key, v_now, 1, v_now)
+  on conflict (key_hash) do update
+  set window_started_at = case
+        when public.share_comment_limits.window_started_at + v_window <= v_now then v_now
+        else public.share_comment_limits.window_started_at
+      end,
+      attempts = case
+        when public.share_comment_limits.window_started_at + v_window <= v_now then 1
+        else public.share_comment_limits.attempts + 1
+      end,
+      updated_at = v_now
+  returning * into v_row;
+  allowed := v_row.attempts <= v_limit;
+  retry_after_seconds := case
+    when allowed then 0
+    else greatest(
+      1,
+      ceil(extract(epoch from (v_row.window_started_at + v_window - v_now)))::integer
+    )
+  end;
+  return next;
+end;
+$$;
+revoke all on function public.consume_share_comment_attempt(text) from public;
+revoke all on function public.consume_share_comment_attempt(text) from anon, authenticated;
+grant execute on function public.consume_share_comment_attempt(text) to service_role;
 
 create table if not exists public.subscriptions (
   user_id uuid primary key references auth.users (id) on delete cascade,

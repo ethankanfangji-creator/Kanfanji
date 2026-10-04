@@ -5,6 +5,7 @@ import { ArrowLeft, MapPin, ShieldAlert } from "lucide-react";
 import { ChatReportShareCard } from "@/components/share-card/ChatReportShareCard";
 import { LocalTime } from "@/components/share-card/LocalTime";
 import { DecisionSummaryCard } from "@/components/share-card/DecisionSummaryCard";
+import { ShareReportComments } from "@/components/share-card/ShareReportComments";
 import { ShareUnlockForm } from "@/components/share-card/ShareUnlockForm";
 import { detectLocale, htmlLang, isLocale, LOCALE_STORAGE_KEY, type Locale } from "@/lib/i18n/config";
 import { getMessages } from "@/lib/i18n";
@@ -196,13 +197,6 @@ function renderResult(token: string, result: PublicShareResult, locale: Locale) 
     foot: share.readonlyFoot,
     openApp: share.openApp,
   };
-  const statusName = (status: string) => {
-    if (status === "confirmed") return chat.statusConfirmed;
-    if (status === "subjective") return chat.statusSubjective;
-    if (status === "inferred") return chat.statusInferred;
-    if (status === "corrected") return chat.statusCorrected;
-    return status;
-  };
   if (result.status === "password_required") {
     return (
       <ShareShell labels={shell}>
@@ -220,22 +214,54 @@ function renderResult(token: string, result: PublicShareResult, locale: Locale) 
     return (
       <ShareShell labels={shell}>
         <ChatReportShareCard
-          address={result.chatReport.address}
+          report={result.chatReport}
           generatedAt={formatWhen(result.chatReport.reportGeneratedAt, locale)}
-          summary={result.chatReport.summary}
-          pros={result.chatReport.pros}
-          risks={result.chatReport.risks}
-          checklist={result.chatReport.checklist}
-          fields={result.chatReport.fields}
+          photoUrls={result.photoUrls}
           labels={{
-            pros: messages.card.pros,
-            risks: messages.card.risks,
-            checkedFields: share.checkedFields,
             empty: share.empty,
             caution: share.aiCaution,
-            fieldName: (fieldId) =>
-              chat.fieldLabels[fieldId as keyof typeof chat.fieldLabels] ?? fieldId,
-            statusName,
+            photos: share.reportPhotos,
+            sections: {
+              overview: chat.reportOverview,
+              interior: chat.reportInterior,
+              outdoorLand: chat.reportOutdoorLand,
+              transitLifestyle: chat.reportTransitLifestyle,
+              pricing: chat.reportPricing,
+              pros: chat.reportPros,
+              risks: chat.reportRisks,
+              scores: chat.reportScores,
+              highlight: chat.reportHighlight,
+              biggestQuestion: chat.reportBiggestQuestion,
+              overall: chat.reportOverall,
+              verdict: chat.reportVerdict,
+              nextSteps: chat.reportNextSteps,
+              meta: {
+                viewingDate: chat.reportMetaViewingDate,
+                propertyType: chat.reportMetaPropertyType,
+                yearBuilt: chat.reportMetaYearBuilt,
+                askingPrice: chat.reportMetaAskingPrice,
+                lotSize: chat.reportMetaLotSize,
+                interiorSize: chat.reportMetaInteriorSize,
+                layout: chat.reportMetaLayout,
+                neighborhood: chat.reportMetaNeighborhood,
+              },
+            },
+          }}
+        />
+        <ShareReportComments
+          token={token}
+          labels={{
+            title: share.commentsTitle,
+            empty: share.commentsEmpty,
+            nickname: share.commentsNickname,
+            nicknamePlaceholder: share.commentsNicknamePlaceholder,
+            body: share.commentsBody,
+            bodyPlaceholder: share.commentsBodyPlaceholder,
+            submit: share.commentsSubmit,
+            submitting: share.commentsSubmitting,
+            failed: share.commentsFailed,
+            rateLimited: share.commentsRateLimited,
+            guestDefault: share.commentsGuestDefault,
           }}
         />
       </ShareShell>

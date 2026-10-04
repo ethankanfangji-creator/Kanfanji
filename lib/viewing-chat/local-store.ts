@@ -50,6 +50,7 @@ function readAll(): ViewingChatThread[] {
         : [],
       conversationStatus: thread.conversationStatus ?? "collecting",
       turnWarnings: Array.isArray(thread.turnWarnings) ? thread.turnWarnings : [],
+      decisionStatus: thread.decisionStatus ?? null,
     }));
   } catch {
     return [];

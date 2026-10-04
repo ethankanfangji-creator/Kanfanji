@@ -15,20 +15,14 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   MediaPermissionBanner,
 } from "@/components/media/MediaPermissionBanner";
-import {
-  PermissionPreflight,
-  type PermissionCopy,
-} from "@/components/media/PermissionPreflight";
+import type { PermissionCopy } from "@/components/media/PermissionPreflight";
 import { selectSupportedAudioMimeType } from "@/components/media/useMediaCapture";
 import { AI_LIMITS } from "@/lib/ai-boundary/config";
 import { MEDIA_IMPORT_LIMITS } from "@/lib/media-import";
 import {
   createBrowserMediaPermissionAdapter,
-  decideCaptureStart,
-  hasCaptureExplained,
   isBlockingPermissionStatus,
   markCaptureExplained,
-  type CaptureKind,
   type MediaPermissionAdapter,
   type MediaPermissionStatus,
 } from "@/lib/media-permissions";
@@ -133,10 +127,6 @@ export function ViewingChatComposer({
   const [attachOpen, setAttachOpen] = useState(false);
   const [multiline, setMultiline] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [preflightKind, setPreflightKind] = useState<CaptureKind | null>(null);
-  const [preflightStatus, setPreflightStatus] =
-    useState<MediaPermissionStatus | null>(null);
-  const [preflightBusy, setPreflightBusy] = useState(false);
   const [permissionBanner, setPermissionBanner] =
     useState<PermissionBannerState | null>(null);
 
@@ -213,7 +203,6 @@ export function ViewingChatComposer({
   }
 
   async function beginRecording() {
-    setPreflightKind(null);
     setPermissionBanner(null);
     setError(null);
     if (busy || recording) return;
@@ -278,74 +267,24 @@ export function ViewingChatComposer({
     if (busy || recording) return;
 
     const media = mediaRef.current;
-    setPreflightBusy(true);
     let status: MediaPermissionStatus = "prompt";
     if (media.isMediaDevicesSupported()) {
       status = await media.query("camera");
     }
-    setPreflightBusy(false);
 
-    // Camera capture may be permanently blocked — offer gallery before OS picker.
+    // Permanently blocked — offer gallery instead of a dead OS picker.
     if (isBlockingPermissionStatus(status)) {
       showPermissionBanner(status, "photo");
       return;
     }
 
-    // Reuse the video explained flag: both need a one-shot camera explain.
-    const decision = decideCaptureStart({
-      kind: "video",
-      status,
-      explained: hasCaptureExplained("video"),
-    });
-
-    if (decision.action === "show-preflight") {
-      setPreflightKind("video");
-      setPreflightStatus(decision.status);
-      return;
-    }
-
+    // Let the browser/OS ask for camera when the capture input opens.
+    markCaptureExplained("video");
     cameraRef.current?.click();
-  }
-
-  async function onPreflightContinue() {
-    if (!preflightKind) return;
-    const kind = preflightKind;
-    if (kind === "audio") {
-      markCaptureExplained("audio");
-      await beginRecording();
-      return;
-    }
-    if (kind === "video") {
-      markCaptureExplained("video");
-      setPreflightKind(null);
-      setPermissionBanner(null);
-      cameraRef.current?.click();
-      return;
-    }
-    setPreflightKind(null);
-    imageRef.current?.click();
-  }
-
-  function onPreflightImport() {
-    const kind = preflightKind;
-    setPreflightKind(null);
-    if (kind === "audio") {
-      audioImportRef.current?.click();
-      return;
-    }
-    // Camera / photo: gallery without capture attribute
-    imageRef.current?.click();
-  }
-
-  function onPreflightCancel() {
-    setPreflightKind(null);
-    setPreflightBusy(false);
-    // Do not clear composer text / attachments.
   }
 
   function focusTextFallback() {
     setPermissionBanner(null);
-    setPreflightKind(null);
     textareaRef.current?.focus();
   }
 
@@ -650,19 +589,6 @@ export function ViewingChatComposer({
           setAttachOpen(false);
         }}
       />
-
-      {preflightKind ? (
-        <PermissionPreflight
-          kind={preflightKind}
-          copy={permissionCopy}
-          status={preflightStatus}
-          busy={preflightBusy}
-          onContinue={() => void onPreflightContinue()}
-          onCancel={onPreflightCancel}
-          onImport={onPreflightImport}
-          onTextNote={focusTextFallback}
-        />
-      ) : null}
 
       {permissionBanner ? (
         <MediaPermissionBanner

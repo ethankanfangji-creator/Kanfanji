@@ -22,22 +22,22 @@ describe("decideCaptureStart", () => {
     ).toEqual({ action: "start-direct" });
   });
 
-  it("explains video once then opens the native picker without re-auth gating", () => {
+  it("opens the native picker for video without an in-app permission sheet", () => {
     expect(
       decideCaptureStart({ kind: "video", status: "prompt", explained: false }),
-    ).toEqual({ action: "show-preflight", status: "prompt" });
+    ).toEqual({ action: "open-picker" });
     expect(
       decideCaptureStart({ kind: "video", status: "denied", explained: true }),
-    ).toEqual({ action: "start-direct" });
+    ).toEqual({ action: "open-picker" });
     expect(
       decideCaptureStart({ kind: "video", status: "granted", explained: false }),
-    ).toEqual({ action: "show-preflight", status: "prompt" });
+    ).toEqual({ action: "open-picker" });
   });
 
-  it("shows a one-shot explain sheet only for first audio prompt", () => {
+  it("starts audio directly so the browser can ask for the microphone", () => {
     expect(
       decideCaptureStart({ kind: "audio", status: "prompt", explained: false }),
-    ).toEqual({ action: "show-preflight", status: "prompt" });
+    ).toEqual({ action: "start-direct" });
     expect(
       decideCaptureStart({ kind: "audio", status: "prompt", explained: true }),
     ).toEqual({ action: "start-direct" });

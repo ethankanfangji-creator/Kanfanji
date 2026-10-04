@@ -10,9 +10,56 @@ export const PolishReplySchema = z.object({
   assistantMessage: z.string().min(1).max(4000),
 });
 
+const nullableString = z.union([z.string().max(200), z.null()]).optional();
+
+export const ChatReportMetaLlmSchema = z
+  .object({
+    viewingDate: nullableString,
+    propertyType: nullableString,
+    yearBuilt: nullableString,
+    askingPrice: nullableString,
+    lotSize: nullableString,
+    interiorSize: nullableString,
+    layout: nullableString,
+    neighborhood: nullableString,
+  })
+  .optional();
+
+export const ChatReportScoresLlmSchema = z
+  .object({
+    items: z
+      .array(
+        z.object({
+          label: z.string().min(1).max(80),
+          score: z.number().min(0).max(5),
+        }),
+      )
+      .max(16)
+      .optional(),
+    overall: z.string().max(80).optional(),
+    highlight: z.string().max(500).optional(),
+    biggestQuestion: z.string().max(500).optional(),
+  })
+  .optional();
+
+/** ChatGPT-style sectioned report (+ legacy fields still accepted for integrate path). */
 export const ChatReportLlmSchema = z.object({
-  pros: z.array(z.string()).max(8).optional(),
-  risks: z.array(z.string()).max(8).optional(),
+  title: z.string().max(300).optional(),
+  meta: ChatReportMetaLlmSchema,
+  overview: z.string().max(8000).optional(),
+  interior: z.string().max(8000).optional(),
+  outdoorLand: z.string().max(8000).optional(),
+  transitLifestyle: z.string().max(8000).optional(),
+  pricing: z.string().max(8000).optional(),
+  pros: z.array(z.string()).max(24).optional(),
+  risks: z.array(z.string()).max(24).optional(),
+  scores: ChatReportScoresLlmSchema,
+  verdict: z.string().max(8000).optional(),
+  nextSteps: z.array(z.string()).max(24).optional(),
+  /** @deprecated not in ChatGPT template — ignored by notes report path */
+  whatsStoppingYou: z.array(z.string()).max(24).optional(),
+  /** @deprecated legacy integrate / old prompts */
+  followUps: z.array(z.string()).max(24).optional(),
   checklist: z
     .array(
       z.object({
@@ -24,7 +71,7 @@ export const ChatReportLlmSchema = z.object({
     )
     .max(40)
     .optional(),
-  summary: z.string().max(4000).optional(),
+  summary: z.string().max(12000).optional(),
 });
 
 export type PolishReply = z.infer<typeof PolishReplySchema>;

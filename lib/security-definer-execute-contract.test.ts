@@ -9,6 +9,11 @@ import { describe, expect, it } from "vitest";
 const CLIENT_EXECUTE_ALLOWLIST: Record<string, string> = {
   "public.get_viewing_by_share_token(text)":
     "A share token has to open one viewing without a logged-in session. The grant is limited to this lookup.",
+  // Historical grants only — dropped by 20261005060000_drop_house_cards_discussion.sql
+  "public.read_live_viewing(text)":
+    "Legacy live card-session reader for the retired /live product; grants remain in old migrations only.",
+  "public.viewing_has_active_session(uuid)":
+    "Legacy helper for live card RLS on the retired viewing_cards table; grants remain in old migrations only.",
 };
 
 function sqlFiles(dir: string): string[] {

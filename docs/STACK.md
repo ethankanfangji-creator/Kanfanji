@@ -16,6 +16,7 @@ Last updated: 2026-09-19. Living inventory for agents and humans.
 | Geocoding | Google Places (New) for CA suggest; TW Geocode uses `language=zh-TW` (zh-CN when locale is zh-Hans) and `region=tw` | **Server only.** `GOOGLE_MAPS_API_KEY` never `NEXT_PUBLIC_` |
 | Property intel | Property facts pipeline → projected intel; BC/Google/OSM/Bing evidence (+ optional ATTOM); DB cache | `/api/property-facts`, `/api/property-intel` — no crawling. Viewing briefing also uses OpenAI web_search for neighborhood tips. |
 | Payments | Stripe Checkout + webhook | Server secrets only |
+| Notifications | In-app inbox (`notifications`) + Resend email | Off-page events only (share comments, collab invites). No-op email when `RESEND_API_KEY` unset. |
 | Analytics | PostHog (`posthog-js` / `posthog-node`) | Action counts only. No-op when `NEXT_PUBLIC_POSTHOG_KEY` is unset. Product analytics are processed by PostHog in the United States (`https://us.i.posthog.com`). Supabase stays in ca-central-1. |
 | i18n | `zh-Hant` / `zh-Hans` / `en` / `th` | `lib/i18n/*` — no hardcoded product copy in new UI |
 | Tests | Vitest + Playwright | `npm test` / `npm run test:e2e` |
@@ -49,6 +50,8 @@ Do not read `user_metadata.role`. Manual Pro does not raise the AI daily quota. 
 - `AI_QUOTA_HASH_SECRET`
 - `SUPABASE_SERVICE_ROLE_KEY` (can sign guest cookies only as a fallback; do not use it as the sole Production secret, and never send it to the browser)
 - `SHARE_COOKIE_SECRET`
+- `RESEND_API_KEY` (optional; without it product emails are skipped / logged)
+- `RESEND_FROM_EMAIL` (optional; verified Resend from address, e.g. `KanFangJi <notify@yourdomain.com>`)
 - Optional quotas/timeouts: `AI_UPSTREAM_TIMEOUT_MS`, `AI_*_DAILY_LIMIT`, `AI_QUOTA_WINDOW_SECONDS`
 - Optional property intel: `GOOGLE_MAPS_API_KEY`, `BING_SEARCH_API_KEY`, `ATTOM_API_KEY`, `PROPERTY_INTEL_CACHE_TTL_HOURS`
 
@@ -200,6 +203,24 @@ Markets: property region `CA|US|TW|OTHER`; viewing/AI markets also allow `TH` (l
 
 Migration: `supabase/migrate-properties-multicountry.sql` (`country_code`, `admin1`, `city`, `postal_code`).
 
+### Property registry identity (unit-aware)
+
+- Canonical key: `(country_code, normalized_address, unit_key)` where `normalized_address` is **street-only** (unit tokens stripped) and `unit_key` is the canonical unit (`''` when absent).
+- `find_or_create_property` is service-role only; **no 500m proximity merge** (that collapsed different units in one building).
+- Cloud viewing create (`POST /api/viewings`, `POST /api/viewing-chat/threads`) auto-links `viewings.property_id` via [`lib/viewings/link-property.server.ts`](../lib/viewings/link-property.server.ts); soft-fails so create still succeeds.
+- Client keeps owning private notes/report on the viewing; property rows hold shared identity/facts (`listing`, coords, `unit_label`).
+- Helpers: [`lib/property-identity.ts`](../lib/property-identity.ts). Backfill: `npx tsx --env-file=.env.local scripts/backfill-viewing-property-ids.ts`.
+- Migration: `supabase/migrations/20261005010000_properties_unit_identity.sql`.
+
+### Property signals (anonymous aggregates)
+
+- Table `public.property_signals` (1:1 with `properties`): viewing/viewer counts + liked/shortlist/passed/revisit counts + Ask `theme_counts` / `ask_hit_count`. No notes, addresses, question text, or user ids.
+- Service-role only (RLS on, no client grants). Viewing/decision side recomputed by [`lib/properties/signals.ts`](../lib/properties/signals.ts) after viewing create / decisionStatus change / delete (Ask theme fields preserved).
+- Ask attribution: on `POST /api/portfolio/ask`, themes are rolled onto properties for **matched** viewing ids (else all cards in scope) via `schedulePropertyAskThemes`.
+- Per-user Ask rows remain in `portfolio_ask_signals` (owner RLS).
+- Backfill (viewing/decision only): `npx tsx --env-file=.env.local scripts/backfill-property-signals.ts`.
+- Migrations: `20261005030000_property_signals.sql`, `20261005040000_property_signals_theme_counts.sql`.
+
 ## Min vertical slice (done)
 
 Address confirm → property basics → Start viewing → Step 2 one text input → ticket merge → Step 3 Report → guest share LoginGate.
@@ -211,6 +232,7 @@ Contract tests: `lib/viewing-wizard/vertical-slice.test.ts`.
 - Home shell (`ViewingChatApp`): address create + history / compare / media / ask nav only
 - Capture: `ViewingSessionApp` at `/viewings/[id]` — user notes timeline (`role===user` messages) + briefing + report
 - Second act: `/ask` Portfolio Q&A (`components/portfolio/PortfolioAskApp.tsx`)
+- Ask analytics: PostHog enum funnel (`lib/analytics/events.ts`, no free text); theme signals in `portfolio_ask_signals` (`lib/portfolio/question-themes.ts` on `POST /api/portfolio/ask`)
 - Storage: `viewings.messages` JSONB + `viewings.report` JSONB + `chat_state` (notes fields + `decisionStatus`)
 - APIs: `POST /api/viewing-chat/report`, `POST /api/viewing-chat/briefing`, `POST /api/portfolio/ask` — **no** on-site `/api/viewing-chat/turn`
 

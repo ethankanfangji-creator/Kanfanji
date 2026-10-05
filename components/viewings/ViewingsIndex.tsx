@@ -12,7 +12,11 @@ import {
   type ViewingListDecisionFilter,
   type ViewingListSort,
 } from "@/lib/viewings/list-filter";
-import type { ViewingListItem } from "@/lib/viewings/list-item";
+import {
+  viewingListCover,
+  type ViewingListItem,
+} from "@/lib/viewings/list-item";
+import { ViewingMapCover } from "@/components/viewings/ViewingMapCover";
 
 const DECISION_CHIP_ORDER: DecisionStatus[] = [
   "liked",
@@ -40,6 +44,26 @@ function formatWhen(iso: string, locale: string) {
   ).format(new Date(iso));
 }
 
+function CardCover({ src }: { src: string | null }) {
+  const [failed, setFailed] = useState(false);
+  if (!src || failed) {
+    return (
+      <div className="flex h-full w-full items-center justify-center">
+        <MapPin className="h-4 w-4 text-[#9CA3AF] sm:h-5 sm:w-5" />
+      </div>
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt=""
+      className="h-full w-full object-cover"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 function Chip({
   active,
   onClick,
@@ -54,7 +78,7 @@ function Chip({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`inline-flex h-8 shrink-0 items-center rounded-full px-3 text-[12px] font-semibold transition ${
+      className={`inline-flex min-h-[var(--touch-target)] shrink-0 items-center rounded-full px-3.5 text-[12px] font-semibold transition ${
         active
           ? "bg-black text-white"
           : "bg-black/5 text-[#374151] hover:bg-black/10"
@@ -111,7 +135,10 @@ export function ViewingsIndex({
 
   return (
     <div className="space-y-4">
-      <div className="sticky top-0 z-10 -mx-1 space-y-3 bg-[var(--color-canvas)]/95 px-1 pb-2 pt-1 backdrop-blur">
+      <div
+        className="sticky top-0 z-10 -mx-1 space-y-3 bg-[var(--color-canvas)]/95 px-1 pb-2 backdrop-blur"
+        style={{ paddingTop: "max(0.25rem, env(safe-area-inset-top, 0px))" }}
+      >
         <div className="relative">
           <Search
             className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#9CA3AF]"
@@ -125,7 +152,7 @@ export function ViewingsIndex({
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="-mx-1 flex items-center gap-1.5 overflow-x-auto px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <Chip active={decision === "all"} onClick={() => setDecision("all")}>
             {v.filterAll}
           </Chip>
@@ -148,12 +175,12 @@ export function ViewingsIndex({
           >
             {v.filterHasReport}
           </Chip>
-          <label className="ml-auto inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#6B7280]">
+          <label className="ml-auto inline-flex shrink-0 items-center gap-1.5 text-[12px] font-semibold text-[#6B7280]">
             <span className="sr-only">{v.sortLabel}</span>
             <select
               value={sort}
               onChange={(event) => setSort(event.target.value as ViewingListSort)}
-              className="h-8 rounded-full border border-black/10 bg-white px-2.5 text-[12px] font-semibold text-[#374151] outline-none"
+              className="min-h-[var(--touch-target)] rounded-full border border-black/10 bg-white px-2.5 text-[12px] font-semibold text-[#374151] outline-none"
               aria-label={v.sortLabel}
             >
               <option value="updated_desc">{v.sortUpdated}</option>
@@ -216,7 +243,7 @@ export function ViewingsIndex({
 
       <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {filtered.map((viewing) => {
-          const cover = viewing.photo_urls[0];
+          const cover = viewingListCover(viewing);
           const photoCount = viewing.photo_urls.length;
           const videoCount = viewing.video_urls.length;
           return (
@@ -225,18 +252,11 @@ export function ViewingsIndex({
                 href={`/viewings/${viewing.id}`}
                 className="flex h-full gap-3 rounded-2xl border border-black/[0.05] bg-white p-2.5 shadow-[0_2px_12px_rgba(0,0,0,0.03)] transition hover:border-black/10 hover:shadow-[0_4px_16px_rgba(0,0,0,0.06)] sm:flex-col sm:gap-2 sm:p-3"
               >
-                <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-[#F5F3F0] sm:aspect-[4/3] sm:h-auto sm:w-full">
-                  {cover ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={cover}
-                      alt=""
-                      className="h-full w-full object-cover"
-                    />
+                <div className="h-20 w-20 shrink-0 overflow-hidden rounded-xl bg-[#F5F3F0] sm:aspect-[4/3] sm:h-auto sm:w-full">
+                  {cover.kind === "map" ? (
+                    <ViewingMapCover lat={cover.lat} lng={cover.lng} />
                   ) : (
-                    <div className="flex h-full w-full items-center justify-center">
-                      <MapPin className="h-4 w-4 text-[#9CA3AF] sm:h-5 sm:w-5" />
-                    </div>
+                    <CardCover src={cover.kind === "photo" ? cover.url : null} />
                   )}
                 </div>
                 <div className="min-w-0 flex-1">

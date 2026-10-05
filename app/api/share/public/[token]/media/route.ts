@@ -43,13 +43,13 @@ export async function POST(request: Request, ctx: Ctx) {
       const status =
         failure.status === "active"
           ? 200
-          : failure.status === "password_required"
-            ? 401
-            : failure.status === "missing"
-              ? 404
-              : failure.status === "expired" || failure.status === "revoked"
-                ? 410
-                : 403;
+          : failure.status === "missing"
+            ? 404
+            : failure.status === "expired" ||
+                failure.status === "revoked" ||
+                failure.status === "closed"
+              ? 410
+              : 403;
       return NextResponse.json(failure, { status });
     }
 

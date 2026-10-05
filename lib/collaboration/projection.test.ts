@@ -3,6 +3,7 @@ import { projectViewingForRole } from "./projection";
 
 const row = {
   id: "view-1",
+  user_id: "owner-1",
   address: "1 Main",
   tags: [],
   market: null,
@@ -13,7 +14,6 @@ const row = {
   photo_urls: [],
   video_urls: [],
   audio_urls: ["owner/view/audios/one.webm"],
-  share_token: "secret",
   property: {
     city: "Vancouver",
     shareAccess: { passwordHash: "secret" },
@@ -41,7 +41,8 @@ describe("role-aware viewing projection", () => {
       const dto = projectViewingForRole(row, role);
       expect(Object.hasOwn(dto, "notes")).toBe(canReadNotes);
       expect(Object.hasOwn(dto, "audio_urls")).toBe(canReadAudio);
-      expect(Object.hasOwn(dto, "share_token")).toBe(canReadOwnerFields);
+      expect(Object.hasOwn(dto, "user_id")).toBe(canReadOwnerFields);
+      expect(dto).not.toHaveProperty("share_token");
       expect(dto.role).toBe(role);
     },
   );

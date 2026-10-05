@@ -10,7 +10,6 @@ const shortLabels = {
   nav: "Primary navigation",
   ask: "Ask",
   history: "History",
-  search: "Search",
   media: "Media",
   account: "Account",
 };

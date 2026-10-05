@@ -110,6 +110,7 @@ describe("GET /api/share/links", () => {
         createdAt: "2026-10-01T00:00:00.000Z",
         updatedAt: "2026-10-01T00:00:00.000Z",
         revokedAt: null,
+        closedAt: null,
         lastResolvedAt: null,
         accessVersion: 1,
         urlPath: "/s/abc",

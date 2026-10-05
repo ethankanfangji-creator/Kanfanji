@@ -31,6 +31,7 @@ import { filterHistoryThreads } from "@/lib/viewing-chat/history-filter";
 import { formatMessage } from "@/lib/i18n";
 import { COMPARE_LITE_MAX } from "@/lib/comparison/from-thread";
 import { CompareSelectionBar } from "@/components/viewing-chat/shell/CompareSelectionBar";
+import { NotificationsBell } from "@/components/notifications/NotificationsBell";
 
 function supportMailto(locale: string, email?: string | null): string {
   const to =
@@ -210,7 +211,7 @@ export function IconRail({
         </RailButton>
         <RailButton
           label={messages.portfolio.tabAsk}
-          href="/ask"
+          href="/ask?from=nav"
           expanded={expanded}
         >
           <MessageSquareText className="h-5 w-5" strokeWidth={2} />
@@ -233,6 +234,7 @@ export function IconRail({
         >
           <Share2 className="h-5 w-5" strokeWidth={2} />
         </RailButton>
+        <NotificationsBell expanded={expanded} />
       </div>
 
       {expanded ? (

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { extractConfirmedMapCoords } from "@/lib/map/open-in-maps";
 import { toStoragePath } from "@/lib/media-paths";
 import {
   isDecisionSummarySnapshot,
@@ -11,6 +12,11 @@ import type {
 } from "./types";
 import { toPublicDecisionSummaryDto } from "./public-dto";
 
+const ShareCoordsSchema = z.object({
+  lat: z.number().finite().gte(-90).lte(90),
+  lng: z.number().finite().gte(-180).lte(180),
+});
+
 type PublishableViewing = {
   id: string;
   user_id: string;
@@ -20,6 +26,7 @@ type PublishableViewing = {
   photo_urls: string[] | null;
   property: Record<string, unknown> | null;
   updated_at: string;
+  chat_state?: unknown;
 };
 
 export type SharePublication = {
@@ -90,14 +97,25 @@ export function buildSharePublication(
         risks: (viewing.risks ?? []).filter((text) => text.trim()).slice(0, 3),
       };
 
+  const coords = extractConfirmedMapCoords({
+    chatState: viewing.chat_state,
+    property: viewing.property,
+  });
+
   return {
     snapshot: {
       version: 1,
       title: "看房決策摘要",
       address: (decisionSummary?.address || viewing.address || "").trim(),
       updatedAt: viewing.updated_at || null,
-      decisionSummary,
+      decisionSummary: decisionSummary
+        ? {
+            ...decisionSummary,
+            ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
+          }
+        : null,
       ...(legacyHighlights ? { legacyHighlights } : {}),
+      ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
       publishedAt,
     },
     mediaManifest,
@@ -244,8 +262,22 @@ export const ChatReportShareSnapshotSchema = z
     scores: ShareReportScoresSchema.optional(),
     verdict: z.string().optional(),
     nextSteps: z.array(z.string()).max(SHARE_LIST_LIMIT).optional(),
+    /** Confirmed site pin (or property coords) for map cover + open-in-maps. */
+    lat: ShareCoordsSchema.shape.lat.optional(),
+    lng: ShareCoordsSchema.shape.lng.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    const hasLat = value.lat != null;
+    const hasLng = value.lng != null;
+    if (hasLat !== hasLng) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "lat and lng must both be set",
+        path: hasLat ? ["lng"] : ["lat"],
+      });
+    }
+  });
 
 export type ChatReportShareSnapshotV2 = z.infer<typeof ChatReportShareSnapshotV2Schema>;
 export type ChatReportShareSnapshot = z.infer<typeof ChatReportShareSnapshotSchema>;
@@ -266,8 +298,12 @@ export function buildChatReportPublication(viewing: {
   chat_state: unknown;
   updated_at: string;
   photo_urls?: string[] | null;
+  property?: Record<string, unknown> | null;
 }): { snapshot: ChatReportShareSnapshot; mediaManifest: PublishedShareMediaItem[] } {
-  void viewing.chat_state;
+  const coords = extractConfirmedMapCoords({
+    chatState: viewing.chat_state,
+    property: viewing.property,
+  });
   const report = (
     viewing.report && typeof viewing.report === "object" ? viewing.report : {}
   ) as {
@@ -408,6 +444,7 @@ export function buildChatReportPublication(viewing: {
     ...(scrubStringList(report.nextSteps).length
       ? { nextSteps: scrubStringList(report.nextSteps) }
       : {}),
+    ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
   });
   const mediaManifest = chatReportImageManifest(viewing);
   const encoded = JSON.stringify(snapshot);

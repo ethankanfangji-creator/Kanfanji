@@ -88,9 +88,10 @@ describe("share access public dto", () => {
 });
 
 describe("share link gate", () => {
-  it("resolves missing revoked expired password and active", () => {
+  it("resolves missing revoked closed expired and active; ignores password", () => {
     expect(resolveShareLinkGate({ found: false })).toBe("missing");
     expect(resolveShareLinkGate({ found: true, revokedAt: "2026-01-01" })).toBe("revoked");
+    expect(resolveShareLinkGate({ found: true, closedAt: "2026-01-01" })).toBe("closed");
     expect(
       resolveShareLinkGate({
         found: true,
@@ -100,7 +101,7 @@ describe("share link gate", () => {
     ).toBe("expired");
     expect(
       resolveShareLinkGate({ found: true, passwordHash: "scrypt$x$y", unlocked: false }),
-    ).toBe("password_required");
+    ).toBe("active");
     expect(resolveShareLinkGate({ found: true })).toBe("active");
   });
 });

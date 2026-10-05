@@ -16,6 +16,7 @@ const labels = {
   pin: "Pin",
   unpin: "Unpin",
   delete: "Delete",
+  startNew: "New property",
   compareToggle: "Compare",
   compareCancel: "Cancel",
   compareSelectedCount: "Selected {n}/{max}",
@@ -120,6 +121,28 @@ describe("MobileHistoryDrawer", () => {
 
     await user.click(screen.getByRole("button", { name: /Unit 8B/i }));
     expect(onSelectThread).toHaveBeenCalledWith("t-select");
+  });
+
+  it("exposes New property in the header when history is non-empty", async () => {
+    const user = userEvent.setup();
+    const onStartNew = vi.fn();
+    render(
+      <MobileHistoryDrawer
+        open
+        threads={[thread({ id: "t1", address: "Taipei 101" })]}
+        activeId={null}
+        onClose={vi.fn()}
+        onSelectThread={vi.fn()}
+        onDeleteThread={vi.fn()}
+        onTogglePinThread={vi.fn()}
+        onStartNew={onStartNew}
+        {...compareProps}
+        labels={labels}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "New property" }));
+    expect(onStartNew).toHaveBeenCalled();
   });
 
   it("renders nothing when closed", () => {

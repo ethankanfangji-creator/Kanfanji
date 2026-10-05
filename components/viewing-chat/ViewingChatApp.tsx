@@ -51,7 +51,11 @@ import { uploadViewingFile, appendViewingPath } from "@/lib/media";
 import { claimAccountThreads, pullCloudThreads } from "@/lib/viewing-chat/claim-account";
 import { deleteViewingThread } from "@/lib/viewing-chat/delete-thread";
 import { sameViewingAddress } from "@/lib/viewing-chat/same-address";
-import { FREE_VIEWING_LIMIT } from "@/lib/viewing-wizard/free-tier";
+import { resolvePropertyIdentity } from "@/lib/property-identity";
+import {
+  canStartLocalViewing,
+  FREE_VIEWING_LIMIT,
+} from "@/lib/viewing-wizard/free-tier";
 import { buildChatStatePayload, pushViewingThread } from "@/lib/viewing-chat/cloud-push";
 import { appendChatMessages } from "@/lib/viewing-chat/append-messages";
 import { mergeChatMessages } from "@/lib/viewing-chat/merge-messages";
@@ -192,6 +196,7 @@ export function ViewingChatApp({
     droppedPin: { lat: number; lng: number } | null;
   } | null>(null);
   const [proLimitOpen, setProLimitOpen] = useState(false);
+  const [guestLimitOpen, setGuestLimitOpen] = useState(false);
   const [addressCue, setAddressCue] = useState(false);
   const [addressFocusToken, setAddressFocusToken] = useState(0);
   const [status, setStatus] = useState("");
@@ -438,13 +443,9 @@ export function ViewingChatApp({
 
   function handleMobileNav(tab: MobileNavTabId) {
     setMobileNavTab(tab);
-    if (tab === "new") {
-      goToNewProperty();
-      return;
-    }
     if (tab === "ask") {
       closeMobileOverlays();
-      router.push("/ask");
+      router.push("/ask?from=tab");
       return;
     }
     if (tab === "history") {
@@ -595,9 +596,11 @@ export function ViewingChatApp({
   }
 
   function goToNewProperty() {
-    closeMobileOverlays();
-    setMobileNavTab("new");
+    // Desktop sidebar stays open; close mobile history drawer + covering sheets.
+    if (isMobileViewport) setHistoryOpen(false);
     setMediaOpen(false);
+    setAccountOpen(false);
+    setMobileNavTab(null);
     if (viewingId) {
       router.push("/?new=1");
       return;
@@ -617,7 +620,7 @@ export function ViewingChatApp({
   /** Bind a confirmed normalized address to a new local viewing thread, then open session. */
   async function bindConfirmedAddress(
     label: string,
-    _place?: { placeId: string | null; placeSource: string | null },
+    place?: { placeId: string | null; placeSource: string | null },
     sitePin?: { lat: number; lng: number; source: "civic" | "map" },
   ) {
     const trimmed = label.trim();
@@ -625,12 +628,21 @@ export function ViewingChatApp({
       setStatus(c.needAddress);
       return;
     }
-    if (!userId) {
-      setStatus(c.syncRetry);
-      return;
-    }
-    const pool = listLocalThreads().filter(
-      (thread) => thread.ownerUserId === userId || !thread.ownerUserId,
+    const identity = resolvePropertyIdentity({
+      address: trimmed,
+      lat: sitePin?.lat ?? null,
+      lng: sitePin?.lng ?? null,
+      placeId: place?.placeId ?? null,
+    });
+    const unitPatch = {
+      ...(identity.unitKey ? { unitKey: identity.unitKey } : {}),
+      ...(identity.unitLabel ? { unitLabel: identity.unitLabel } : {}),
+      ...(identity.placeId ? { placeId: identity.placeId } : {}),
+    };
+    const pool = listLocalThreads().filter((thread) =>
+      userId
+        ? thread.ownerUserId === userId || !thread.ownerUserId
+        : !thread.ownerUserId,
     );
     const duplicate = pool.find(
       (thread) =>
@@ -640,11 +652,46 @@ export function ViewingChatApp({
     if (duplicate) {
       setPendingAddressConfirm(null);
       setAddressCue(false);
-      const exists = await fetch(`/api/viewing-chat/threads/${duplicate.id}`);
-      if (exists.ok) router.replace(`/viewings/${duplicate.id}`);
-      else setStatus(c.syncRetry);
+      router.replace(`/viewings/${duplicate.id}`);
       return;
     }
+
+    if (!userId) {
+      const localCount = listLocalThreads().filter((thread) => !thread.ownerUserId).length;
+      const localGate = canStartLocalViewing({
+        authenticated: false,
+        localViewingCount: localCount,
+      });
+      if (!localGate.allowed) {
+        setGuestLimitOpen(true);
+        return;
+      }
+      const market = detectMarketRegion(trimmed) ?? "OTHER";
+      const thread = createLocalThread(trimmed, [], null);
+      patchLocalThread(thread.id, {
+        normalizedAddress: trimmed,
+        skippedSources: true,
+        agendaMarket: market,
+        briefing: null,
+        reportNotesFingerprint: null,
+        report: null,
+        cloud: { state: "local_only" },
+        ...(sitePin ? { sitePin } : {}),
+        ...unitPatch,
+      });
+      refreshLocal();
+      track({
+        name: "viewing_created",
+        props: { storage: "local", market },
+      });
+      setActiveId(thread.id);
+      setAddressDraft(trimmed);
+      setPendingAddressConfirm(null);
+      setStatus("");
+      router.replace(`/viewings/${thread.id}`);
+      return;
+    }
+
     const gate = await fetch("/api/viewing-chat/threads");
     if (!gate.ok) {
       setStatus(c.syncRetry);
@@ -665,6 +712,7 @@ export function ViewingChatApp({
       reportNotesFingerprint: null,
       report: null,
       ...(sitePin ? { sitePin } : {}),
+      ...unitPatch,
     });
     refreshLocal();
     track({
@@ -691,6 +739,7 @@ export function ViewingChatApp({
           briefing: null,
           reportNotesFingerprint: null,
           ...(sitePin ? { sitePin } : {}),
+          ...unitPatch,
         },
       }),
     })
@@ -1003,6 +1052,17 @@ export function ViewingChatApp({
       ref={shellRef}
       className="fixed inset-0 flex h-[100svh] max-h-[100svh] w-full flex-col overflow-hidden bg-[#FAF6F1] text-[#1A1A1A]"
     >
+      {guestLimitOpen ? (
+        <GuestLimitDialog
+          title={c.guestLimitTitle}
+          body={c.guestLimitBody}
+          signInLabel={c.guestLimitSignIn}
+          cancelLabel={c.guestLimitCancel}
+          signInHref={`/login?mode=signup&next=${encodeURIComponent("/")}`}
+          onCancel={() => setGuestLimitOpen(false)}
+        />
+      ) : null}
+
       {proLimitOpen ? (
         <GuestLimitDialog
           title={c.proLimitTitle}
@@ -1176,15 +1236,12 @@ export function ViewingChatApp({
               ? "media"
               : historyOpen && isMobileViewport
                 ? "history"
-                : mobileNavTab === "new" || mobileNavTab === "search"
-                  ? null
-                  : mobileNavTab
+                : mobileNavTab
         }
         labels={{
           nav: c.mobileNavLabel,
           ask: c.tabAsk,
           history: c.tabHistory,
-          search: c.tabSearch,
           media: c.tabMedia,
           account: c.tabAccount,
         }}

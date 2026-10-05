@@ -4,7 +4,6 @@ const resolveActiveShareForComments = vi.fn();
 const listShareCommentsForLink = vi.fn();
 const insertShareComment = vi.fn();
 const consumeShareCommentRateLimit = vi.fn();
-const isUnlocked = vi.fn();
 
 vi.mock("@/lib/share-access", () => ({
   isShareTokenFormat: (token: string) => /^[a-f0-9]{64}$/i.test(token),
@@ -23,24 +22,12 @@ vi.mock("@/lib/share-access/comments", async () => {
   };
 });
 
-vi.mock("@/lib/share-access/cookie", () => ({
-  shareUnlockCookieName: () => "share-unlock",
-  verifyShareUnlockCookieValue: () => true,
-}));
-
-vi.mock("@/lib/share-access/server", () => ({
-  fetchShareGateByTokenAdmin: vi.fn(async () => ({
-    shareLink: { password_hash: null, access_version: 1, viewing_id: "v1", id: "l1" },
-  })),
-  getShareAccess: (row: { shareLink: unknown }) => row.shareLink,
-}));
-
 vi.mock("@/utils/supabase/admin", () => ({
   createAdminClient: () => ({}),
 }));
 
-vi.mock("next/headers", () => ({
-  cookies: async () => ({ get: () => undefined }),
+vi.mock("@/lib/notifications/emit", () => ({
+  emitShareCommentNotification: vi.fn(),
 }));
 
 import { GET, POST } from "./route";
@@ -64,7 +51,6 @@ describe("GET/POST /api/share/public/[token]/comments", () => {
       createdAt: "2026-10-04T00:00:00.000Z",
       shareLinkId: "l1",
     });
-    void isUnlocked;
   });
 
   it("lists comments for an active share", async () => {

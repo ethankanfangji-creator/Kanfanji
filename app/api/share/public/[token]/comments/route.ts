@@ -1,4 +1,3 @@
-import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { clientIp } from "@/lib/ai-boundary/quota";
 import { isShareTokenFormat } from "@/lib/share-access";
@@ -11,15 +10,7 @@ import {
   optionalClientHash,
   resolveActiveShareForComments,
 } from "@/lib/share-access/comments";
-import {
-  shareUnlockCookieName,
-  verifyShareUnlockCookieValue,
-} from "@/lib/share-access/cookie";
-import {
-  fetchShareGateByTokenAdmin,
-  getShareAccess,
-} from "@/lib/share-access/server";
-import { createAdminClient } from "@/utils/supabase/admin";
+import { emitShareCommentNotification } from "@/lib/notifications/emit";
 
 export const runtime = "nodejs";
 
@@ -27,30 +18,11 @@ type Ctx = { params: Promise<{ token: string }> };
 
 const headers = { "Cache-Control": "no-store" };
 
-async function isUnlocked(token: string): Promise<boolean> {
-  try {
-    const admin = createAdminClient();
-    const gateRow = await fetchShareGateByTokenAdmin(admin, token);
-    if (!gateRow) return false;
-    if (!gateRow.shareLink.password_hash) return true;
-    const access = getShareAccess(gateRow);
-    const jar = await cookies();
-    return verifyShareUnlockCookieValue(
-      token,
-      access.access_version,
-      jar.get(shareUnlockCookieName(token))?.value,
-    );
-  } catch {
-    return false;
-  }
-}
-
 function statusCode(
-  status: "missing" | "revoked" | "expired" | "password_required" | "forbidden",
+  status: "missing" | "revoked" | "closed" | "expired" | "password_required" | "forbidden",
 ): number {
   if (status === "missing") return 404;
-  if (status === "password_required") return 401;
-  if (status === "expired" || status === "revoked") return 410;
+  if (status === "expired" || status === "revoked" || status === "closed") return 410;
   return 403;
 }
 
@@ -59,7 +31,8 @@ export async function GET(_req: Request, ctx: Ctx) {
   if (!isShareTokenFormat(token)) {
     return NextResponse.json({ error: "INVALID_TOKEN" }, { status: 404, headers });
   }
-  const resolved = await resolveActiveShareForComments(token, await isUnlocked(token));
+  // Password sharing is retired; always treat as unlocked.
+  const resolved = await resolveActiveShareForComments(token, true);
   if (!resolved.ok) {
     return NextResponse.json(
       { error: resolved.status.toUpperCase() },
@@ -106,7 +79,7 @@ export async function POST(req: Request, ctx: Ctx) {
       );
     }
 
-    const resolved = await resolveActiveShareForComments(token, await isUnlocked(token));
+    const resolved = await resolveActiveShareForComments(token, true);
     if (!resolved.ok) {
       return NextResponse.json(
         { error: resolved.status.toUpperCase() },
@@ -120,6 +93,12 @@ export async function POST(req: Request, ctx: Ctx) {
       authorLabel,
       body: commentBody,
       clientHash,
+    });
+    emitShareCommentNotification({
+      viewingId: resolved.viewingId,
+      commentId: comment.id,
+      authorLabel: comment.authorLabel,
+      bodyPreview: comment.body,
     });
     return NextResponse.json({ comment }, { status: 201, headers });
   } catch (error) {

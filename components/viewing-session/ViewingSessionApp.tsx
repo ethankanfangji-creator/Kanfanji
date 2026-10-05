@@ -12,6 +12,7 @@ import { ShareReportDialog } from "@/components/viewing-chat/ShareReportDialog";
 import { ViewingChatComposer } from "@/components/viewing-chat/ViewingChatComposer";
 import { useChatMediaUrl } from "@/components/viewing-chat/useChatMediaUrl";
 import { AI_CONSENT_VERSION } from "@/lib/ai-boundary/client";
+import { track } from "@/lib/analytics/client";
 import type { DecisionStatus } from "@/lib/portfolio";
 import {
   briefingDisplaySources,
@@ -165,9 +166,8 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
   const [feedbackReasonDraft, setFeedbackReasonDraft] = useState("");
   const [shareOpen, setShareOpen] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
-  const [shareLinkId, setShareLinkId] = useState<string | null>(null);
-  const [shareNeedsRegenerate, setShareNeedsRegenerate] = useState(false);
-  const [shareExpires, setShareExpires] = useState<string | null>(null);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
   const syncTimer = useRef(0);
   const notesEndRef = useRef<HTMLDivElement>(null);
@@ -356,21 +356,78 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
     }
     if (!(await ensureSyncedForShare())) return;
     setShareError(null);
+    setShareCopied(false);
+    setShareUrl(null);
+    setShareBusy(true);
     setShareOpen(true);
-    void fetch(`/api/share/links?viewingId=${encodeURIComponent(viewingId)}`).then(
-      async (response) => {
-        if (!response.ok) return;
-        const data = (await response.json()) as {
+
+    try {
+      const existingRes = await fetch(
+        `/api/share/links?viewingId=${encodeURIComponent(viewingId)}`,
+      );
+      let absolute: string | null = null;
+      if (existingRes.ok) {
+        const existing = (await existingRes.json()) as {
           url?: string | null;
-          needsRegenerate?: boolean;
-          link?: { id?: string; expiresAt?: string | null };
+          link?: { id?: string; status?: string };
         };
-        setShareLinkId(data.link?.id ?? null);
-        setShareNeedsRegenerate(Boolean(data.needsRegenerate));
-        setShareExpires(data.link?.expiresAt ?? null);
-        setShareUrl(data.url ? `${window.location.origin}${data.url}` : null);
-      },
-    );
+        if (existing.url && existing.link?.id && existing.link.status === "closed") {
+          const reopenRes = await fetch(`/api/share/links/${existing.link.id}/reopen`, {
+            method: "POST",
+          });
+          if (reopenRes.ok) {
+            absolute = `${window.location.origin}${existing.url}`;
+          }
+        } else if (existing.url && existing.link?.status !== "closed") {
+          absolute = `${window.location.origin}${existing.url}`;
+        }
+      }
+
+      if (!absolute) {
+        const createRes = await fetch("/api/share/links", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ viewingId }),
+        });
+        const created = (await createRes.json()) as {
+          urlPath?: string;
+          code?: string;
+        };
+        if (createRes.status === 429) {
+          setShareError(c.shareRateLimited);
+          return;
+        }
+        if (createRes.status === 503) {
+          setShareError(c.shareUnavailable);
+          return;
+        }
+        if (created.code === "VIEWING_NOT_FOUND" || createRes.status === 404) {
+          setShareError(c.viewingNotFound);
+          return;
+        }
+        if (createRes.status === 409) {
+          setShareError(c.shareNoReportYet);
+          return;
+        }
+        if (!createRes.ok || !created.urlPath) {
+          setShareError(c.shareUnavailable);
+          return;
+        }
+        absolute = `${window.location.origin}${created.urlPath}`;
+      }
+
+      setShareUrl(absolute);
+      try {
+        await navigator.clipboard.writeText(absolute);
+        setShareCopied(true);
+      } catch {
+        setShareError("COPY_FAILED");
+      }
+    } catch {
+      setShareError(c.shareUnavailable);
+    } finally {
+      setShareBusy(false);
+    }
   }
 
   function setBriefingFeedback(value: ViewingBriefingFeedback) {
@@ -765,7 +822,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
       <header className="sticky top-0 z-10 border-b border-black/8 bg-[#FAF6F1]/95 px-4 py-3 backdrop-blur">
         <Link
           href="/"
-          className="inline-flex items-center gap-1 text-[12px] font-medium text-[#6B7280]"
+          className="inline-flex min-h-[var(--touch-target)] items-center gap-1 text-[12px] font-medium text-[#6B7280]"
         >
           <ArrowLeft className="h-3.5 w-3.5" /> {t.loginPage.backHome}
         </Link>
@@ -783,6 +840,10 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
             }}
             onChange={(next: DecisionStatus | null) => {
               patchLocalThread(viewingId, { decisionStatus: next });
+              track({
+                name: "decision_status_changed",
+                props: { status: next ?? "none", surface: "session" },
+              });
               queueSync();
               refresh();
             }}
@@ -820,7 +881,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
                   aria-label={c.briefingLike}
                   title={c.briefingLike}
                   aria-pressed={briefing.feedback === "like"}
-                  className={`inline-flex h-8 w-8 items-center justify-center rounded-full transition ${
+                  className={`inline-flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center rounded-full transition ${
                     briefing.feedback === "like"
                       ? "bg-[#1A1A1A] text-white"
                       : "text-[#6B7280] hover:bg-black/5 hover:text-[#1A1A1A]"
@@ -834,7 +895,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
                   aria-label={c.briefingDislike}
                   title={c.briefingDislike}
                   aria-pressed={briefing.feedback === "dislike"}
-                  className={`inline-flex h-8 w-8 items-center justify-center rounded-full transition ${
+                  className={`inline-flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center rounded-full transition ${
                     briefing.feedback === "dislike"
                       ? "bg-[#1A1A1A] text-white"
                       : "text-[#6B7280] hover:bg-black/5 hover:text-[#1A1A1A]"
@@ -903,7 +964,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
                         onClick={saveEditNote}
                         aria-label={c.noteSave}
                         title={c.noteSave}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-black text-white hover:bg-black/85"
+                        className="inline-flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center rounded-full bg-black text-white hover:bg-black/85"
                       >
                         <Check className="h-3.5 w-3.5" aria-hidden />
                       </button>
@@ -915,7 +976,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
                         }}
                         aria-label={c.noteCancel}
                         title={c.noteCancel}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[#6B7280] hover:bg-black/5 hover:text-[#1A1A1A]"
+                        className="inline-flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center rounded-full text-[#6B7280] hover:bg-black/5 hover:text-[#1A1A1A]"
                       >
                         <X className="h-3.5 w-3.5" aria-hidden />
                       </button>
@@ -944,7 +1005,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
                           onClick={() => beginEditNote(note)}
                           aria-label={c.noteEdit}
                           title={c.noteEdit}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[#6B7280] hover:bg-black/5 hover:text-[#1A1A1A]"
+                          className="inline-flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center rounded-full text-[#6B7280] hover:bg-black/5 hover:text-[#1A1A1A]"
                         >
                           <Pencil className="h-3.5 w-3.5" aria-hidden />
                         </button>
@@ -954,7 +1015,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
                         onClick={() => deleteNote(note.id)}
                         aria-label={c.noteDelete}
                         title={c.noteDelete}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[#9CA3AF] hover:bg-[#FEE2E2] hover:text-[#991B1B]"
+                        className="inline-flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center rounded-full text-[#9CA3AF] hover:bg-[#FEE2E2] hover:text-[#991B1B]"
                       >
                         <Trash2 className="h-3.5 w-3.5" aria-hidden />
                       </button>
@@ -1040,7 +1101,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
                   aria-label={c.reportLike}
                   title={c.reportLike}
                   aria-pressed={shownReport.feedback === "like"}
-                  className={`inline-flex h-8 w-8 items-center justify-center rounded-full transition ${
+                  className={`inline-flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center rounded-full transition ${
                     shownReport.feedback === "like"
                       ? "bg-[#1A1A1A] text-white"
                       : "text-[#6B7280] hover:bg-black/5 hover:text-[#1A1A1A]"
@@ -1054,7 +1115,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
                   aria-label={c.reportDislike}
                   title={c.reportDislike}
                   aria-pressed={shownReport.feedback === "dislike"}
-                  className={`inline-flex h-8 w-8 items-center justify-center rounded-full transition ${
+                  className={`inline-flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center rounded-full transition ${
                     shownReport.feedback === "dislike"
                       ? "bg-[#1A1A1A] text-white"
                       : "text-[#6B7280] hover:bg-black/5 hover:text-[#1A1A1A]"
@@ -1068,7 +1129,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
                 onClick={() => void requestShare()}
                 aria-label={c.shareReport}
                 title={c.shareReport}
-                className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-full bg-black text-white hover:bg-black/85"
+                className="ml-auto inline-flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center rounded-full bg-black text-white hover:bg-black/85"
               >
                 <Share2 className="h-3.5 w-3.5" aria-hidden />
               </button>
@@ -1158,105 +1219,19 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
       <ShareReportDialog
         open={shareOpen}
         url={shareUrl}
-        needsRegenerate={shareNeedsRegenerate}
+        copied={shareCopied}
+        busy={shareBusy}
         error={shareError}
         labels={{
           title: c.shareNoticeTitle,
-          body: shareExpires
-            ? c.shareExisting.replace("{date}", shareExpires.slice(0, 10))
-            : c.shareNoticeBody,
-          point1: c.shareNoticePoint1,
-          point2: c.shareNoticePoint2,
-          point3: c.shareNoticePoint3,
-          acknowledge: c.shareAcknowledge,
-          create: c.shareCreate,
-          revoke: c.shareRevoke,
-          regenerate: c.shareRegenerate,
-          regenerateConfirm: c.shareRegenerateConfirm,
-          copy: c.shareCopy,
+          copied: c.shareCopied,
           copyFailed: c.shareCopyFailed,
-          unavailable: c.shareUnavailable,
-          needsRegenerate: c.shareNeedsRegenerate,
+          hubGuide: c.shareHubGuide,
+          hubCta: c.shareHubCta,
           close: c.shareClose,
+          preparing: c.sharePreparing,
         }}
         onClose={() => setShareOpen(false)}
-        onCreate={() => {
-          void fetch("/api/share/links", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ viewingId }),
-          }).then(async (response) => {
-            const data = (await response.json()) as {
-              urlPath?: string;
-              error?: string;
-              code?: string;
-              link?: { id?: string; expiresAt?: string | null };
-            };
-            if (response.status === 429) setShareError(c.shareRateLimited);
-            else if (response.status === 503) setShareError(c.shareUnavailable);
-            else if (data.code === "VIEWING_NOT_FOUND" || response.status === 404) {
-              setShareError(c.viewingNotFound);
-            } else if (response.status === 409) setShareError(c.shareNoReportYet);
-            else if (!response.ok) setShareError(c.shareUnavailable);
-            else {
-              setShareError(null);
-              setShareLinkId(data.link?.id ?? null);
-              setShareExpires(data.link?.expiresAt ?? null);
-              setShareNeedsRegenerate(false);
-              setShareUrl(data.urlPath ? `${window.location.origin}${data.urlPath}` : null);
-            }
-          });
-        }}
-        onCopy={async () => {
-          if (!shareUrl) return false;
-          try {
-            await navigator.clipboard.writeText(shareUrl);
-            return true;
-          } catch {
-            return false;
-          }
-        }}
-        onRevoke={() => {
-          if (!shareLinkId) return;
-          const previous = shareUrl;
-          void fetch(`/api/share/links/${shareLinkId}/revoke`, { method: "POST" }).then(
-            async (response) => {
-              if (!response.ok) {
-                setShareUrl(previous);
-                setShareError(c.shareUnavailable);
-                return;
-              }
-              setShareUrl(null);
-              setShareLinkId(null);
-              setShareError(null);
-              setStatus(c.shareRevoked);
-            },
-          );
-        }}
-        onRegenerate={() => {
-          if (!shareLinkId) return;
-          void fetch(`/api/share/links/${shareLinkId}/rotate`, { method: "POST" }).then(
-            async (response) => {
-              const data = (await response.json()) as {
-                urlPath?: string;
-                code?: string;
-                link?: { id?: string; expiresAt?: string | null };
-              };
-              if (response.status === 429) {
-                setShareError(c.shareRateLimited);
-                return;
-              }
-              if (!response.ok || !data.urlPath) {
-                setShareError(c.shareUnavailable);
-                return;
-              }
-              setShareError(null);
-              setShareLinkId(data.link?.id ?? null);
-              setShareExpires(data.link?.expiresAt ?? null);
-              setShareUrl(`${window.location.origin}${data.urlPath}`);
-            },
-          );
-        }}
       />
     </div>
   );

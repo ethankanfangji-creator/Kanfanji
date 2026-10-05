@@ -281,7 +281,7 @@ export async function createViewingInvite(input: {
 export async function acceptViewingInvite(
   rawToken: string,
   user: User,
-): Promise<{ viewingId: string; role: MemberRole }> {
+): Promise<{ viewingId: string; role: MemberRole; inviteId: string }> {
   const email = user.email?.trim().toLowerCase();
   if (!email) throw new Error("EMAIL_REQUIRED");
   const admin = createAdminClient();
@@ -304,7 +304,11 @@ export async function acceptViewingInvite(
     inviteId: invite.id,
     email,
   });
-  return { viewingId: String(invite.viewing_id), role };
+  return {
+    viewingId: String(invite.viewing_id),
+    role,
+    inviteId: String(invite.id),
+  };
 }
 
 export async function updateViewingMember(input: {

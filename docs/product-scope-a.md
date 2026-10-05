@@ -39,6 +39,7 @@ Last updated: 2026-10-04.
 | History / search / media library | shell panels | Recorder chrome |
 | Guest local → login to share | login gate | Safety story for A |
 | Compare 2–5 viewings | `/compare` | Optional from Ask / history |
+| Notifications (in-app + email) | bell + `/notifications` | Off-page only: share comments, collab invite create/accept |
 
 ### Cut（不再投資）
 
@@ -47,6 +48,12 @@ Last updated: 2026-10-04.
 | `/api/viewing-chat/turn` + coach dialogue | Notes-first; no on-site chat bubbles |
 | Agenda / opening AI bubbles | Coaching removed from main path |
 | ChatMessageList as capture UI | Replaced by Session notes timeline |
+
+## Ask analytics (privacy)
+
+- **PostHog funnel** (enums only, no question/notes/address text): `ask_opened`, `ask_question_sent`, `ask_answer_received`, `ask_feedback`, `ask_rewrite`, `ask_compare_opened`, `decision_status_changed`; `compare_opened` may use `source=ask`; quota uses `endpoint=portfolio`.
+- **First-party signals** (`portfolio_ask_signals`): rule-based `themes[]` per signed-in Ask (budget / risk / family_preference / …). No question body in that table; full turns stay in `portfolio_ask_turns` for the owner.
+- Non-goals here: preference profile synthesis, listing recommendations, third-party free-text analytics.
 
 ## Related
 

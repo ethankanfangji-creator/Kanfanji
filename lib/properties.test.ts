@@ -14,7 +14,7 @@ afterEach(() => {
 });
 
 describe("property registry client", () => {
-  it("uses only the admin client and sends the canonical address", async () => {
+  it("sends street + unit identity and allows null coordinates", async () => {
     createAdminClient.mockReturnValue({ rpc });
     rpc.mockResolvedValue({
       data: "c92a071b-4148-4fb0-96ea-f7d50f72d9e2",
@@ -23,16 +23,48 @@ describe("property registry client", () => {
 
     await expect(
       findOrCreateProperty({
-        normalizedAddress: "  123 MAIN St  ",
-        lat: 49.2827,
-        lng: -123.1207,
+        normalizedAddress: "Unit 5, 2143 Spring St, Port Moody, BC",
+        countryCode: "CA",
       }),
     ).resolves.toBe("c92a071b-4148-4fb0-96ea-f7d50f72d9e2");
 
     expect(createAdminClient).toHaveBeenCalledOnce();
     expect(rpc).toHaveBeenCalledWith(
       "find_or_create_property",
-      expect.objectContaining({ p_normalized_address: "123 main st" }),
+      expect.objectContaining({
+        p_normalized_address: "2143 spring st, port moody, bc",
+        p_unit_key: "5",
+        p_unit_label: "Unit 5",
+        p_country_code: "CA",
+        p_lat: null,
+        p_lng: null,
+      }),
+    );
+  });
+
+  it("keeps different units as distinct RPC keys", async () => {
+    createAdminClient.mockReturnValue({ rpc });
+    rpc.mockResolvedValue({ data: "id-a", error: null });
+
+    await findOrCreateProperty({
+      normalizedAddress: "2143 Spring St",
+      unitLabel: "Unit 5",
+      lat: 49.28,
+      lng: -122.85,
+      countryCode: "CA",
+    });
+    await findOrCreateProperty({
+      normalizedAddress: "2143 Spring St",
+      unitLabel: "Unit 6",
+      lat: 49.28,
+      lng: -122.85,
+      countryCode: "CA",
+    });
+
+    expect(rpc.mock.calls[0][1].p_unit_key).toBe("5");
+    expect(rpc.mock.calls[1][1].p_unit_key).toBe("6");
+    expect(rpc.mock.calls[0][1].p_normalized_address).toBe(
+      rpc.mock.calls[1][1].p_normalized_address,
     );
   });
 

@@ -27,6 +27,8 @@ function item(
     video_urls: [],
     decisionStatus: null,
     hasReport: false,
+    lat: null,
+    lng: null,
     ...partial,
   };
 }
@@ -89,5 +91,29 @@ describe("ViewingsIndex", () => {
     await user.click(screen.getByRole("button", { name: /喜歡/ }));
     expect(screen.getByText("Liked Home")).toBeTruthy();
     expect(screen.queryByText("Passed Home")).toBeNull();
+  });
+
+  it("uses OSM tile map cover when pin coords exist", () => {
+    const { container } = render(
+      <I18nProvider>
+        <ViewingsIndex
+          viewings={[
+            item({
+              id: "1",
+              address: "1167 Victory Drive",
+              photo_urls: ["user/1/photos/a.jpg"],
+              lat: 49.28,
+              lng: -122.85,
+            }),
+          ]}
+          loading={false}
+          error=""
+        />
+      </I18nProvider>,
+    );
+    const tile = container.querySelector(
+      'img[src^="https://tile.openstreetmap.org/"]',
+    );
+    expect(tile).toBeTruthy();
   });
 });

@@ -10,6 +10,7 @@ import {
   RequestValidationError,
   validationErrorBody,
 } from "@/lib/http/validation";
+import { emitInviteCreatedNotification } from "@/lib/notifications/emit";
 
 export const runtime = "nodejs";
 
@@ -45,10 +46,19 @@ export async function POST(
     });
     const siteUrl =
       process.env.NEXT_PUBLIC_SITE_URL || new URL(request.url).origin;
+    const inviteUrl = `${siteUrl}/invite/${result.token}`;
+    emitInviteCreatedNotification({
+      viewingId: id,
+      inviteId: result.invite.id,
+      inviteEmail: result.invite.email,
+      inviteUrl,
+      actorUserId: user.id,
+      siteUrl,
+    });
     return NextResponse.json(
       {
         invite: result.invite,
-        inviteUrl: `${siteUrl}/invite/${result.token}`,
+        inviteUrl,
       },
       { status: 201 },
     );

@@ -17,6 +17,9 @@ export function buildChatStatePayload(thread: {
   conversationStatus?: string;
   pinned?: boolean;
   sitePin?: { lat: number; lng: number; source: "civic" | "map" } | null;
+  unitKey?: string | null;
+  unitLabel?: string | null;
+  placeId?: string | null;
   briefing?: unknown;
   listingUrl?: string | null;
   reportNotesFingerprint?: string | null;
@@ -35,6 +38,9 @@ export function buildChatStatePayload(thread: {
     reportNotesFingerprint: thread.reportNotesFingerprint ?? null,
     decisionStatus: thread.decisionStatus ?? null,
     ...(thread.sitePin ? { sitePin: thread.sitePin } : {}),
+    ...(thread.unitKey ? { unitKey: thread.unitKey } : {}),
+    ...(thread.unitLabel ? { unitLabel: thread.unitLabel } : {}),
+    ...(thread.placeId ? { placeId: thread.placeId } : {}),
   };
 }
 

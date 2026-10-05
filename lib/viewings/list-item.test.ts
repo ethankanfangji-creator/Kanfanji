@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { toViewingListItem } from "./list-item";
+import { toViewingListItem, viewingListCover } from "./list-item";
 
 describe("toViewingListItem", () => {
-  it("extracts decisionStatus and hasReport from chat_state / report", () => {
+  it("extracts decisionStatus, hasReport, and sitePin coords", () => {
     const item = toViewingListItem({
       id: "v1",
       address: "1200 Westwood St",
@@ -11,13 +11,19 @@ describe("toViewingListItem", () => {
       photo_urls: ["https://example.com/a.jpg"],
       video_urls: [],
       report: { sections: [] },
-      chat_state: { v: 1, decisionStatus: "shortlist" },
+      chat_state: {
+        v: 1,
+        decisionStatus: "shortlist",
+        sitePin: { lat: 49.2815, lng: -122.8512, source: "map" },
+      },
     });
     expect(item).toMatchObject({
       id: "v1",
       decisionStatus: "shortlist",
       hasReport: true,
       photo_urls: ["https://example.com/a.jpg"],
+      lat: 49.2815,
+      lng: -122.8512,
     });
   });
 
@@ -37,5 +43,37 @@ describe("toViewingListItem", () => {
 
   it("returns null without id/address", () => {
     expect(toViewingListItem({ address: "x" })).toBeNull();
+  });
+});
+
+describe("viewingListCover", () => {
+  it("prefers confirmed pin map over storage photo paths", () => {
+    expect(
+      viewingListCover({
+        lat: 49.2815,
+        lng: -122.8512,
+        photo_urls: ["user/v1/photos/a.jpg"],
+      }),
+    ).toEqual({ kind: "map", lat: 49.2815, lng: -122.8512 });
+  });
+
+  it("ignores non-http photo paths when no coords", () => {
+    expect(
+      viewingListCover({
+        lat: null,
+        lng: null,
+        photo_urls: ["user/v1/photos/a.jpg"],
+      }),
+    ).toEqual({ kind: "empty" });
+  });
+
+  it("uses http photo when no coords", () => {
+    expect(
+      viewingListCover({
+        lat: null,
+        lng: null,
+        photo_urls: ["https://cdn.example.com/a.jpg"],
+      }),
+    ).toEqual({ kind: "photo", url: "https://cdn.example.com/a.jpg" });
   });
 });

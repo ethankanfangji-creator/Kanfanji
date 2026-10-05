@@ -6,7 +6,6 @@ import { ChatReportShareCard } from "@/components/share-card/ChatReportShareCard
 import { LocalTime } from "@/components/share-card/LocalTime";
 import { DecisionSummaryCard } from "@/components/share-card/DecisionSummaryCard";
 import { ShareReportComments } from "@/components/share-card/ShareReportComments";
-import { ShareUnlockForm } from "@/components/share-card/ShareUnlockForm";
 import { detectLocale, htmlLang, isLocale, LOCALE_STORAGE_KEY, type Locale } from "@/lib/i18n/config";
 import { getMessages } from "@/lib/i18n";
 import { resolvePublicShare } from "@/lib/share";
@@ -32,6 +31,7 @@ const READONLY_LABELS = {
   eyebrow: "KANFANGJI · DECISION SUMMARY",
   address: "Address",
   viewingAt: "Viewing date",
+  openMap: "Open in Maps",
   basics: "Layout, price & basics",
   unit: "Unit",
   price: "Price",
@@ -67,14 +67,20 @@ function ShareShell({
 }) {
   return (
     <div className="min-h-screen w-full flex justify-center bg-[#FDF6F0] text-[#1A1A1A]">
-      <div className="w-full max-w-[720px] px-4 pt-6 pb-28">
+      <div
+        className="w-full max-w-[720px] px-4"
+        style={{
+          paddingTop: "max(1.5rem, env(safe-area-inset-top, 0px))",
+          paddingBottom: "max(7rem, calc(1.5rem + env(safe-area-inset-bottom, 0px)))",
+        }}
+      >
         <div className="mb-3 flex items-center justify-between gap-3">
           <p className="text-[11px] font-[700] tracking-[0.18em] opacity-60">
             {labels.eyebrow}
           </p>
           <Link
             href="/"
-            className="inline-flex items-center gap-1 h-8 px-3 rounded-full bg-white border border-black/10 text-[11px] font-bold"
+            className="inline-flex min-h-[var(--touch-target)] items-center gap-1 rounded-full border border-black/10 bg-white px-3 text-[11px] font-bold"
           >
             <ArrowLeft className="w-3.5 h-3.5" /> {labels.close}
           </Link>
@@ -197,13 +203,6 @@ function renderResult(token: string, result: PublicShareResult, locale: Locale) 
     foot: share.readonlyFoot,
     openApp: share.openApp,
   };
-  if (result.status === "password_required") {
-    return (
-      <ShareShell labels={shell}>
-        <ShareUnlockForm token={token} message={result.message} />
-      </ShareShell>
-    );
-  }
   if (result.status !== "active") {
     return (
       <ShareStatusPage title={share.invalidTitle} body={share.invalidBody} shell={shell} />
@@ -221,6 +220,7 @@ function renderResult(token: string, result: PublicShareResult, locale: Locale) 
             empty: share.empty,
             caution: share.aiCaution,
             photos: share.reportPhotos,
+            openMap: share.openMap,
             sections: {
               overview: chat.reportOverview,
               interior: chat.reportInterior,
@@ -280,6 +280,7 @@ function renderResult(token: string, result: PublicShareResult, locale: Locale) 
           snapshot={summary}
           labels={{
             ...READONLY_LABELS,
+            openMap: share.openMap,
             pros: messages.card.pros,
             risks: messages.card.risks,
             emptySection: share.empty,

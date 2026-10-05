@@ -31,6 +31,11 @@ export {
 } from "./corpus";
 export { askPortfolio } from "./ask";
 export {
+  ASK_QUESTION_THEMES,
+  classifyAskQuestionThemes,
+  type AskQuestionTheme,
+} from "./question-themes";
+export {
   PORTFOLIO_HISTORY_MAX_TURNS,
   buildHistoryForAsk,
   findLastUserQuestion,

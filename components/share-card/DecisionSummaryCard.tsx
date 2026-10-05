@@ -10,6 +10,7 @@ import {
   MapPin,
   Star,
 } from "lucide-react";
+import { ShareMapBlock } from "@/components/share-card/ShareMapBlock";
 import type { DecisionSummarySnapshot, SharePhotoItem, ShareTextItem } from "@/lib/share-card";
 import { formatViewingAt } from "@/lib/share-card";
 
@@ -17,6 +18,7 @@ export type DecisionSummaryCardLabels = {
   eyebrow: string;
   address: string;
   viewingAt: string;
+  openMap: string;
   basics: string;
   unit: string;
   price: string;
@@ -372,6 +374,17 @@ export function DecisionSummaryCard({
           )}
         </div>
       </header>
+
+      {snapshot.lat != null && snapshot.lng != null ? (
+        <div className="px-4 pt-4 sm:px-5 sm:pt-5">
+          <ShareMapBlock
+            lat={snapshot.lat}
+            lng={snapshot.lng}
+            address={snapshot.address}
+            openMapLabel={labels.openMap}
+          />
+        </div>
+      ) : null}
 
       <div className="p-4 sm:p-5 space-y-4">
         {canEdit && onToggleEditing ? (

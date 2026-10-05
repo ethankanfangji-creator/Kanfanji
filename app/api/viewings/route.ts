@@ -15,6 +15,12 @@ import {
   FREE_VIEWING_LIMIT,
 } from "@/lib/viewing-wizard/free-tier";
 import { toViewingListItem } from "@/lib/viewings/list-item";
+import {
+  coordsFromUnknown,
+  linkViewingToProperty,
+} from "@/lib/viewings/link-property.server";
+import { detectMarketRegion } from "@/lib/property-intel/types";
+import { schedulePropertySignalsRefresh } from "@/lib/properties/signals";
 
 export const runtime = "nodejs";
 
@@ -162,6 +168,28 @@ export async function POST(request: Request) {
       );
     }
 
+    const property =
+      body.property && typeof body.property === "object" ? body.property : {};
+    const coords = coordsFromUnknown(property);
+    const unitLabel =
+      typeof property.unitLabel === "string" ? property.unitLabel : null;
+    const marketRegion =
+      body.market === "US" ||
+      body.market === "CA" ||
+      body.market === "TW" ||
+      body.market === "OTHER"
+        ? body.market
+        : detectMarketRegion(address) ?? "OTHER";
+    // Ignore client-supplied property_id; server owns registry linkage.
+    const propertyId = await linkViewingToProperty(admin, {
+      address,
+      countryCode: marketRegion,
+      lat: coords?.lat ?? null,
+      lng: coords?.lng ?? null,
+      unitLabel,
+      placeId: typeof property.placeId === "string" ? property.placeId : null,
+    });
+
     const payload = {
       address,
       tags: Array.isArray(body.tags) ? body.tags : [],
@@ -170,8 +198,8 @@ export async function POST(request: Request) {
       notes: body.notes ?? [],
       pros: Array.isArray(body.pros) ? body.pros : [],
       risks: Array.isArray(body.risks) ? body.risks : [],
-      property: body.property ?? {},
-      property_id: null,
+      property,
+      property_id: propertyId,
       user_id: user!.id,
       is_pro: isPro,
       photo_urls: [] as string[],
@@ -195,16 +223,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "存檔失敗：沒有回傳 id" }, { status: 500 });
     }
 
-    const market =
-      body.market === "US" ||
-      body.market === "CA" ||
-      body.market === "TW" ||
-      body.market === "OTHER"
-        ? body.market
-        : "OTHER";
+    schedulePropertySignalsRefresh(admin, propertyId);
+
     await serverTrack(user!.id, {
       name: "viewing_created",
-      props: { storage: "cloud", market },
+      props: { storage: "cloud", market: marketRegion },
     });
 
     return NextResponse.json({

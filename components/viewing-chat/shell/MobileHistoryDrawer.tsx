@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Pin, Search, Trash2 } from "lucide-react";
+import { Check, Pin, Plus, Search, Trash2 } from "lucide-react";
 import type { ViewingChatThread } from "@/lib/viewing-chat/types";
 import { shortenAddressLabel } from "@/lib/shorten-address";
 import { filterHistoryThreads } from "@/lib/viewing-chat/history-filter";
@@ -80,24 +80,40 @@ export function MobileHistoryDrawer({
       closeLabel={labels.close}
       tall
       headerExtra={
-        <div className="flex items-center gap-1">
+        <>
+          {onStartNew && labels.startNew ? (
+            <button
+              type="button"
+              aria-label={labels.startNew}
+              title={labels.startNew}
+              onClick={onStartNew}
+              className="inline-flex min-h-9 items-center gap-1 rounded-full bg-black px-3 text-[12px] font-bold text-white active:scale-[0.98]"
+            >
+              <Plus className="h-3.5 w-3.5" strokeWidth={2.5} aria-hidden />
+              <span className="max-w-[5.5rem] truncate">{labels.startNew}</span>
+            </button>
+          ) : null}
           <button
             type="button"
             aria-label={labels.searchPlaceholder ?? labels.title}
+            aria-pressed={filterOpen}
             onClick={() => setFilterOpen((open) => !open)}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full text-[#111]"
+            className={`inline-flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center rounded-full active:bg-black/5 ${
+              filterOpen ? "bg-black/5 text-[#111]" : "text-[#111]"
+            }`}
           >
-            <Search className="h-4 w-4" />
+            <Search className="h-4 w-4" aria-hidden />
           </button>
-        </div>
+        </>
       }
     >
       {filterOpen ? (
         <input
+          autoFocus
           value={historyQuery}
           onChange={(event) => setHistoryQuery(event.target.value)}
           placeholder={labels.searchPlaceholder ?? ""}
-          className="mx-4 mb-2 h-10 w-[calc(100%-2rem)] rounded-full border border-black/10 px-3 text-[14px]"
+          className="mx-4 mb-2 mt-3 h-11 w-[calc(100%-2rem)] rounded-full border border-black/10 px-4 text-[14px] outline-none focus:border-black/25 focus:ring-2 focus:ring-black/5"
         />
       ) : null}
       <ul className="pb-2">

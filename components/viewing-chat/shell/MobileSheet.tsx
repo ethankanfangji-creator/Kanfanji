@@ -23,7 +23,7 @@ export function MobileSheet({
   children,
   /** Near-full height for long lists (history, search, media). */
   tall = false,
-  /** Optional node under the title (e.g. search field). */
+  /** Actions in the title row (before close), e.g. New + Search. */
   headerExtra,
   /** Accessible name when title is a custom node; defaults to string title. */
   ariaLabel,
@@ -104,17 +104,15 @@ export function MobileSheet({
           onTouchCancel={resetDrag}
         >
           <div className="mx-auto mb-1 h-1 w-10 rounded-full bg-black/15" aria-hidden />
-          <div className="flex items-center justify-between gap-2 px-3 pb-2">
-            <div className="min-w-0 flex-1 text-[15px] font-bold text-[#1A1A1A]">
+          <div className="flex items-center gap-1.5 border-b border-black/8 px-3 pb-2">
+            <div className="min-w-0 flex-1 truncate text-[15px] font-bold text-[#1A1A1A]">
               {title}
             </div>
+            {headerExtra ? (
+              <div className="flex shrink-0 items-center gap-1">{headerExtra}</div>
+            ) : null}
             <SheetCloseButton label={closeLabel} onClick={onClose} />
           </div>
-          {headerExtra ? (
-            <div className="border-b border-black/8 px-3 pb-3">{headerExtra}</div>
-          ) : (
-            <div className="border-b border-black/8" />
-          )}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {children}

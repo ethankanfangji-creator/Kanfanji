@@ -8,26 +8,25 @@ import {
   UserRound,
 } from "lucide-react";
 
-export type MobileNavTabId = "new" | "ask" | "history" | "search" | "media" | "account";
+export type MobileNavTabId = "ask" | "history" | "media" | "account";
 
 export type MobileNavLabels = {
   nav: string;
   ask: string;
   history: string;
-  search: string;
   media: string;
   account: string;
 };
 
 type TabDef = {
-  id: Exclude<MobileNavTabId, "new">;
+  id: MobileNavTabId;
   label: string;
   icon: ReactNode;
 };
 
 /**
  * Mobile primary navigation. Hidden from md and up (desktop uses IconRail).
- * “New viewing” lives on the address empty state / ⋯ menu.
+ * “New viewing” lives in the History sheet header (and empty-state CTA).
  * Icon + short label; selected state uses a filled icon chip + underline.
  */
 export function MobileBottomNav({

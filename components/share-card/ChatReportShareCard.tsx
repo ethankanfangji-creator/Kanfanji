@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { ShareMapBlock } from "@/components/share-card/ShareMapBlock";
 import {
   ReportSectionsView,
   type ReportSectionLabels,
@@ -22,9 +23,12 @@ export function ChatReportShareCard({
     empty: string;
     caution: string;
     photos?: string;
+    openMap: string;
     sections: ReportSectionLabels;
   };
 }) {
+  const lat = report.version === 3 ? report.lat : undefined;
+  const lng = report.version === 3 ? report.lng : undefined;
   const sectionReport =
     report.version === 3
       ? {
@@ -61,6 +65,16 @@ export function ChatReportShareCard({
     <article className="rounded-[28px] bg-white p-6">
       <h1 className="text-[20px] font-bold">{report.address || "—"}</h1>
       <p className="mt-1 text-[12px] text-[#6B7280]">{generatedAt || "—"}</p>
+      {lat != null && lng != null ? (
+        <div className="mt-3">
+          <ShareMapBlock
+            lat={lat}
+            lng={lng}
+            address={report.address}
+            openMapLabel={labels.openMap}
+          />
+        </div>
+      ) : null}
       {hasBody ? (
         <div className="mt-3">
           <ReportSectionsView

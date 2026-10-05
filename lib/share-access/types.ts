@@ -7,6 +7,7 @@ export type ShareCapability = "read";
 
 export type ShareLinkStatus =
   | "active"
+  | "closed"
   | "revoked"
   | "expired"
   | "missing"
@@ -21,12 +22,13 @@ export type ShareLinkRecord = {
   /** Opaque URL token — unguessable, not sequential viewing id. */
   token: string;
   capability: ShareCapability;
-  status: Extract<ShareLinkStatus, "active" | "revoked" | "expired">;
+  status: Extract<ShareLinkStatus, "active" | "closed" | "revoked" | "expired">;
   expiresAt: string | null;
   passwordEnabled: boolean;
   createdAt: string;
   updatedAt: string;
   revokedAt: string | null;
+  closedAt: string | null;
   lastResolvedAt: string | null;
   /** Increments whenever existing unlock cookies must stop working. */
   accessVersion: number;
@@ -84,6 +86,9 @@ export type PublicDecisionSummary = {
   photos: PublicSharePhotoItem[];
   disclaimer: string;
   generatedAt: string;
+  /** Confirmed pin for map cover + open-in-maps (optional). */
+  lat?: number;
+  lng?: number;
 };
 
 /** Public payload — least privilege for /s/[token]. */
@@ -136,6 +141,8 @@ export type PublicSharePayload = {
         };
         verdict?: string;
         nextSteps?: string[];
+        lat?: number;
+        lng?: number;
       }
     | {
         version: 2;
@@ -172,6 +179,8 @@ export type PublishedShareSnapshot = {
     risks: string[];
   };
   publishedAt: string;
+  lat?: number;
+  lng?: number;
 };
 
 /** Server-only manifest. Paths are storage object keys, never signed URLs. */
@@ -228,20 +237,18 @@ export const PUBLIC_SHARE_FORBIDDEN_KEYS = [
 export type CreateShareLinkRequest = {
   viewingId: string;
   expiresAt?: string | null;
-  /** Plaintext only in request body over TLS — never logged or stored. */
-  password?: string | null;
   capability?: ShareCapability;
 };
 
 export type CreateShareLinkResponse = {
   link: ShareLinkRecord;
-  /** Absolute or path URL for owner copy — token only, no password. */
+  /** Absolute or path URL for owner copy — token only. */
   urlPath: string;
 };
 
 export type UpdateShareLinkRequest = {
   expiresAt?: string | null;
-  /** Set new password; null clears password. Omitted = unchanged. */
+  /** @deprecated Password sharing is retired; API returns 400 if present. */
   password?: string | null;
 };
 
@@ -250,14 +257,4 @@ export type RotateShareLinkResponse = {
   urlPath: string;
   /** Previous token is immediately invalid. */
   previousTokenInvalidated: true;
-};
-
-export type UnlockShareRequest = {
-  password: string;
-};
-
-export type UnlockShareResponse = {
-  ok: true;
-  /** Cookie is set by Set-Cookie; body must not echo password. */
-  expiresAt: string;
 };

@@ -12,8 +12,6 @@ export type {
   ShareCapability,
   ShareLinkRecord,
   ShareLinkStatus,
-  UnlockShareRequest,
-  UnlockShareResponse,
   UpdateShareLinkRequest,
 } from "./types";
 export { PUBLIC_SHARE_FORBIDDEN_KEYS } from "./types";
@@ -48,8 +46,3 @@ export {
   newShareAccessState,
   type ShareAccessState,
 } from "./state";
-export {
-  createShareUnlockCookieValue,
-  shareUnlockCookieName,
-  verifyShareUnlockCookieValue,
-} from "./cookie";

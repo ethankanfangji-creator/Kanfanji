@@ -58,7 +58,10 @@ export async function resolveActiveShareForComments(
   unlocked = false,
 ): Promise<
   | { ok: true; viewingId: string; shareLinkId: string }
-  | { ok: false; status: "missing" | "revoked" | "expired" | "password_required" | "forbidden" }
+  | {
+      ok: false;
+      status: "missing" | "revoked" | "closed" | "expired" | "password_required" | "forbidden";
+    }
 > {
   if (!isShareTokenFormat(token)) return { ok: false, status: "missing" };
   const admin = createAdminClient();
@@ -67,6 +70,7 @@ export async function resolveActiveShareForComments(
   if (gate !== "active" || !gateRow) {
     if (
       gate === "revoked" ||
+      gate === "closed" ||
       gate === "expired" ||
       gate === "password_required" ||
       gate === "missing"

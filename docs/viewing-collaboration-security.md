@@ -26,7 +26,8 @@
 - 預設 7 天到期；同案件、同 email 同時只允許一筆 pending 邀請。
 - 接受邀請前必須登入，且登入帳號 email 必須與邀請 email 完全一致（不分大小寫）。
 - Owner 可以撤銷 pending 邀請或 active membership。
-- v1 不依賴郵件供應商；建立邀請後由 owner 複製連結傳給家人。
+- 建立邀請後 server 會嘗試以 Resend 寄出邀請信（需設定 `RESEND_API_KEY` + `RESEND_FROM_EMAIL`）；未設定時略過寄信，owner 仍可複製連結／mailto 傳給家人。
+- 邀請被接受時會通知 owner（in-app + email，同樣受 Resend 設定與 `notification_preferences.email_enabled` 影響）。
 
 ## RLS 與媒體
 

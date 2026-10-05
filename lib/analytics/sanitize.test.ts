@@ -50,4 +50,74 @@ describe("sanitizeAnalyticsProps", () => {
       }),
     ).toBeNull();
   });
+
+  it("keeps ask funnel enums and bounded counts", () => {
+    expect(
+      sanitizeEvent({
+        name: "ask_opened",
+        props: { source: "direct" },
+      }),
+    ).toEqual({ name: "ask_opened", props: { source: "direct" } });
+
+    expect(
+      sanitizeAnalyticsProps("ask_question_sent", {
+        scope_mode: "all",
+        home_count: 3,
+        has_share_comments: true,
+        is_rewrite: false,
+        rewrite_hint: "none",
+        question: "媽媽喜歡哪間",
+      }),
+    ).toEqual({
+      scope_mode: "all",
+      home_count: 3,
+      has_share_comments: true,
+      is_rewrite: false,
+      rewrite_hint: "none",
+    });
+
+    expect(
+      sanitizeEvent({
+        name: "ask_answer_received",
+        props: { matched_count: 2, suggest_compare: true, has_citations: true },
+      }),
+    ).toEqual({
+      name: "ask_answer_received",
+      props: { matched_count: 2, suggest_compare: true, has_citations: true },
+    });
+
+    expect(
+      sanitizeEvent({
+        name: "decision_status_changed",
+        props: { status: "shortlist", surface: "ask" },
+      }),
+    ).toEqual({
+      name: "decision_status_changed",
+      props: { status: "shortlist", surface: "ask" },
+    });
+
+    expect(
+      sanitizeEvent({
+        name: "compare_opened",
+        props: { count: 2, source: "ask" },
+      }),
+    ).toEqual({ name: "compare_opened", props: { count: 2, source: "ask" } });
+  });
+
+  it("rejects ask home_count outside 1–40 and free-text leakage", () => {
+    expect(
+      sanitizeAnalyticsProps("ask_question_sent", {
+        scope_mode: "all",
+        home_count: 0,
+        has_share_comments: false,
+        is_rewrite: false,
+        rewrite_hint: "none",
+      }),
+    ).toEqual({
+      scope_mode: "all",
+      has_share_comments: false,
+      is_rewrite: false,
+      rewrite_hint: "none",
+    });
+  });
 });

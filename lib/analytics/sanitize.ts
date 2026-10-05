@@ -2,7 +2,14 @@ import type { AnalyticsEvent, AnalyticsEventName } from "./events";
 
 const REGIONS = new Set(["CA", "US", "TW", "OTHER"]);
 const MARKETS = new Set(["US", "CA", "TW", "OTHER"]);
-const SOURCES = new Set(["bc_geocoder", "nominatim", "google", "photon"]);
+const ADDRESS_SOURCES = new Set(["bc_geocoder", "nominatim", "google", "photon"]);
+const COMPARE_SOURCES = new Set(["chat_history", "viewings_list", "ask"]);
+const ASK_OPEN_SOURCES = new Set(["nav", "tab", "direct"]);
+const SCOPE_MODES = new Set(["all", "time", "ids", "status"]);
+const REWRITE_HINTS = new Set(["none", "retry", "shorter", "more_citations", "matches_only"]);
+const ASK_REWRITE_HINTS = new Set(["retry", "shorter", "more_citations", "matches_only"]);
+const DECISION_STATUSES = new Set(["liked", "shortlist", "passed", "revisit", "none"]);
+const DECISION_SURFACES = new Set(["ask", "session", "viewings"]);
 
 const ALLOWED: Record<AnalyticsEventName, ReadonlySet<string>> = {
   address_search_started: new Set(["region"]),
@@ -19,20 +26,39 @@ const ALLOWED: Record<AnalyticsEventName, ReadonlySet<string>> = {
   compare_gate_shown: new Set(["reason", "source"]),
   share_created: new Set(["kind"]),
   share_viewed: new Set(["kind"]),
+  ask_opened: new Set(["source"]),
+  ask_question_sent: new Set([
+    "scope_mode",
+    "home_count",
+    "has_share_comments",
+    "is_rewrite",
+    "rewrite_hint",
+  ]),
+  ask_answer_received: new Set(["matched_count", "suggest_compare", "has_citations"]),
+  ask_feedback: new Set(["rating"]),
+  ask_rewrite: new Set(["hint"]),
+  ask_compare_opened: new Set(["count"]),
+  decision_status_changed: new Set(["status", "surface"]),
 };
 
 const ENUMS: Record<string, ReadonlySet<string>> = {
   region: REGIONS,
   market: MARKETS,
-  source: SOURCES,
+  source: ADDRESS_SOURCES,
   storage: new Set(["local", "cloud"]),
   kind: new Set(["text", "audio", "photo", "file"]),
   tier: new Set(["guest", "free", "pro"]),
   limit: new Set(["tier", "network"]),
   reason: new Set(["login_required", "upgrade_required", "too_many_items"]),
-  endpoint: new Set(["turn", "report", "intel", "ingest"]),
+  endpoint: new Set(["turn", "report", "intel", "ingest", "portfolio"]),
   trigger: new Set(["ai_quota", "free_limit", "compare", "paywall", "account"]),
   plan: new Set(["pro"]),
+  scope_mode: SCOPE_MODES,
+  rewrite_hint: REWRITE_HINTS,
+  hint: ASK_REWRITE_HINTS,
+  rating: new Set(["like", "dislike"]),
+  status: DECISION_STATUSES,
+  surface: DECISION_SURFACES,
 };
 
 function keepEnum(key: string, value: unknown): string | undefined {
@@ -40,6 +66,12 @@ function keepEnum(key: string, value: unknown): string | undefined {
   const allowed = ENUMS[key];
   if (!allowed || !allowed.has(value)) return undefined;
   if (key === "trigger") return value;
+  return value;
+}
+
+function keepBoundedInt(value: unknown, min: number, max: number): number | undefined {
+  if (typeof value !== "number" || !Number.isInteger(value)) return undefined;
+  if (value < min || value > max) return undefined;
   return value;
 }
 
@@ -52,7 +84,17 @@ function keepValue(event: AnalyticsEventName, key: string, value: unknown): unkn
   if (key === "count") {
     return value === 2 || value === 3 || value === 4 || value === 5 ? value : undefined;
   }
-  if (key === "is_reply") return typeof value === "boolean" ? value : undefined;
+  if (key === "home_count") return keepBoundedInt(value, 1, 40);
+  if (key === "matched_count") return keepBoundedInt(value, 0, 40);
+  if (
+    key === "is_reply" ||
+    key === "has_share_comments" ||
+    key === "is_rewrite" ||
+    key === "suggest_compare" ||
+    key === "has_citations"
+  ) {
+    return typeof value === "boolean" ? value : undefined;
+  }
   if (key === "trigger") {
     const next = keepEnum(key, value);
     if (!next) return undefined;
@@ -74,8 +116,14 @@ function keepValue(event: AnalyticsEventName, key: string, value: unknown): unkn
     }
     return next;
   }
-  if (key === "source" && (event === "compare_opened" || event === "compare_gate_shown")) {
-    return value === "chat_history" || value === "viewings_list" ? value : undefined;
+  if (key === "source") {
+    if (event === "compare_opened" || event === "compare_gate_shown") {
+      return typeof value === "string" && COMPARE_SOURCES.has(value) ? value : undefined;
+    }
+    if (event === "ask_opened") {
+      return typeof value === "string" && ASK_OPEN_SOURCES.has(value) ? value : undefined;
+    }
+    return keepEnum("source", value);
   }
   if (key === "kind" && (event === "share_created" || event === "share_viewed")) {
     return value === "compare" ? value : undefined;

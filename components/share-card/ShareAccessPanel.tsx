@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Link2, RefreshCw, ShieldOff, Timer } from "lucide-react";
+import { Link2, RefreshCw, Timer } from "lucide-react";
 import type { ShareLinkRecord } from "@/lib/share-access/types";
 
 export type ShareAccessPanelLabels = {
@@ -65,11 +65,9 @@ export function ShareAccessPanel({
   const [expiresLocal, setExpiresLocal] = useState(
     link?.expiresAt ? link.expiresAt.slice(0, 16) : "",
   );
-  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [showExpiry, setShowExpiry] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
   const [history, setHistory] = useState<ShareLinkRecord[]>([]);
 
   useEffect(() => {
@@ -154,9 +152,6 @@ export function ShareAccessPanel({
               {labels.expiresAtLabel}: {new Date(link.expiresAt).toLocaleString()}
             </p>
           ) : null}
-          <p className="mt-0.5 text-[11px] text-[#9CA3AF]">
-            {link?.passwordEnabled ? labels.passwordOn : labels.passwordOff}
-          </p>
         </div>
         <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-[#F5F3F0] text-[#6B7280]">
           {labels.readOnly}
@@ -181,7 +176,7 @@ export function ShareAccessPanel({
       {hasToken ? <p className="text-[11px] text-[#166534]">{labels.tokenOk}</p> : null}
       {error ? <p role="alert" className="text-[12px] text-[#B91C1C]">{error}</p> : null}
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
         <button
           type="button"
           disabled={busy || !viewingId}
@@ -190,15 +185,6 @@ export function ShareAccessPanel({
           className="min-h-11 rounded-full border border-black/10 text-[11px] font-bold flex items-center justify-center gap-1.5 disabled:opacity-45"
         >
           <Timer className="w-3.5 h-3.5" /> {labels.expiry}
-        </button>
-        <button
-          type="button"
-          disabled={busy || !viewingId}
-          aria-expanded={showPassword}
-          onClick={() => setShowPassword((v) => !v)}
-          className="min-h-11 rounded-full border border-black/10 text-[11px] font-bold flex items-center justify-center gap-1.5 disabled:opacity-45"
-        >
-          <ShieldOff className="w-3.5 h-3.5" /> {labels.password}
         </button>
         <button
           type="button"
@@ -264,75 +250,6 @@ export function ShareAccessPanel({
           >
             {labels.expirySave}
           </button>
-        </div>
-      ) : null}
-
-      {showPassword ? (
-        <div className="rounded-xl border border-black/5 bg-[#FAF7F3] p-3 space-y-2">
-          <input
-            type="password"
-            aria-label={labels.password}
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder={labels.passwordPlaceholder}
-            className="w-full h-10 rounded-full border border-black/10 px-3 text-[12px]"
-            autoComplete="new-password"
-          />
-          <div className="flex gap-2">
-            <button
-              type="button"
-              disabled={busy || password.length < 4}
-              onClick={() =>
-                void run(async () => {
-                  const current = await ensureLink();
-                  const res = await fetch(`/api/share/links/${current.id}`, {
-                    method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ password }),
-                  });
-                  const payload = (await res.json()) as {
-                    link?: ShareLinkRecord;
-                    error?: string;
-                  };
-                  if (!res.ok || !payload.link) {
-                    throw new Error(payload.error || labels.errorGeneric);
-                  }
-                  setPassword("");
-                  onLinkChanged({ link: payload.link });
-                  setShowPassword(false);
-                })
-              }
-              className="flex-1 h-10 rounded-full bg-black text-white text-[12px] font-bold disabled:opacity-50"
-            >
-              {labels.passwordSave}
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() =>
-                void run(async () => {
-                  const current = await ensureLink();
-                  const res = await fetch(`/api/share/links/${current.id}`, {
-                    method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ password: null }),
-                  });
-                  const payload = (await res.json()) as {
-                    link?: ShareLinkRecord;
-                    error?: string;
-                  };
-                  if (!res.ok || !payload.link) {
-                    throw new Error(payload.error || labels.errorGeneric);
-                  }
-                  onLinkChanged({ link: payload.link });
-                  setShowPassword(false);
-                })
-              }
-              className="flex-1 h-10 rounded-full border border-black/10 text-[12px] font-bold disabled:opacity-50"
-            >
-              {labels.passwordClear}
-            </button>
-          </div>
         </div>
       ) : null}
 

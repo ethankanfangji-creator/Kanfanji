@@ -49,16 +49,7 @@ export const shareApiContract = {
     auth: "none",
     success: "200 PublicShareResult",
     notes:
-      "Never returns user_id, notes, audio, transcripts, account fields. Password gate does not include viewing id.",
-  },
-  unlockPublic: {
-    method: "POST",
-    path: "/api/share/public/:token/unlock",
-    auth: "none",
-    body: "{ password }",
-    success: "200 UnlockShareResponse + httpOnly cookie",
-    errors: ["401 invalid password", "410 expired/revoked", "404"],
-    notes: "Password must not be written to URL, logs, or analytics.",
+      "Never returns user_id, notes, audio, transcripts, account fields. Soft-close / revoke / expiry only — password sharing retired.",
   },
 } as const;
 

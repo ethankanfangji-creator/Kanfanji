@@ -7,7 +7,8 @@ export function assertChatShareExpiry(
 ) {
   if (!viewing.chat_state) return;
   if (!Object.hasOwn(patch, "expiresAt")) return;
-  if (patch.expiresAt == null) throw new Error("SHARE_EXPIRES_INVALID");
+  // Null means never expires (owner stops sharing manually).
+  if (patch.expiresAt == null) return;
   const requested = Date.parse(patch.expiresAt);
   const cap = Date.parse(chatShareExpiresAt(now));
   if (!Number.isFinite(requested) || requested > cap) throw new Error("SHARE_EXPIRES_INVALID");

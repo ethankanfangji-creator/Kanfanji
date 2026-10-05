@@ -16,6 +16,8 @@ import {
 } from "@/lib/viewing-chat/thread-payload";
 import { mergeChatState } from "@/lib/viewing-chat/chat-state";
 import type { ChatMessage } from "@/lib/viewing-chat/types";
+import { schedulePropertySignalsRefresh } from "@/lib/properties/signals";
+import { coerceDecisionStatus } from "@/lib/portfolio/decision-status";
 
 export const runtime = "nodejs";
 
@@ -56,7 +58,7 @@ export async function PUT(
     const admin = createAdminClient();
     const current = await admin
       .from("viewings")
-      .select("id, user_id, messages, revision, chat_state")
+      .select("id, user_id, messages, revision, chat_state, property_id")
       .eq("id", id)
       .maybeSingle();
     if (current.error || !current.data) {
@@ -86,11 +88,15 @@ export async function PUT(
       ? (current.data.messages as ChatMessage[])
       : [];
     const merged = messages ? mergeChatMessages(existing, messages) : undefined;
+    const nextChatState =
+      isOwner && chatState
+        ? mergeChatState(current.data.chat_state, chatState)
+        : null;
     const { error } = await admin
       .from("viewings")
       .update({
         ...(merged ? { messages: merged } : {}),
-        ...(isOwner && chatState ? { chat_state: mergeChatState(current.data.chat_state, chatState) } : {}),
+        ...(nextChatState ? { chat_state: nextChatState } : {}),
         ...(isOwner && report !== undefined ? { report } : {}),
         ...(clientUpdatedAt ? { client_updated_at: clientUpdatedAt } : {}),
         revision: revision + 1,
@@ -99,6 +105,23 @@ export async function PUT(
       .eq("id", id)
       .eq("user_id", current.data.user_id);
     if (error) return noStore({ code: "unavailable" }, 503);
+
+    if (nextChatState) {
+      const prevStatus = coerceDecisionStatus(
+        (current.data.chat_state as { decisionStatus?: unknown } | null)?.decisionStatus,
+      );
+      const nextStatus = coerceDecisionStatus(
+        (nextChatState as { decisionStatus?: unknown }).decisionStatus,
+      );
+      if (prevStatus !== nextStatus) {
+        const propertyId =
+          typeof (current.data as { property_id?: unknown }).property_id === "string"
+            ? String((current.data as { property_id?: string }).property_id)
+            : null;
+        schedulePropertySignalsRefresh(admin, propertyId);
+      }
+    }
+
     return noStore({ ok: true, revision: revision + 1 });
   } catch (error) {
     if (error instanceof RequestValidationError) {
@@ -144,14 +167,17 @@ export async function DELETE(
   const admin = createAdminClient();
   const owned = await admin
     .from("viewings")
-    .select("id")
+    .select("id, property_id")
     .eq("id", id)
     .eq("user_id", user.id)
     .maybeSingle();
   if (owned.error || !owned.data) return noStore({ code: "not_found" }, 404);
+  const propertyId =
+    typeof owned.data.property_id === "string" ? owned.data.property_id : null;
   await removeViewingObjects(admin, user.id, id);
   const { error } = await admin.from("viewings").delete().eq("id", id).eq("user_id", user.id);
   if (error) return noStore({ code: "unavailable" }, 503);
+  schedulePropertySignalsRefresh(admin, propertyId);
   return noStore({ ok: true });
 }
 

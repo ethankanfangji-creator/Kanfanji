@@ -75,6 +75,9 @@ export function toPublicDecisionSummaryDto(
       })),
     disclaimer: selected.disclaimer,
     generatedAt: selected.generatedAt,
+    ...(selected.lat != null && selected.lng != null
+      ? { lat: selected.lat, lng: selected.lng }
+      : {}),
   };
 }
 
@@ -108,6 +111,7 @@ export function publicShareFailure(
 export function resolveShareLinkGate(input: {
   found: boolean;
   revokedAt?: string | null;
+  closedAt?: string | null;
   expiresAt?: string | null;
   passwordHash?: string | null;
   unlocked?: boolean;
@@ -115,6 +119,7 @@ export function resolveShareLinkGate(input: {
 }): ShareLinkStatus {
   if (!input.found) return "missing";
   if (input.revokedAt) return "revoked";
+  if (input.closedAt) return "closed";
   const now = input.now ?? new Date();
   if (input.expiresAt) {
     const exp = new Date(input.expiresAt);
@@ -122,7 +127,9 @@ export function resolveShareLinkGate(input: {
       return "expired";
     }
   }
-  if (input.passwordHash && !input.unlocked) return "password_required";
+  // Password sharing is retired; ignore leftover password_hash rows.
+  void input.passwordHash;
+  void input.unlocked;
   return "active";
 }
 
@@ -189,6 +196,8 @@ export function mapStatusToFailure(status: ShareLinkStatus): PublicShareResult {
       return publicShareFailure("missing", "此分享連結不存在或已被移除。");
     case "revoked":
       return publicShareFailure("revoked", "此分享連結已取消，無法再開啟。");
+    case "closed":
+      return publicShareFailure("closed", "此分享連結已停止分享。");
     case "expired":
       return publicShareFailure("expired", "此分享連結已過期。");
     case "forbidden":

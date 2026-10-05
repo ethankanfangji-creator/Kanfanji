@@ -50,6 +50,21 @@ describe("buildChatReportPublication", () => {
     expect(snapshot.version).toBe(3);
   });
 
+  it("freezes confirmed sitePin coords into the snapshot", () => {
+    const snapshot = buildChatReportPublication({
+      id: "viewing-pin",
+      user_id: "user-pin",
+      address: "1167 Victory Drive",
+      report: { summary: "ok", pros: [], risks: [] },
+      chat_state: {
+        sitePin: { lat: 49.278436, lng: -122.8798442, source: "civic" },
+      },
+      updated_at: "2026-09-28T00:00:00.000Z",
+    }).snapshot;
+    expect(snapshot.lat).toBe(49.278436);
+    expect(snapshot.lng).toBe(-122.8798442);
+  });
+
   it("rejects unknown snapshot keys on v3", () => {
     expect(
       ChatReportShareSnapshotSchema.safeParse({

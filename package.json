@@ -27,6 +27,7 @@
     "posthog-node": "^5.54.1",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "resend": "^6.32.0",
     "server-only": "^0.0.1",
     "stripe": "^17.7.0",
     "unpdf": "^1.8.1",

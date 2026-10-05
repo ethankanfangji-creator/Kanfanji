@@ -41,6 +41,9 @@ export type DecisionSummarySnapshot = {
   photos: SharePhotoItem[];
   disclaimer: string;
   generatedAt: string;
+  /** Confirmed pin for share map cover (optional). */
+  lat?: number;
+  lng?: number;
 };
 
 export type DecisionSummaryBuildInput = {

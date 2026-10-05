@@ -2,6 +2,12 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAccountTier, TierLookupError } from "@/lib/entitlement/tier";
 import { canCreateCloudViewing, FREE_VIEWING_LIMIT } from "@/lib/viewing-wizard/free-tier";
+import {
+  linkViewingToProperty,
+  readChatStateLinkFields,
+} from "@/lib/viewings/link-property.server";
+import { detectMarketRegion } from "@/lib/property-intel/types";
+import { schedulePropertySignalsRefresh } from "@/lib/properties/signals";
 
 export type CreateViewingInput = {
   id: string;
@@ -85,6 +91,18 @@ export async function createViewingRow(
     };
   }
 
+  const linkFields = readChatStateLinkFields(input.chatState);
+  const market = detectMarketRegion(input.address);
+  const propertyId = await linkViewingToProperty(admin, {
+    address: input.address,
+    countryCode: linkFields.countryCode ?? market ?? null,
+    lat: linkFields.lat,
+    lng: linkFields.lng,
+    unitLabel: linkFields.unitLabel,
+    unitKey: linkFields.unitKey,
+    placeId: linkFields.placeId,
+  });
+
   const inserted = await admin
     .from("viewings")
     .insert({
@@ -99,10 +117,12 @@ export async function createViewingRow(
       client_updated_at: input.clientUpdatedAt ?? new Date().toISOString(),
       is_pro: isPro,
       revision: 1,
+      property_id: propertyId,
     })
     .select("id")
     .single();
   if (inserted.error) throw inserted.error;
+  schedulePropertySignalsRefresh(admin, propertyId);
   return {
     outcome: "created",
     id: String(inserted.data.id),

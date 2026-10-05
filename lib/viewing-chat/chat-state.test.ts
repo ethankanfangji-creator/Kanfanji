@@ -66,4 +66,23 @@ describe("chat state round trip", () => {
     const invalid = mergeChatState(saved, { v: 1, decisionStatus: "damp" });
     expect(invalid.decisionStatus).toBeNull();
   });
+
+  it("round-trips unit identity fields", () => {
+    const withUnit = {
+      ...thread,
+      unitKey: "5",
+      unitLabel: "Unit 5",
+      placeId: "place-1",
+    };
+    const saved = buildChatStatePayload(withUnit);
+    expect(saved).toMatchObject({
+      unitKey: "5",
+      unitLabel: "Unit 5",
+      placeId: "place-1",
+    });
+    const loaded = applyChatStateToLocal(thread, saved);
+    expect(loaded.unitKey).toBe("5");
+    expect(loaded.unitLabel).toBe("Unit 5");
+    expect(loaded.placeId).toBe("place-1");
+  });
 });

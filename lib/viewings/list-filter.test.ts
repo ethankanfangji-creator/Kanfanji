@@ -12,6 +12,8 @@ function item(
     video_urls: [],
     decisionStatus: null,
     hasReport: false,
+    lat: null,
+    lng: null,
     ...partial,
   };
 }

@@ -1,44 +1,16 @@
-const STREET_SUFFIX: Record<string, string> = {
-  street: "st",
-  st: "st",
-  avenue: "ave",
-  ave: "ave",
-  road: "rd",
-  rd: "rd",
-  drive: "dr",
-  dr: "dr",
-  boulevard: "blvd",
-  blvd: "blvd",
-  lane: "ln",
-  ln: "ln",
-  way: "way",
-  court: "ct",
-  ct: "ct",
-  place: "pl",
-  pl: "pl",
-  crescent: "cres",
-  cres: "cres",
-};
+import { resolvePropertyIdentity } from "@/lib/property-identity";
 
-function normalizePart(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[.]/g, "")
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((word) => STREET_SUFFIX[word] ?? word)
-    .join(" ");
-}
-
-/** Street line plus city, ignoring case and extra spaces. */
+/**
+ * Street + unit + city identity for duplicate viewing detection.
+ * Different units at the same civic address must not collide.
+ */
 export function addressIdentity(address: string): string {
-  const parts = address
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean);
-  const street = normalizePart(parts[0] ?? "");
-  const city = normalizePart(parts[1] ?? "");
-  return `${street}|${city}`;
+  const id = resolvePropertyIdentity({ address });
+  if (!id.streetNormalized) return "|";
+  const parts = id.streetNormalized.split(",").map((part) => part.trim());
+  const street = parts[0] ?? "";
+  const city = parts[1] ?? "";
+  return `${street}|${id.unitKey}|${city}`;
 }
 
 export function sameViewingAddress(left: string, right: string): boolean {

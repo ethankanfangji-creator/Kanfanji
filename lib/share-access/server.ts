@@ -1,9 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   generateShareToken,
-  hashSharePassword,
   hashShareToken,
-  verifySharePassword,
   isShareTokenFormat,
 } from "./crypto";
 import { decryptShareToken, encryptShareToken } from "./token-vault";
@@ -30,7 +28,6 @@ export type ViewingShareRow = {
   pros: string[] | null;
   risks: string[] | null;
   photo_urls: string[] | null;
-  share_token: string | null;
   property: Record<string, unknown> | null;
   updated_at: string;
   created_at: string;
@@ -52,15 +49,16 @@ export type ShareLinkRow = {
   created_at: string;
   updated_at: string;
   revoked_at: string | null;
+  closed_at: string | null;
   last_resolved_at: string | null;
   published_snapshot: unknown;
   media_manifest: unknown;
 };
 
 const LINK_COLUMNS =
-  "id, viewing_id, token, token_ciphertext, capability, status, expires_at, password_hash, access_version, created_at, updated_at, revoked_at, last_resolved_at, published_snapshot, media_manifest";
+  "id, viewing_id, token, token_ciphertext, capability, status, expires_at, password_hash, access_version, created_at, updated_at, revoked_at, closed_at, last_resolved_at, published_snapshot, media_manifest";
 const LINK_GATE_COLUMNS =
-  "id, viewing_id, capability, status, expires_at, password_hash, access_version, created_at, updated_at, revoked_at, last_resolved_at";
+  "id, viewing_id, capability, status, expires_at, password_hash, access_version, created_at, updated_at, revoked_at, closed_at, last_resolved_at";
 
 export type PublishedShareRow = {
   shareLink: ShareLinkRow;
@@ -91,7 +89,14 @@ function publicPathForRow(row: ShareLinkRow): { urlPath: string; needsRegenerate
 export function toShareLinkRecord(row: ShareLinkRow): ShareLinkRecord {
   const expired =
     row.expires_at && new Date(row.expires_at).getTime() <= Date.now();
-  const status = row.status === "revoked" ? "revoked" : expired ? "expired" : "active";
+  const status =
+    row.status === "revoked"
+      ? "revoked"
+      : row.closed_at
+        ? "closed"
+        : expired
+          ? "expired"
+          : "active";
   return {
     id: row.id,
     viewingId: row.viewing_id,
@@ -99,10 +104,11 @@ export function toShareLinkRecord(row: ShareLinkRow): ShareLinkRecord {
     capability: "read",
     status,
     expiresAt: row.expires_at,
-    passwordEnabled: Boolean(row.password_hash),
+    passwordEnabled: false,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     revokedAt: row.revoked_at,
+    closedAt: row.closed_at,
     lastResolvedAt: row.last_resolved_at,
     accessVersion: row.access_version,
   };
@@ -116,7 +122,7 @@ async function fetchOwnedViewing(
   const { data, error } = await supabase
     .from("viewings")
     .select(
-      "id, user_id, address, tags, pros, risks, photo_urls, share_token, property, report, chat_state, updated_at, created_at",
+      "id, user_id, address, tags, pros, risks, photo_urls, property, report, chat_state, updated_at, created_at",
     )
     .eq("id", viewingId)
     .eq("user_id", userId)
@@ -166,8 +172,8 @@ export async function listOwnerShareLinks(
 }
 
 export type OwnerShareLinksFilter = {
-  /** open = active+expired (not revoked); revoked; all */
-  status?: "open" | "revoked" | "all";
+  /** open = publicly accessible; closed = stopped (incl. legacy revoked); all */
+  status?: "open" | "closed" | "all";
   q?: string;
   limit?: number;
 };
@@ -185,16 +191,16 @@ export async function listOwnerShareLinksAcrossViewings(
   let query = supabase
     .from("share_links")
     .select(
-      "id, viewing_id, token, token_ciphertext, capability, status, expires_at, password_hash, access_version, created_at, updated_at, revoked_at, last_resolved_at, published_snapshot, media_manifest, viewings!inner(id, user_id, address)",
+      "id, viewing_id, token, token_ciphertext, capability, status, expires_at, password_hash, access_version, created_at, updated_at, revoked_at, closed_at, last_resolved_at, published_snapshot, media_manifest, viewings!inner(id, user_id, address)",
     )
     .eq("viewings.user_id", userId)
     .order("created_at", { ascending: false })
     .limit(limit);
 
   if (status === "open") {
-    query = query.eq("status", "active").is("revoked_at", null);
-  } else if (status === "revoked") {
-    query = query.eq("status", "revoked");
+    query = query.eq("status", "active").is("revoked_at", null).is("closed_at", null);
+  } else if (status === "closed") {
+    query = query.or("closed_at.not.is.null,status.eq.revoked");
   }
 
   if (q) {
@@ -228,7 +234,6 @@ export async function ensureOwnerShareLink(
   viewingId: string,
   options?: {
     expiresAt?: string | null;
-    password?: string | null;
     rotateToken?: boolean;
   },
 ): Promise<{ link: ShareLinkRecord; urlPath: string; needsRegenerate?: boolean }> {
@@ -243,9 +248,8 @@ export async function ensureOwnerShareLink(
 
   const current = await getOwnerShareLink(supabase, userId, viewingId);
   if (current.link) {
-    const patch: { expiresAt?: string | null; password?: string | null } = {};
+    const patch: { expiresAt?: string | null } = {};
     if (options && Object.hasOwn(options, "expiresAt")) patch.expiresAt = options.expiresAt ?? null;
-    if (options && Object.hasOwn(options, "password")) patch.password = options.password ?? null;
     const link =
       Object.keys(patch).length > 0
         ? await updateOwnerShareLink(supabase, userId, current.link.id, patch)
@@ -253,10 +257,6 @@ export async function ensureOwnerShareLink(
     return { link, urlPath: current.urlPath, needsRegenerate: current.needsRegenerate };
   }
 
-  const passwordHash =
-    options && Object.hasOwn(options, "password") && options.password
-      ? await hashSharePassword(options.password)
-      : null;
   const token = generateShareToken();
   const linkId = crypto.randomUUID();
   let tokenCiphertext: string;
@@ -275,10 +275,10 @@ export async function ensureOwnerShareLink(
         chat_state: viewing.chat_state,
         updated_at: viewing.updated_at,
         photo_urls: viewing.photo_urls,
+        property: viewing.property,
       })
       : { snapshot: buildSharePublication(viewing).snapshot, mediaManifest: buildSharePublication(viewing).mediaManifest };
   if (!(await consumeShareCreateRateLimit(userId))) throw new Error("SHARE_RATE_LIMITED");
-  const chatExpiry = useChatReport ? chatShareExpiresAt() : null;
   const { data, error } = await supabase
     .from("share_links")
     .insert({
@@ -289,10 +289,9 @@ export async function ensureOwnerShareLink(
       token_ciphertext: tokenCiphertext,
       token_key_id: "v1",
       expires_at:
-        options && Object.hasOwn(options, "expiresAt")
-          ? options.expiresAt ?? null
-          : chatExpiry,
-      password_hash: passwordHash,
+        options && Object.hasOwn(options, "expiresAt") ? options.expiresAt ?? null : null,
+      password_hash: null,
+      closed_at: null,
       published_snapshot: publication.snapshot,
       media_manifest: publication.mediaManifest,
     })
@@ -306,11 +305,69 @@ export async function ensureOwnerShareLink(
   };
 }
 
+export async function setOwnerShareLinkClosed(
+  supabase: SupabaseClient,
+  userId: string,
+  linkId: string,
+  closed: boolean,
+): Promise<ShareLinkRecord> {
+  const { data, error } = await supabase.rpc("set_share_link_closed", {
+    p_link_id: linkId,
+    p_user_id: userId,
+    p_closed: closed,
+  });
+  if (error) throw error;
+  const next = (Array.isArray(data) ? data[0] : data) as ShareLinkRow | null;
+  if (!next) throw new Error("LINK_NOT_FOUND");
+  return toShareLinkRecord(next);
+}
+
+export async function republishOwnerShareLink(
+  supabase: SupabaseClient,
+  userId: string,
+  linkId: string,
+): Promise<{ link: ShareLinkRecord; urlPath: string; needsRegenerate: boolean }> {
+  const row = await fetchOwnedLink(supabase, userId, linkId);
+  if (!row || row.status !== "active") throw new Error("LINK_NOT_FOUND");
+  const viewing = await fetchOwnedViewing(supabase, userId, row.viewing_id);
+  if (!viewing) throw new Error("VIEWING_NOT_FOUND");
+  const useChatReport = Boolean(viewing.report || viewing.chat_state);
+  if (!useChatReport && !viewing.property) throw new Error("REPORT_NOT_READY");
+  const publication = useChatReport
+    ? buildChatReportPublication({
+        id: viewing.id,
+        user_id: viewing.user_id,
+        address: viewing.address,
+        report: viewing.report,
+        chat_state: viewing.chat_state,
+        updated_at: viewing.updated_at,
+        photo_urls: viewing.photo_urls,
+        property: viewing.property,
+      })
+    : buildSharePublication(viewing);
+  if (!publication.snapshot) throw new Error("REPORT_NOT_READY");
+  const { data, error } = await supabase.rpc("republish_share_link", {
+    p_link_id: linkId,
+    p_user_id: userId,
+    p_snapshot: publication.snapshot,
+    p_manifest: publication.mediaManifest,
+  });
+  if (error) throw error;
+  const next = (Array.isArray(data) ? data[0] : data) as ShareLinkRow | null;
+  if (!next) throw new Error("LINK_NOT_FOUND");
+  const path = publicPathForRow(next);
+  return {
+    link: toShareLinkRecord(next),
+    urlPath: path.urlPath,
+    needsRegenerate: path.needsRegenerate,
+  };
+}
+
 export async function updateOwnerShareLink(
   supabase: SupabaseClient,
   userId: string,
   linkId: string,
-  patch: { expiresAt?: string | null; password?: string | null },
+  patch: { expiresAt?: string | null },
 ): Promise<ShareLinkRecord> {
   const row = await fetchOwnedLink(supabase, userId, linkId);
   if (!row || row.status !== "active") throw new Error("LINK_NOT_FOUND");
@@ -318,20 +375,15 @@ export async function updateOwnerShareLink(
   if (!viewing) throw new Error("LINK_NOT_FOUND");
   assertChatShareExpiry(viewing, patch);
   const setExpires = Object.hasOwn(patch, "expiresAt");
-  const setPassword = Object.hasOwn(patch, "password");
-  if (!setExpires && !setPassword) return toShareLinkRecord(row);
-  let passwordHash: string | null = null;
-  if (Object.hasOwn(patch, "password")) {
-    passwordHash = patch.password ? await hashSharePassword(patch.password) : null;
-  }
+  if (!setExpires) return toShareLinkRecord(row);
   const { data, error } = await supabase.rpc("mutate_share_link_security", {
     p_link_id: linkId,
     p_user_id: userId,
     p_expected_access_version: row.access_version,
     p_set_expires: setExpires,
     p_expires_at: patch.expiresAt ?? null,
-    p_set_password: setPassword,
-    p_password_hash: passwordHash,
+    p_set_password: false,
+    p_password_hash: null,
     p_revoke: false,
   });
   if (error) throw error;
@@ -413,6 +465,7 @@ export async function rotateOwnerShareLink(
         chat_state: viewing.chat_state,
         updated_at: viewing.updated_at,
         photo_urls: viewing.photo_urls,
+        property: viewing.property,
       })
     : buildSharePublication(viewing);
   if (!(await consumeShareCreateRateLimit(userId))) throw new Error("SHARE_RATE_LIMITED");
@@ -491,26 +544,18 @@ export async function touchShareResolved(
 
 export function gateFromViewing(
   viewing: PublishedShareRow | ShareGateRow | null,
-  unlocked: boolean,
+  _unlocked = false,
 ): ReturnType<typeof resolveShareLinkGate> {
   if (!viewing) return "missing";
   const access = viewing.shareLink;
   return resolveShareLinkGate({
     found: true,
     revokedAt: access?.status === "revoked" ? access.revoked_at || access.updated_at : null,
+    closedAt: access?.closed_at ?? null,
     expiresAt: access?.expires_at ?? null,
-    passwordHash: access?.password_hash ?? null,
-    unlocked,
+    passwordHash: null,
+    unlocked: false,
   });
-}
-
-export async function verifyViewingSharePassword(
-  viewing: PublishedShareRow | ShareGateRow,
-  password: string,
-): Promise<boolean> {
-  const hash = viewing.shareLink?.password_hash;
-  if (!hash) return true;
-  return verifySharePassword(password, hash);
 }
 
 export function getShareAccess(viewing: PublishedShareRow | ShareGateRow): ShareLinkRow {

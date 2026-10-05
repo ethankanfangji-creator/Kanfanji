@@ -54,4 +54,7 @@ export type Property = {
   admin1?: string | null;
   city?: string | null;
   postal_code?: string | null;
+  unit_key?: string | null;
+  unit_label?: string | null;
+  place_id?: string | null;
 };

@@ -11,6 +11,8 @@ import {
   aiErrorUiCopyFromBoundary,
   mapAiErrorToUi,
 } from "@/lib/ai-boundary/map-ai-error-ui";
+import { track } from "@/lib/analytics/client";
+import type { AskRewriteHint, AskScopeMode } from "@/lib/analytics/events";
 import { COMPARE_LITE_MAX } from "@/lib/comparison/from-thread";
 import { formatMessage } from "@/lib/i18n";
 import { localPreferenceBlock } from "@/lib/viewing-chat/ai-preferences";
@@ -178,6 +180,12 @@ export function PortfolioAskApp() {
   }, [refreshSessionList, refreshThreads]);
 
   useEffect(() => {
+    const from = new URLSearchParams(window.location.search).get("from");
+    const source = from === "nav" || from === "tab" ? from : "direct";
+    track({ name: "ask_opened", props: { source } });
+  }, []);
+
+  useEffect(() => {
     if (!isSupabaseConfigured()) return;
     const supabase = getSupabase();
     if (!supabase) return;
@@ -257,6 +265,10 @@ export function PortfolioAskApp() {
   async function persistDecision(threadId: string, status: DecisionStatus | null) {
     patchLocalThread(threadId, { decisionStatus: status });
     refreshThreads();
+    track({
+      name: "decision_status_changed",
+      props: { status: status ?? "none", surface: "ask" },
+    });
     const thread = listLocalThreads().find((row) => row.id === threadId);
     if (!thread || !userId || thread.id.startsWith("local_")) return;
     if (thread.cloud?.state !== "synced" && thread.cloud?.state !== "syncing") return;
@@ -326,9 +338,29 @@ export function PortfolioAskApp() {
       setDraft("");
     }
 
+    const userTurnId =
+      [...working].reverse().find((turn) => turn.role === "user")?.id ?? null;
+    const isRewrite = Boolean(input.rewriteHint);
+    const rewriteHintTrack: AskRewriteHint = input.rewriteHint ?? "none";
+    const scopeMode = (scope.mode ?? "all") as AskScopeMode;
+
     setBusy(true);
     try {
       const cardsWithComments = await loadShareCommentsForCards(cards);
+      const homeCount = Math.min(40, Math.max(1, cardsWithComments.length || 1));
+      const hasShareComments = cardsWithComments.some(
+        (card) => card.shareComments.length > 0,
+      );
+      track({
+        name: "ask_question_sent",
+        props: {
+          scope_mode: scopeMode,
+          home_count: homeCount,
+          has_share_comments: hasShareComments,
+          is_rewrite: isRewrite,
+          rewrite_hint: rewriteHintTrack,
+        },
+      });
       const response = await fetch("/api/portfolio/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -342,6 +374,9 @@ export function PortfolioAskApp() {
           consentVersion: AI_CONSENT_VERSION,
           consentSessionId: consentSessionId(),
           identityKind: userId ? "user" : "guest",
+          scopeMode,
+          sessionId: session?.id ?? null,
+          turnId: userTurnId,
         }),
       });
       const data = (await response.json()) as PortfolioAskResult & {
@@ -352,6 +387,16 @@ export function PortfolioAskApp() {
         resetsAt?: string | null;
       };
       if (!response.ok) {
+        if (data.code === "ai_quota_exceeded" || response.status === 429) {
+          track({
+            name: "ai_quota_exceeded",
+            props: {
+              tier: data.tier ?? (userId ? "free" : "guest"),
+              endpoint: "portfolio",
+              limit: data.limit ?? "tier",
+            },
+          });
+        }
         const ui = mapAiErrorToUi(
           {
             code: data.code,
@@ -366,12 +411,21 @@ export function PortfolioAskApp() {
         );
         throw new Error(ui.message);
       }
+      const matchedIds = data.matchedIds ?? [];
+      track({
+        name: "ask_answer_received",
+        props: {
+          matched_count: Math.min(40, matchedIds.length),
+          suggest_compare: Boolean(data.suggestCompare),
+          has_citations: (data.citations?.length ?? 0) > 0,
+        },
+      });
       const assistant: PortfolioChatTurn = {
         id: input.replaceAssistantId || newTurnId(),
         role: "assistant",
         text: data.answer,
         createdAt: new Date().toISOString(),
-        matchedIds: data.matchedIds ?? [],
+        matchedIds,
         citations: data.citations ?? [],
         suggestCompare: Boolean(data.suggestCompare),
         feedback: null,
@@ -394,6 +448,7 @@ export function PortfolioAskApp() {
   }
 
   function rewrite(hint: PortfolioRewriteHint) {
+    track({ name: "ask_rewrite", props: { hint } });
     const withoutAssistant = historyExcludingTrailingAssistant(turns);
     const question = findLastUserQuestion(withoutAssistant);
     if (!question) return;
@@ -422,6 +477,7 @@ export function PortfolioAskApp() {
     persistSession({ turns: nextTurns, scope });
     const turn = nextTurns.find((row) => row.id === turnId);
     if (!turn?.feedback) return;
+    track({ name: "ask_feedback", props: { rating: turn.feedback } });
     await submitAiFeedback({
       kind: "portfolio",
       rating: turn.feedback,
@@ -471,6 +527,9 @@ export function PortfolioAskApp() {
   function openCompare(ids: string[]) {
     const clipped = ids.slice(0, COMPARE_LITE_MAX);
     if (clipped.length < 2) return;
+    const count = clipped.length as 2 | 3 | 4 | 5;
+    track({ name: "ask_compare_opened", props: { count } });
+    track({ name: "compare_opened", props: { count, source: "ask" } });
     router.push(`/compare?ids=${clipped.map(encodeURIComponent).join(",")}`);
   }
 

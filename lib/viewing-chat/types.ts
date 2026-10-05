@@ -172,6 +172,12 @@ export type ViewingChatThread = {
   normalizedAddress?: string | null;
   /** Building coordinate. A street midpoint is never stored here. */
   sitePin?: { lat: number; lng: number; source: "civic" | "map" } | null;
+  /** Canonical unit key for property registry linkage. */
+  unitKey?: string | null;
+  /** Display unit label (Unit 5 / 5樓). */
+  unitLabel?: string | null;
+  /** Optional vendor place id captured at address confirm. */
+  placeId?: string | null;
   createdAt: string;
   updatedAt: string;
   messages: ChatMessage[];

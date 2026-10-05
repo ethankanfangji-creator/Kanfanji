@@ -18,12 +18,12 @@ export async function GET(_req: Request, ctx: Ctx) {
   const status =
     result.status === "active"
       ? 200
-      : result.status === "password_required"
-        ? 401
-        : result.status === "missing"
-          ? 404
-          : result.status === "expired" || result.status === "revoked"
-            ? 410
-            : 403;
+      : result.status === "missing"
+        ? 404
+        : result.status === "expired" ||
+            result.status === "revoked" ||
+            result.status === "closed"
+          ? 410
+          : 403;
   return NextResponse.json(result, { status });
 }

@@ -25,6 +25,7 @@ const link = {
   createdAt: "2026-09-15T00:00:00.000Z",
   updatedAt: "2026-09-15T00:00:00.000Z",
   revokedAt: null,
+  closedAt: null,
   lastResolvedAt: null,
   accessVersion: 1,
 };
@@ -54,8 +55,8 @@ describe("PATCH /api/share/links/:linkId", () => {
     );
   });
 
-  it("passes null explicitly to clear a field", async () => {
-    await PATCH(
+  it("rejects retired password updates", async () => {
+    const response = await PATCH(
       new Request("http://test/api/share/links/link-1", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -64,11 +65,25 @@ describe("PATCH /api/share/links/:linkId", () => {
       { params: Promise.resolve({ linkId: "link-1" }) },
     );
 
+    expect(response.status).toBe(400);
+    expect(updateOwnerShareLink).not.toHaveBeenCalled();
+  });
+
+  it("passes null explicitly to clear expiresAt", async () => {
+    await PATCH(
+      new Request("http://test/api/share/links/link-1", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expiresAt: null }),
+      }),
+      { params: Promise.resolve({ linkId: "link-1" }) },
+    );
+
     expect(updateOwnerShareLink).toHaveBeenCalledWith(
       {},
       "owner-1",
       "link-1",
-      { password: null },
+      { expiresAt: null },
     );
   });
 

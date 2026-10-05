@@ -1,9 +1,15 @@
-/**
- * `/ask` — portfolio Q&A over local viewing-chat threads.
- * Corpus is assembled client-side (guest-local); compare is an optional CTA.
- */
+import { redirect } from "next/navigation";
 import { PortfolioAskApp } from "@/components/portfolio/PortfolioAskApp";
+import { createClient } from "@/utils/supabase/server";
 
-export default function AskPage() {
+/** `/ask` — portfolio Q&A (signed-in only). */
+export default async function AskPage() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    redirect(`/login?next=${encodeURIComponent("/ask")}`);
+  }
   return <PortfolioAskApp />;
 }

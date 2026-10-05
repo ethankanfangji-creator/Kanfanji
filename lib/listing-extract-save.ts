@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { findOrCreateProperty } from "@/lib/properties";
+import { resolvePropertyIdentity } from "@/lib/property-identity";
+import { schedulePropertySignalsRefresh } from "@/lib/properties/signals";
 import type { ListingExtract } from "./listing-fields";
 
 export class ListingSaveError extends Error {
@@ -33,12 +35,27 @@ export async function saveListingOnProperty(
   let propertyId = viewing.property_id;
   if (!propertyId) {
     const coords = coordsOf(viewing.property);
-    if (!coords) throw new ListingSaveError("missing_property");
+    const unitLabel =
+      typeof viewing.property?.unitLabel === "string"
+        ? viewing.property.unitLabel
+        : null;
+    const identity = resolvePropertyIdentity({
+      address: viewing.address,
+      unitLabel,
+      lat: coords?.lat ?? null,
+      lng: coords?.lng ?? null,
+    });
+    if (identity.streetNormalized.length < 3) {
+      throw new ListingSaveError("missing_property");
+    }
     propertyId = await findOrCreateProperty({
-      normalizedAddress: viewing.address,
-      lat: coords.lat,
-      lng: coords.lng,
+      normalizedAddress: identity.streetNormalized,
+      lat: identity.lat,
+      lng: identity.lng,
+      unitKey: identity.unitKey,
+      unitLabel: identity.unitLabel,
       yearBuilt: listing.year,
+      countryCode: identity.countryCode,
     });
   }
 
@@ -67,5 +84,6 @@ export async function saveListingOnProperty(
     .eq("id", viewing.id)
     .eq("user_id", viewing.user_id);
   if (viewingError) throw new ListingSaveError("save_failed");
+  if (!viewing.property_id) schedulePropertySignalsRefresh(admin, propertyId);
   return propertyId;
 }

@@ -67,7 +67,7 @@ export function MediaLibraryPanel({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end bg-black/40 md:items-stretch"
+      className="fixed inset-0 z-[var(--z-modal)] flex items-end bg-black/40 md:items-stretch"
       role="dialog"
       aria-modal="true"
       aria-label={labels.title}

@@ -12,10 +12,20 @@ create table if not exists public.properties (
   year_built integer,
   zoning text,
   view_count integer not null default 0,
+  country_code text not null default 'UNKNOWN',
+  admin1 text,
+  city text,
+  postal_code text,
+  place_id text,
+  listing jsonb not null default '{}'::jsonb,
+  unit_key text not null default '',
+  unit_label text,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  constraint properties_normalized_address_key unique (normalized_address)
+  updated_at timestamptz not null default now()
 );
+
+create unique index if not exists properties_country_street_unit_key
+  on public.properties (country_code, normalized_address, unit_key);
 
 create index if not exists properties_lat_lng_idx
   on public.properties (lat, lng)
@@ -235,6 +245,101 @@ create policy "owners manage portfolio ask turns"
   using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
 
+create table if not exists public.portfolio_ask_signals (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  session_id text,
+  turn_id text,
+  themes text[] not null default '{}',
+  scope_mode text not null default 'all'
+    check (scope_mode in ('all', 'time', 'ids', 'status')),
+  home_count integer not null default 0
+    check (home_count >= 0 and home_count <= 40),
+  matched_count integer not null default 0
+    check (matched_count >= 0 and matched_count <= 40),
+  has_share_comments boolean not null default false,
+  created_at timestamptz not null default now(),
+  constraint portfolio_ask_signals_themes_len check (
+    cardinality(themes) between 1 and 8
+  ),
+  constraint portfolio_ask_signals_themes_allowed check (
+    themes <@ array[
+      'budget',
+      'risk',
+      'family_preference',
+      'pros_cons',
+      'compare',
+      'layout',
+      'noise_light',
+      'parking_transit',
+      'decision',
+      'other'
+    ]::text[]
+  ),
+  constraint portfolio_ask_signals_session_id_len check (
+    session_id is null or char_length(session_id) between 1 and 64
+  ),
+  constraint portfolio_ask_signals_turn_id_len check (
+    turn_id is null or char_length(turn_id) between 1 and 64
+  )
+);
+
+create index if not exists portfolio_ask_signals_user_created_idx
+  on public.portfolio_ask_signals (user_id, created_at desc);
+
+alter table public.portfolio_ask_signals enable row level security;
+
+revoke all on table public.portfolio_ask_signals from public, anon, authenticated;
+grant select, insert on table public.portfolio_ask_signals to authenticated;
+grant all on table public.portfolio_ask_signals to service_role;
+
+drop policy if exists "owners insert portfolio ask signals" on public.portfolio_ask_signals;
+create policy "owners insert portfolio ask signals"
+  on public.portfolio_ask_signals for insert to authenticated
+  with check ((select auth.uid()) = user_id);
+
+drop policy if exists "owners select portfolio ask signals" on public.portfolio_ask_signals;
+create policy "owners select portfolio ask signals"
+  on public.portfolio_ask_signals for select to authenticated
+  using ((select auth.uid()) = user_id);
+
+create table if not exists public.property_signals (
+  property_id uuid primary key references public.properties (id) on delete cascade,
+  viewing_count integer not null default 0 check (viewing_count >= 0),
+  unique_viewer_count integer not null default 0 check (unique_viewer_count >= 0),
+  liked_count integer not null default 0 check (liked_count >= 0),
+  shortlist_count integer not null default 0 check (shortlist_count >= 0),
+  passed_count integer not null default 0 check (passed_count >= 0),
+  revisit_count integer not null default 0 check (revisit_count >= 0),
+  decision_set_count integer not null default 0 check (decision_set_count >= 0),
+  theme_counts jsonb not null default '{}'::jsonb
+    check (jsonb_typeof(theme_counts) = 'object' and pg_column_size(theme_counts) <= 4096),
+  ask_hit_count integer not null default 0 check (ask_hit_count >= 0),
+  last_ask_at timestamptz,
+  last_viewing_at timestamptz,
+  refreshed_at timestamptz not null default now(),
+  constraint property_signals_decision_sum_chk check (
+    decision_set_count = liked_count + shortlist_count + passed_count + revisit_count
+  ),
+  constraint property_signals_decision_lte_viewings_chk check (
+    decision_set_count <= viewing_count
+  ),
+  constraint property_signals_viewers_lte_viewings_chk check (
+    unique_viewer_count <= viewing_count
+  )
+);
+
+create index if not exists property_signals_refreshed_idx
+  on public.property_signals (refreshed_at desc);
+
+create index if not exists property_signals_viewing_count_idx
+  on public.property_signals (viewing_count desc);
+
+alter table public.property_signals enable row level security;
+
+revoke all on table public.property_signals from public, anon, authenticated;
+grant all on table public.property_signals to service_role;
+
 create table if not exists public.share_links (
   id uuid primary key default gen_random_uuid(),
   viewing_id uuid not null references public.viewings (id) on delete cascade,
@@ -250,6 +355,7 @@ create table if not exists public.share_links (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   revoked_at timestamptz,
+  closed_at timestamptz,
   last_resolved_at timestamptz
 );
 
@@ -355,10 +461,6 @@ as $$
 begin
   if old.status = 'revoked' then
     raise exception 'revoked share links are immutable';
-  end if;
-  if new.published_snapshot is distinct from old.published_snapshot
-     or new.media_manifest is distinct from old.media_manifest then
-    raise exception 'published share snapshot is immutable';
   end if;
   return new;
 end;
@@ -579,10 +681,17 @@ create policy "users can read own viewing media"
 
 create or replace function public.find_or_create_property(
   p_normalized_address text,
-  p_lat double precision,
-  p_lng double precision,
+  p_lat double precision default null,
+  p_lng double precision default null,
   p_zoning text default null,
-  p_year_built integer default null
+  p_year_built integer default null,
+  p_country_code text default null,
+  p_admin1 text default null,
+  p_city text default null,
+  p_postal_code text default null,
+  p_unit_key text default '',
+  p_unit_label text default null,
+  p_place_id text default null
 ) returns uuid
 language plpgsql
 security definer
@@ -591,6 +700,10 @@ as $$
 declare
   v_id uuid;
   v_norm text := pg_catalog.lower(pg_catalog.btrim(p_normalized_address));
+  v_country text := pg_catalog.upper(pg_catalog.btrim(coalesce(nullif(p_country_code, ''), 'UNKNOWN')));
+  v_unit text := pg_catalog.lower(pg_catalog.btrim(coalesce(p_unit_key, '')));
+  v_label text := nullif(pg_catalog.btrim(coalesce(p_unit_label, '')), '');
+  v_place text := nullif(pg_catalog.btrim(coalesce(p_place_id, '')), '');
 begin
   if v_norm is null
     or pg_catalog.char_length(v_norm) < 3
@@ -600,6 +713,14 @@ begin
     raise exception using
       errcode = '22023',
       message = 'invalid normalized_address';
+  end if;
+
+  if pg_catalog.char_length(v_unit) > 64
+    or v_unit ~ '[[:cntrl:]]'
+  then
+    raise exception using
+      errcode = '22023',
+      message = 'invalid unit_key';
   end if;
 
   if (p_lat is null) <> (p_lng is null)
@@ -623,26 +744,41 @@ begin
   end if;
 
   insert into public.properties (
-    normalized_address, lat, lng, zoning, year_built, view_count
+    normalized_address, lat, lng, zoning, year_built, view_count,
+    country_code, admin1, city, postal_code,
+    unit_key, unit_label, place_id
   )
-  values (v_norm, p_lat, p_lng, p_zoning, p_year_built, 1)
-  on conflict (normalized_address) do update
+  values (
+    v_norm, p_lat, p_lng, p_zoning, p_year_built, 1,
+    v_country, nullif(p_admin1, ''), nullif(p_city, ''), nullif(p_postal_code, ''),
+    v_unit, v_label, v_place
+  )
+  on conflict (country_code, normalized_address, unit_key) do update
     set view_count = public.properties.view_count + 1,
         updated_at = pg_catalog.now(),
         zoning = coalesce(public.properties.zoning, excluded.zoning),
         year_built = coalesce(public.properties.year_built, excluded.year_built),
+        admin1 = coalesce(public.properties.admin1, excluded.admin1),
+        city = coalesce(public.properties.city, excluded.city),
+        postal_code = coalesce(public.properties.postal_code, excluded.postal_code),
         lat = coalesce(public.properties.lat, excluded.lat),
-        lng = coalesce(public.properties.lng, excluded.lng)
+        lng = coalesce(public.properties.lng, excluded.lng),
+        unit_label = coalesce(public.properties.unit_label, excluded.unit_label),
+        place_id = coalesce(public.properties.place_id, excluded.place_id)
   returning id into v_id;
 
   return v_id;
 end;
 $$;
 
-revoke all on function public.find_or_create_property(text, double precision, double precision, text, integer)
-  from public, anon, authenticated;
-grant execute on function public.find_or_create_property(text, double precision, double precision, text, integer)
-  to service_role;
+revoke all on function public.find_or_create_property(
+  text, double precision, double precision, text, integer,
+  text, text, text, text, text, text, text
+) from public, anon, authenticated;
+grant execute on function public.find_or_create_property(
+  text, double precision, double precision, text, integer,
+  text, text, text, text, text, text, text
+) to service_role;
 
 -- Server-only, multi-dimensional AI quota accounting.
 create schema if not exists private;
@@ -810,3 +946,98 @@ grant execute on function public.process_stripe_subscription_event(
 
 -- Collaboration tables/RLS and all post-release forward fixes are composed
 -- from the ordered migration list in docs/release-migration-runbook.md.
+
+create table if not exists public.notifications (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  type text not null,
+  title text not null,
+  body text not null default '',
+  href text,
+  payload jsonb not null default '{}'::jsonb
+    check (jsonb_typeof(payload) = 'object'),
+  dedupe_key text,
+  read_at timestamptz,
+  email_status text not null default 'skipped'
+    check (email_status in ('skipped', 'queued', 'sent', 'failed')),
+  created_at timestamptz not null default now(),
+  constraint notifications_type_len check (char_length(type) between 1 and 64),
+  constraint notifications_title_len check (char_length(title) between 1 and 200),
+  constraint notifications_body_len check (char_length(body) <= 2000),
+  constraint notifications_href_len check (href is null or char_length(href) <= 500),
+  constraint notifications_dedupe_key_len check (
+    dedupe_key is null or char_length(dedupe_key) between 1 and 200
+  )
+);
+
+create index if not exists notifications_user_created_idx
+  on public.notifications (user_id, created_at desc);
+
+create index if not exists notifications_user_unread_idx
+  on public.notifications (user_id, created_at desc)
+  where read_at is null;
+
+create unique index if not exists notifications_user_type_dedupe_uidx
+  on public.notifications (user_id, type, dedupe_key)
+  where dedupe_key is not null;
+
+create table if not exists public.notification_preferences (
+  user_id uuid primary key references auth.users (id) on delete cascade,
+  email_enabled boolean not null default true,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.notifications enable row level security;
+alter table public.notification_preferences enable row level security;
+
+revoke all on table public.notifications from public, anon, authenticated;
+revoke all on table public.notification_preferences from public, anon, authenticated;
+
+grant select, update (read_at) on table public.notifications to authenticated;
+grant select, insert, update on table public.notification_preferences to authenticated;
+grant all on table public.notifications to service_role;
+grant all on table public.notification_preferences to service_role;
+
+drop policy if exists "users select own notifications" on public.notifications;
+create policy "users select own notifications"
+  on public.notifications for select to authenticated
+  using (user_id = (select auth.uid()));
+
+drop policy if exists "users update own notifications read_at" on public.notifications;
+create policy "users update own notifications read_at"
+  on public.notifications for update to authenticated
+  using (user_id = (select auth.uid()))
+  with check (user_id = (select auth.uid()));
+
+drop policy if exists "users select own notification preferences" on public.notification_preferences;
+create policy "users select own notification preferences"
+  on public.notification_preferences for select to authenticated
+  using (user_id = (select auth.uid()));
+
+drop policy if exists "users upsert own notification preferences" on public.notification_preferences;
+create policy "users upsert own notification preferences"
+  on public.notification_preferences for insert to authenticated
+  with check (user_id = (select auth.uid()));
+
+drop policy if exists "users update own notification preferences" on public.notification_preferences;
+create policy "users update own notification preferences"
+  on public.notification_preferences for update to authenticated
+  using (user_id = (select auth.uid()))
+  with check (user_id = (select auth.uid()));
+
+create or replace function public.lookup_auth_user_id_by_email(p_email text)
+returns uuid
+language sql
+stable
+security definer
+set search_path = pg_catalog, auth
+as $$
+  select id
+  from auth.users
+  where lower(email::text) = lower(trim(p_email))
+  limit 1;
+$$;
+
+revoke all on function public.lookup_auth_user_id_by_email(text) from public;
+revoke all on function public.lookup_auth_user_id_by_email(text) from anon, authenticated;
+grant execute on function public.lookup_auth_user_id_by_email(text) to service_role;

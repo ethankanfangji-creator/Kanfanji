@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { acceptViewingInvite } from "@/lib/collaboration/server";
+import { emitInviteAcceptedNotification } from "@/lib/notifications/emit";
 
 export const runtime = "nodejs";
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ token: string }> },
 ) {
   try {
@@ -18,7 +19,19 @@ export async function POST(
       return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
     }
     const result = await acceptViewingInvite(token, user);
-    return NextResponse.json(result);
+    if (user.email) {
+      emitInviteAcceptedNotification({
+        viewingId: result.viewingId,
+        inviteId: result.inviteId,
+        accepterUserId: user.id,
+        accepterEmail: user.email,
+        siteUrl: process.env.NEXT_PUBLIC_SITE_URL || new URL(request.url).origin,
+      });
+    }
+    return NextResponse.json({
+      viewingId: result.viewingId,
+      role: result.role,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "ACCEPT_FAILED";
     const status =
@@ -35,4 +48,3 @@ export async function POST(
     return NextResponse.json({ error: message }, { status });
   }
 }
-

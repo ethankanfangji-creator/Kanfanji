@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import { LifeBuoy, LogIn, LogOut, Share2 } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { LifeBuoy, List, LogIn, LogOut, Share2 } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
 import { AnalyticsToggle } from "@/components/analytics/AnalyticsToggle";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { NotificationsBell } from "@/components/notifications/NotificationsBell";
 import { useI18n } from "@/components/I18nProvider";
 import { MobileSheet } from "@/components/viewing-chat/shell/MobileSheet";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
@@ -26,6 +27,26 @@ function supportMailto(locale: string, email?: string | null): string {
     ].join("\n"),
   );
   return `mailto:${to}?subject=${subject}&body=${body}`;
+}
+
+function RowLink({
+  href,
+  onClick,
+  children,
+}: {
+  href: string;
+  onClick?: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      onClick={onClick}
+      className="flex min-h-[var(--touch-target)] w-full items-center gap-2.5 rounded-2xl px-3 text-left text-[14px] font-bold text-[#111] hover:bg-[#FAF6F1] active:bg-[#F3EEE7]"
+    >
+      {children}
+    </Link>
+  );
 }
 
 /** Mobile account sheet opened from the bottom tab. */
@@ -70,54 +91,70 @@ export function MobileAccountSheet({
       closeLabel={messages.chat.searchClose}
       ariaLabel={messages.nav.signIn}
     >
-      <div className="space-y-2 px-4 py-3">
+      <div className="space-y-4 px-4 py-3">
         {!ready ? (
           <div className="h-11 animate-pulse rounded-2xl bg-[#EFEAE4]" />
         ) : (
           <>
-            <LanguageSwitcher className="w-full" />
-            <AnalyticsToggle />
-            <Link
-              href="/shares"
-              onClick={onClose}
-              className="flex min-h-[var(--touch-target)] w-full items-center gap-2 rounded-2xl px-3 text-left text-[13px] font-bold hover:bg-[#FAF6F1]"
-            >
-              <Share2 className="h-4 w-4 shrink-0" />
-              {messages.nav.sharesHub}
-            </Link>
-            <a
-              href={supportMailto(locale, user?.email)}
-              onClick={onClose}
-              className="flex min-h-[var(--touch-target)] w-full items-center gap-2 rounded-2xl px-3 text-left text-[13px] font-bold hover:bg-[#FAF6F1]"
-            >
-              <LifeBuoy className="h-4 w-4 shrink-0" />
-              {messages.nav.contactSupport}
-            </a>
-            {user ? (
-              <button
-                type="button"
-                onClick={() => {
-                  void signOutAndClearLocal().then((ok) => {
-                    if (!ok) return;
-                    onClose();
-                    router.replace("/login");
-                  });
-                }}
-                className="flex min-h-[var(--touch-target)] w-full items-center gap-2 rounded-2xl px-3 text-left text-[13px] font-bold hover:bg-[#FAF6F1]"
-              >
-                <LogOut className="h-4 w-4 shrink-0" />
-                {messages.nav.signOut}
-              </button>
-            ) : (
+            {!user ? (
               <Link
                 href="/login"
                 onClick={onClose}
-                className="flex min-h-[var(--touch-target)] w-full items-center gap-2 rounded-2xl px-3 text-left text-[13px] font-bold hover:bg-[#FAF6F1]"
+                className="flex min-h-11 w-full items-center justify-center gap-2 rounded-full bg-black px-4 text-[14px] font-bold text-white active:scale-[0.99]"
               >
-                <LogIn className="h-4 w-4 shrink-0" />
+                <LogIn className="h-4 w-4" aria-hidden />
                 {messages.nav.signIn}
               </Link>
-            )}
+            ) : null}
+
+            <section className="overflow-hidden rounded-2xl border border-black/[0.06] bg-[#FAF6F1]/60">
+              <RowLink href="/viewings" onClick={onClose}>
+                <List className="h-4 w-4 shrink-0 text-[#6B7280]" aria-hidden />
+                {messages.viewings.navLabel}
+              </RowLink>
+              <div className="mx-3 border-t border-black/[0.05]" />
+              <RowLink href="/shares" onClick={onClose}>
+                <Share2 className="h-4 w-4 shrink-0 text-[#6B7280]" aria-hidden />
+                {messages.nav.sharesHub}
+              </RowLink>
+              {user ? (
+                <>
+                  <div className="mx-3 border-t border-black/[0.05]" />
+                  <div className="px-0">
+                    <NotificationsBell expanded rail={false} />
+                  </div>
+                </>
+              ) : null}
+            </section>
+
+            <section className="space-y-2">
+              <LanguageSwitcher className="w-full" />
+              <AnalyticsToggle />
+              <a
+                href={supportMailto(locale, user?.email)}
+                onClick={onClose}
+                className="flex min-h-[var(--touch-target)] w-full items-center gap-2.5 rounded-2xl px-3 text-left text-[14px] font-bold text-[#111] hover:bg-[#FAF6F1]"
+              >
+                <LifeBuoy className="h-4 w-4 shrink-0 text-[#6B7280]" aria-hidden />
+                {messages.nav.contactSupport}
+              </a>
+              {user ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void signOutAndClearLocal().then((ok) => {
+                      if (!ok) return;
+                      onClose();
+                      router.replace("/login");
+                    });
+                  }}
+                  className="flex min-h-[var(--touch-target)] w-full items-center gap-2.5 rounded-2xl px-3 text-left text-[14px] font-bold text-[#991B1B] hover:bg-[#FEF2F2]"
+                >
+                  <LogOut className="h-4 w-4 shrink-0" aria-hidden />
+                  {messages.nav.signOut}
+                </button>
+              ) : null}
+            </section>
           </>
         )}
       </div>

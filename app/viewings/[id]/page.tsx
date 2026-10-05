@@ -1,24 +1,18 @@
 import { Suspense } from "react";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { ViewingSessionApp } from "@/components/viewing-session/ViewingSessionApp";
-import { getViewingRole } from "@/lib/collaboration/server";
-import { createClient } from "@/utils/supabase/server";
 
+/**
+ * Notes session for guests (IndexedDB) and signed-in users (local + cloud hydrate).
+ * Auth is not required at the page boundary so guests can finish one local viewing.
+ */
 export default async function ViewingChatPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    redirect(`/login?next=${encodeURIComponent(`/viewings/${id}`)}`);
-  }
-  const role = await getViewingRole(id, user.id);
-  if (!role) notFound();
+  if (!id?.trim()) notFound();
 
   return (
     <Suspense fallback={null}>

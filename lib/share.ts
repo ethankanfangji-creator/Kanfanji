@@ -1,4 +1,3 @@
-import { cookies } from "next/headers";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { MEDIA_BUCKET } from "@/lib/supabase";
 import { toStoragePath } from "@/lib/media-paths";
@@ -11,15 +10,11 @@ import {
   toPublicSharePayload,
   type PublicShareResult,
 } from "@/lib/share-access";
-import {
-  shareUnlockCookieName,
-  verifyShareUnlockCookieValue,
-} from "@/lib/share-access/cookie";
+import { extractConfirmedMapCoords } from "@/lib/map/open-in-maps";
 import {
   fetchViewingByShareTokenAdmin,
   fetchShareGateByTokenAdmin,
   gateFromViewing,
-  getShareAccess,
   touchShareResolved,
 } from "@/lib/share-access/server";
 import type {
@@ -27,7 +22,26 @@ import type {
   PublicDecisionSummary,
 } from "@/lib/share-access/types";
 import type { Viewing } from "@/lib/types";
-import { shareTokenFingerprint } from "@/lib/share-access";
+
+async function loadLiveShareCoords(
+  viewingId: string,
+): Promise<{ lat: number; lng: number } | null> {
+  try {
+    const admin = createAdminClient();
+    const { data, error } = await admin
+      .from("viewings")
+      .select("chat_state, property")
+      .eq("id", viewingId)
+      .maybeSingle();
+    if (error || !data) return null;
+    return extractConfirmedMapCoords({
+      chatState: data.chat_state,
+      property: data.property,
+    });
+  } catch {
+    return null;
+  }
+}
 
 async function signPublishedPaths(
   pathsOrUrls: string[],
@@ -110,7 +124,6 @@ function sameRelease(first: Awaited<ReturnType<typeof fetchViewingByShareTokenAd
     first.shareLink.access_version === second.shareLink.access_version &&
     first.shareLink.status === second.shareLink.status &&
     first.shareLink.expires_at === second.shareLink.expires_at &&
-    first.shareLink.password_hash === second.shareLink.password_hash &&
     JSON.stringify(first.snapshot) === JSON.stringify(second.snapshot) &&
     JSON.stringify(first.mediaManifest) === JSON.stringify(second.mediaManifest)
   );
@@ -118,44 +131,21 @@ function sameRelease(first: Awaited<ReturnType<typeof fetchViewingByShareTokenAd
 
 export async function resolvePublicShare(
   token: string,
-  options?: { unlocked?: boolean },
+  _options?: { unlocked?: boolean },
 ): Promise<PublicShareResult> {
   try {
     const admin = createAdminClient();
     const gateRow = await fetchShareGateByTokenAdmin(admin, token);
-    const access = gateRow ? getShareAccess(gateRow) : null;
-    let unlocked = options?.unlocked;
-    if (unlocked == null && access) {
-      try {
-        const jar = await cookies();
-        unlocked = verifyShareUnlockCookieValue(
-          token,
-          access.access_version,
-          jar.get(shareUnlockCookieName(token))?.value,
-        );
-      } catch {
-        unlocked = false;
-      }
-    }
-    const gate = gateFromViewing(gateRow, Boolean(unlocked));
+    const gate = gateFromViewing(gateRow);
     if (gate === "missing") return mapStatusToFailure("missing");
     if (gate === "revoked") return mapStatusToFailure("revoked");
+    if (gate === "closed") return mapStatusToFailure("closed");
     if (gate === "expired") return mapStatusToFailure("expired");
-    if (gate === "password_required") {
-      return {
-        version: 1,
-        status: "password_required",
-        challengeId: shareTokenFingerprint(token),
-        message: "此分享受密碼保護，請輸入密碼後繼續。",
-      };
-    }
     if (!gateRow) return mapStatusToFailure("missing");
+    const accessVersion = gateRow.shareLink.access_version;
     const row = await fetchViewingByShareTokenAdmin(admin, token);
     if (!row) return mapStatusToFailure("missing");
-    if (
-      row.shareLink.access_version !== access?.access_version ||
-      row.shareLink.password_hash !== access?.password_hash
-    ) {
+    if (row.shareLink.access_version !== accessVersion) {
       return mapStatusToFailure("forbidden");
     }
 
@@ -175,6 +165,14 @@ export async function resolvePublicShare(
           : mapStatusToFailure("forbidden");
       }
       void touchShareResolved(admin, finalRow).catch(() => undefined);
+      let chatReport = published;
+      if (
+        published.version === 3 &&
+        (published.lat == null || published.lng == null)
+      ) {
+        const live = await loadLiveShareCoords(finalRow.shareLink.viewing_id);
+        if (live) chatReport = { ...published, lat: live.lat, lng: live.lng };
+      }
       return {
         version: 1,
         capability: "read",
@@ -184,9 +182,9 @@ export async function resolvePublicShare(
         updatedAt: published.reportGeneratedAt,
         decisionSummary: null,
         photoUrls,
-        chatReport: published,
+        chatReport,
         meta: {
-          passwordProtected: Boolean(finalRow.shareLink.password_hash),
+          passwordProtected: false,
           expiresAt: finalRow.shareLink.expires_at,
           snapshotUpdatedAt: published.publishedAt,
         },
@@ -228,7 +226,7 @@ export async function resolvePublicShare(
       photoUrls:
         decision?.photos.map((p) => p.url).filter(Boolean) ?? [],
       expiresAt: finalRow.shareLink.expires_at ?? null,
-      passwordProtected: Boolean(finalRow.shareLink.password_hash),
+      passwordProtected: false,
       snapshotUpdatedAt: published.publishedAt,
     });
   } catch {

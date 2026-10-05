@@ -14,6 +14,22 @@ vi.mock("@/lib/entitlement/tier", () => {
   return { getAccountTier, TierLookupError };
 });
 
+vi.mock("@/lib/viewings/link-property.server", () => ({
+  linkViewingToProperty: vi.fn(async () => "property-1"),
+  readChatStateLinkFields: () => ({
+    lat: null,
+    lng: null,
+    unitLabel: null,
+    unitKey: null,
+    placeId: null,
+    countryCode: null,
+  }),
+}));
+
+vi.mock("@/lib/properties/signals", () => ({
+  schedulePropertySignalsRefresh: vi.fn(),
+}));
+
 import { createViewingRow } from "./create-gate.server";
 
 function admin(options: {

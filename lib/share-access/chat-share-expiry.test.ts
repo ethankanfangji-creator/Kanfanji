@@ -4,10 +4,10 @@ import { assertChatShareExpiry } from "./chat-share-expiry";
 const now = new Date("2026-09-28T00:00:00.000Z");
 
 describe("assertChatShareExpiry", () => {
-  it("rejects clearing expiry on a chat report", () => {
-    expect(() => assertChatShareExpiry({ chat_state: { v: 1 } }, { expiresAt: null }, now)).toThrow(
-      "SHARE_EXPIRES_INVALID",
-    );
+  it("allows clearing expiry on a chat report", () => {
+    expect(() =>
+      assertChatShareExpiry({ chat_state: { v: 1 } }, { expiresAt: null }, now),
+    ).not.toThrow();
   });
 
   it("rejects a date later than the share window", () => {

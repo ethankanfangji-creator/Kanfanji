@@ -8,7 +8,6 @@ import {
 } from "@/lib/share-access/server";
 import type { CreateShareLinkRequest } from "@/lib/share-access/types";
 import { createAdminClient } from "@/utils/supabase/admin";
-import { MAX_SHARE_PASSWORD_LENGTH } from "@/lib/share-access/rate-limit";
 import {
   assertAllowedKeys,
   optionalEnum,
@@ -36,7 +35,7 @@ export async function GET(req: Request) {
     if (!viewingId) {
       const statusParam = url.searchParams.get("status")?.trim();
       const status =
-        statusParam === "revoked" || statusParam === "all" || statusParam === "open"
+        statusParam === "closed" || statusParam === "all" || statusParam === "open"
           ? statusParam
           : "open";
       const q = url.searchParams.get("q")?.trim() || undefined;
@@ -81,35 +80,18 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "請先登入" }, { status: 401 });
     }
     const raw = await readJsonObject(req);
-    assertAllowedKeys(raw, ["viewingId", "expiresAt", "password", "capability"]);
+    assertAllowedKeys(raw, ["viewingId", "expiresAt", "capability"]);
     const body: CreateShareLinkRequest = {
       viewingId: optionalString(raw, "viewingId", { min: 1, max: 128 }) ?? "",
       ...(Object.hasOwn(raw, "expiresAt")
         ? { expiresAt: optionalString(raw, "expiresAt", { max: 64, nullable: true }) }
         : {}),
-      ...(Object.hasOwn(raw, "password")
-        ? {
-            password: optionalString(raw, "password", {
-              trim: false,
-              max: MAX_SHARE_PASSWORD_LENGTH,
-              nullable: true,
-            }),
-          }
-        : {}),
       ...(Object.hasOwn(raw, "capability")
         ? { capability: optionalEnum(raw, "capability", ["read"] as const) }
         : {}),
     };
-    if (
-      body.password != null &&
-      body.password !== "" &&
-      (body.password.length < 4 || body.password.length > MAX_SHARE_PASSWORD_LENGTH)
-    ) {
-      return NextResponse.json({ error: "密碼需為 4–256 碼" }, { status: 400 });
-    }
-    const options: { expiresAt?: string | null; password?: string | null } = {};
+    const options: { expiresAt?: string | null } = {};
     if (Object.hasOwn(body, "expiresAt")) options.expiresAt = body.expiresAt ?? null;
-    if (Object.hasOwn(body, "password")) options.password = body.password ?? null;
     const result = await ensureOwnerShareLink(
       createAdminClient(),
       user.id,

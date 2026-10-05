@@ -31,7 +31,6 @@ export type RoleViewingDto =
       property?: unknown;
       user_id?: unknown;
       property_id?: unknown;
-      share_token?: unknown;
       client_updated_at?: unknown;
       is_pro?: unknown;
     });
@@ -65,7 +64,6 @@ const OWNER_KEYS = [
   ...COLLABORATOR_KEYS,
   "user_id",
   "property_id",
-  "share_token",
   "client_updated_at",
   "is_pro",
   "chat_state",

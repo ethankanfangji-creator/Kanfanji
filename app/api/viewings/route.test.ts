@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getUser, insert, from } = vi.hoisted(() => ({
+const { getUser, insert, from, linkViewingToProperty } = vi.hoisted(() => ({
   getUser: vi.fn(),
   insert: vi.fn(),
   from: vi.fn(),
+  linkViewingToProperty: vi.fn(),
 }));
 
 vi.mock("@/utils/supabase/server", () => ({
@@ -16,6 +17,20 @@ vi.mock("@/utils/supabase/admin", () => ({
 
 vi.mock("@/lib/analytics/server", () => ({
   serverTrack: vi.fn(),
+}));
+
+vi.mock("@/lib/viewings/link-property.server", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/viewings/link-property.server")>(
+    "@/lib/viewings/link-property.server",
+  );
+  return {
+    ...actual,
+    linkViewingToProperty,
+  };
+});
+
+vi.mock("@/lib/properties/signals", () => ({
+  schedulePropertySignalsRefresh: vi.fn(),
 }));
 
 import { POST } from "./route";
@@ -32,6 +47,8 @@ beforeEach(() => {
   getUser.mockReset();
   insert.mockReset();
   from.mockReset();
+  linkViewingToProperty.mockReset();
+  linkViewingToProperty.mockResolvedValue("property-linked");
   getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
   from.mockImplementation((table: string) => {
     if (table === "subscriptions") {
@@ -65,12 +82,20 @@ beforeEach(() => {
 });
 
 describe("POST /api/viewings", () => {
-  it("stores null for a client-supplied property id", async () => {
+  it("ignores client property_id and stores server-linked id", async () => {
     const response = await POST(
-      post({ address: "1 Main St", property_id: "not-a-real-property" }),
+      post({ address: "Unit 5, 1 Main St", property_id: "not-a-real-property" }),
     );
     expect(response.status).toBe(200);
+    expect(linkViewingToProperty).toHaveBeenCalledOnce();
     expect(insert).toHaveBeenCalledTimes(1);
+    expect(insert.mock.calls[0][0].property_id).toBe("property-linked");
+  });
+
+  it("still creates the viewing when property link soft-fails", async () => {
+    linkViewingToProperty.mockResolvedValue(null);
+    const response = await POST(post({ address: "1 Main St" }));
+    expect(response.status).toBe(200);
     expect(insert.mock.calls[0][0].property_id).toBeNull();
   });
 

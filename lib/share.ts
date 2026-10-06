@@ -10,7 +10,6 @@ import {
   toPublicSharePayload,
   type PublicShareResult,
 } from "@/lib/share-access";
-import { extractConfirmedMapCoords } from "@/lib/map/open-in-maps";
 import {
   fetchViewingByShareTokenAdmin,
   fetchShareGateByTokenAdmin,
@@ -22,26 +21,6 @@ import type {
   PublicDecisionSummary,
 } from "@/lib/share-access/types";
 import type { Viewing } from "@/lib/types";
-
-async function loadLiveShareCoords(
-  viewingId: string,
-): Promise<{ lat: number; lng: number } | null> {
-  try {
-    const admin = createAdminClient();
-    const { data, error } = await admin
-      .from("viewings")
-      .select("chat_state, property")
-      .eq("id", viewingId)
-      .maybeSingle();
-    if (error || !data) return null;
-    return extractConfirmedMapCoords({
-      chatState: data.chat_state,
-      property: data.property,
-    });
-  } catch {
-    return null;
-  }
-}
 
 async function signPublishedPaths(
   pathsOrUrls: string[],
@@ -165,14 +144,6 @@ export async function resolvePublicShare(
           : mapStatusToFailure("forbidden");
       }
       void touchShareResolved(admin, finalRow).catch(() => undefined);
-      let chatReport = published;
-      if (
-        published.version === 3 &&
-        (published.lat == null || published.lng == null)
-      ) {
-        const live = await loadLiveShareCoords(finalRow.shareLink.viewing_id);
-        if (live) chatReport = { ...published, lat: live.lat, lng: live.lng };
-      }
       return {
         version: 1,
         capability: "read",
@@ -182,7 +153,7 @@ export async function resolvePublicShare(
         updatedAt: published.reportGeneratedAt,
         decisionSummary: null,
         photoUrls,
-        chatReport,
+        chatReport: published,
         meta: {
           passwordProtected: false,
           expiresAt: finalRow.shareLink.expires_at,

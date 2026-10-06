@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { admin, rpc, createSignedUrls, maybeSingle } = vi.hoisted(() => {
+const { admin, rpc, createSignedUrls, maybeSingle, builder } = vi.hoisted(() => {
   const rpc = vi.fn();
   const createSignedUrls = vi.fn();
   const maybeSingle = vi.fn();
@@ -14,6 +14,7 @@ const { admin, rpc, createSignedUrls, maybeSingle } = vi.hoisted(() => {
     rpc,
     createSignedUrls,
     maybeSingle,
+    builder,
     admin: {
       rpc,
       from: vi.fn(() => builder),
@@ -83,6 +84,8 @@ describe("public share race hardening", () => {
     rpc.mockReset();
     createSignedUrls.mockReset();
     maybeSingle.mockReset();
+    admin.from.mockReset();
+    admin.from.mockImplementation(() => builder);
     maybeSingle.mockResolvedValue({ data: link, error: null });
     createSignedUrls.mockResolvedValue({
       data: [{ signedUrl: "https://signed.example/private" }],
@@ -103,5 +106,74 @@ describe("public share race hardening", () => {
     expect(createSignedUrls).toHaveBeenCalledOnce();
     expect(result.status).not.toBe("active");
     expect(JSON.stringify(result)).not.toContain("signed.example");
+  });
+
+  it("does not hydrate unpublished live map coords into a frozen v3 snapshot", async () => {
+    const v3Link = {
+      ...link,
+      published_snapshot: {
+        version: 3,
+        kind: "chat_report",
+        title: "看房報告",
+        address: "2143 Spring St, Port Moody, BC",
+        publishedAt: "2026-10-04T00:00:00Z",
+        reportGeneratedAt: "2026-10-04T00:00:00Z",
+        summary: "Quiet street",
+        pros: [],
+        risks: [],
+      },
+      media_manifest: [] as Array<{ id: string; path: string }>,
+    };
+    maybeSingle.mockResolvedValue({ data: v3Link, error: null });
+    rpc.mockResolvedValue({
+      data: { shareLink: v3Link, ownerId: "owner-1" },
+      error: null,
+    });
+    admin.from.mockImplementation((table: string) => {
+      if (table === "viewings") {
+        const viewingBuilder = {
+          select: vi.fn(() => viewingBuilder),
+          eq: vi.fn(() => viewingBuilder),
+          maybeSingle: vi.fn(async () => ({
+            data: {
+              chat_state: {
+                sitePin: { lat: 49.2815, lng: -122.8512, source: "map" },
+              },
+              property: { lat: 49.28, lng: -122.85 },
+            },
+            error: null,
+          })),
+        };
+        return viewingBuilder;
+      }
+      return {
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            maybeSingle,
+            update: vi.fn(() => ({
+              eq: vi.fn(() => ({ eq: vi.fn(async () => ({ error: null })) })),
+            })),
+          })),
+        })),
+        update: vi.fn(() => ({
+          eq: vi.fn(() => ({ eq: vi.fn(async () => ({ error: null })) })),
+        })),
+      };
+    });
+
+    const result = await resolvePublicShare(token);
+
+    expect(result.status).toBe("active");
+    expect(JSON.stringify(result)).not.toContain("49.2815");
+    expect(JSON.stringify(result)).not.toContain("-122.8512");
+    if (result.status === "active") {
+      expect(result.chatReport).toMatchObject({
+        version: 3,
+        address: "2143 Spring St, Port Moody, BC",
+      });
+      expect(result.chatReport).not.toHaveProperty("lat");
+      expect(result.chatReport).not.toHaveProperty("lng");
+    }
+    expect(admin.from.mock.calls.some(([table]) => table === "viewings")).toBe(false);
   });
 });

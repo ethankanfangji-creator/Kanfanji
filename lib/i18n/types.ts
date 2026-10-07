@@ -1054,6 +1054,8 @@ export type Messages = {
     composerPlaceholder: string;
     send: string;
     recording: string;
+    /** Idle composer control: record → auto transcript (replaces mic icon). */
+    voiceToText: string;
     stop: string;
     attach: string;
     attachCamera: string;

@@ -29,7 +29,6 @@ import {
 import { localPreferenceBlock } from "@/lib/viewing-chat/ai-preferences";
 import { applyChatStateToLocal } from "@/lib/viewing-chat/chat-state";
 import { buildChatStatePayload, pushViewingThread } from "@/lib/viewing-chat/cloud-push";
-import { appendChatMessages } from "@/lib/viewing-chat/append-messages";
 import {
   getLocalThread,
   patchLocalThread,
@@ -37,6 +36,14 @@ import {
   threadVisibleToAccount,
   upsertLocalThread,
 } from "@/lib/viewing-chat/local-store";
+import { mergeMessagesForHydrate } from "@/lib/viewing-chat/merge-messages-hydrate";
+import {
+  appendMessageToList,
+  buildAudioNoteMessage,
+  mediaRefFromAudioBlob,
+  patchMessageTranscript,
+} from "@/lib/viewing-chat/append-audio-note";
+import { putEphemeralMedia } from "@/lib/viewing-chat/ephemeral-media";
 import { addMediaFile } from "@/lib/viewing-chat/media-library";
 import { submitAiFeedback } from "@/lib/viewing-chat/submit-ai-feedback";
 import { uploadViewingFile, appendViewingPath } from "@/lib/media";
@@ -88,13 +95,25 @@ async function hydrateViewingThread(threadId: string, ownerUserId: string) {
     pinned: false,
   };
   const restored = applyChatStateToLocal(base, row.chat_state);
+  // Re-read after the network round-trip — user may have deleted notes meanwhile.
+  const freshLocal = getLocalThread(threadId);
+  const mergedMessages = mergeMessagesForHydrate(
+    freshLocal?.messages ?? restored.messages ?? [],
+    row.messages ?? [],
+    freshLocal?.updatedAt ?? local?.updatedAt ?? restored.updatedAt,
+    row.updated_at,
+  );
+  const keepLocalClock =
+    Boolean(freshLocal?.updatedAt) &&
+    (freshLocal!.updatedAt > row.updated_at);
   upsertLocalThread({
     ...restored,
     address: row.address || restored.address,
-    messages: appendChatMessages(restored.messages ?? [], row.messages ?? []),
+    messages: mergedMessages,
     report: row.report ?? restored.report,
     metadata: row.metadata ?? restored.metadata,
-    updatedAt: row.updated_at,
+    // Keep the newer clock so a just-deleted local note is not treated as stale.
+    updatedAt: keepLocalClock ? freshLocal!.updatedAt : row.updated_at,
     ownerUserId,
     cloud: {
       state: "synced",
@@ -170,6 +189,8 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
   const [shareBusy, setShareBusy] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
+  const [noteBusy, setNoteBusy] = useState(false);
+  const [noteProcessingHint, setNoteProcessingHint] = useState<string | null>(null);
   const syncTimer = useRef(0);
   const notesEndRef = useRef<HTMLDivElement>(null);
 
@@ -285,27 +306,49 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
     window.clearTimeout(syncTimer.current);
     syncTimer.current = window.setTimeout(() => {
       void (async () => {
-        const current = getLocalThread(viewingId);
-        if (!current) return;
-        const pushed = await pushViewingThread({
-          threadId: viewingId,
-          address: current.address,
-          baseRevision: current.cloud?.revision,
-          previouslySynced:
-            current.cloud?.state === "synced" || typeof current.cloud?.revision === "number",
-          messages: current.messages,
-          chatState: buildChatStatePayload(current),
-          clientUpdatedAt: new Date().toISOString(),
-          report: current.report,
-          metadata: current.metadata,
-        });
-        if (pushed.status >= 200 && pushed.status < 300) {
+        const pushOnce = async () => {
+          const current = getLocalThread(viewingId);
+          if (!current) return null;
+          return {
+            current,
+            pushed: await pushViewingThread({
+              threadId: viewingId,
+              address: current.address,
+              baseRevision: current.cloud?.revision,
+              previouslySynced:
+                current.cloud?.state === "synced" ||
+                typeof current.cloud?.revision === "number",
+              messages: current.messages,
+              chatState: buildChatStatePayload(current),
+              clientUpdatedAt: new Date().toISOString(),
+              report: current.report,
+              metadata: current.metadata,
+            }),
+          };
+        };
+
+        let result = await pushOnce();
+        if (!result) return;
+        // Conflict: adopt remote revision and re-push LOCAL messages (incl. deletes).
+        // Never merge remote messages over local — that resurrects deleted notes.
+        if (result.pushed.status === 409 && typeof result.pushed.revision === "number") {
+          patchLocalThread(viewingId, {
+            cloud: {
+              state: "syncing",
+              lastSyncedAt: result.current.cloud?.lastSyncedAt,
+              revision: result.pushed.revision,
+            },
+          });
+          result = await pushOnce();
+          if (!result) return;
+        }
+        if (result.pushed.status >= 200 && result.pushed.status < 300) {
           patchLocalThread(viewingId, {
             ownerUserId: userId,
             cloud: {
               state: "synced",
               lastSyncedAt: new Date().toISOString(),
-              revision: pushed.revision,
+              revision: result.pushed.revision,
             },
           });
           refresh();
@@ -484,15 +527,58 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
 
   useEffect(() => {
     const supabase = getSupabase();
+    let cancelled = false;
+
+    // Show a guest-local thread immediately — never block the notes UI on auth.
+    const localFirst = getLocalThread(viewingId);
+    if (localFirst && threadVisibleToAccount(localFirst, null)) {
+      setThread(localFirst);
+      setReady(true);
+      if (localFirst.briefing) {
+        const coerced = coerceViewingBriefing(localFirst.briefing);
+        if (
+          coerced &&
+          briefingMatchesAddress(coerced, localFirst.address) &&
+          briefingHasContent(coerced)
+        ) {
+          setBriefing(coerced);
+        }
+      }
+      if (localFirst.report) {
+        const fp = notesFingerprint(localFirst.messages);
+        setShownReport({
+          ...localFirst.report,
+          notesFingerprint:
+            localFirst.report.notesFingerprint ??
+            localFirst.reportNotesFingerprint ??
+            fp,
+        });
+      }
+    }
+
     void (async () => {
       let uid: string | null = null;
       if (supabase) {
-        const { data } = await supabase.auth.getUser();
-        uid = data.user?.id ?? null;
-        setUserId(uid);
+        try {
+          const result = await Promise.race([
+            supabase.auth.getUser(),
+            new Promise<null>((resolve) => {
+              window.setTimeout(() => resolve(null), 2500);
+            }),
+          ]);
+          if (result && "data" in result) {
+            uid = result.data.user?.id ?? null;
+          }
+        } catch {
+          uid = null;
+        }
+        if (!cancelled) setUserId(uid);
       }
+      if (cancelled) return;
+
       if (uid) {
         const ok = await hydrateViewingThread(viewingId, uid);
+        if (cancelled) return;
         if (!ok && !getLocalThread(viewingId)) {
           setMissing(true);
           setReady(true);
@@ -503,6 +589,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
         setReady(true);
         return;
       }
+
       const local = getLocalThread(viewingId);
       if (!local || !threadVisibleToAccount(local, uid)) {
         setMissing(true);
@@ -510,6 +597,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
         return;
       }
       setThread(local);
+      setMissing(false);
       setReady(true);
       if (local.briefing) {
         const coerced = coerceViewingBriefing(local.briefing);
@@ -530,7 +618,10 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
         });
       }
     })();
-    return () => window.clearTimeout(syncTimer.current);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(syncTimer.current);
+    };
   }, [viewingId]);
 
   useEffect(() => {
@@ -556,24 +647,46 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
     file: File,
     kind: "image" | "audio" | "file",
   ) {
-    const saved = await addMediaFile(file, viewingId, thread?.address ?? "");
+    let id =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `media_${Date.now()}`;
+    let mime = file.type || "application/octet-stream";
+    let name = file.name || "upload";
+    let size = file.size;
+    let mediaKind: "image" | "video" | "audio" | "file" =
+      kind === "image" ? "image" : kind === "audio" ? "audio" : "file";
+
+    try {
+      const saved = await addMediaFile(file, viewingId, thread?.address ?? "");
+      id = saved.id;
+      mime = saved.mime;
+      name = saved.name;
+      size = saved.size;
+      mediaKind = saved.kind;
+    } catch {
+      // IndexedDB can fail (private mode / quota). Keep a session blob so the note still plays.
+      putEphemeralMedia(id, file);
+    }
+    putEphemeralMedia(id, file);
+
     let path: string | null = null;
     if (userId && kind !== "file") {
       try {
         const folder = kind === "audio" ? "audios" : "photos";
         const column = kind === "audio" ? "audio_urls" : "photo_urls";
-        path = await uploadViewingFile(viewingId, folder, file, saved.id);
+        path = await uploadViewingFile(viewingId, folder, file, id);
         await appendViewingPath(viewingId, column, path);
       } catch {
         path = null;
       }
     }
     return {
-      id: saved.id,
-      kind: saved.kind,
-      name: saved.name,
-      mime: saved.mime,
-      size: saved.size,
+      id,
+      kind: mediaKind,
+      name,
+      mime,
+      size,
       path,
     };
   }
@@ -584,72 +697,158 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
     image: File | null;
     file: File | null;
   }) {
-    if (!thread) return;
+    // Prefer fresh localStorage; fall back to React state and re-hydrate store.
+    let current = getLocalThread(viewingId);
+    if (!current && thread && thread.id === viewingId) {
+      current = upsertLocalThread(thread);
+    }
+    if (!current) {
+      setStatus(c.viewingNotFound || "找不到這則看房");
+      throw new Error("missing_local_thread");
+    }
+
     setStatus("");
-    let message: ChatMessage;
+    setNoteBusy(true);
+    setNoteProcessingHint(payload.audio ? t.composer.transcribing : null);
 
-    if (payload.image) {
-      const media = await uploadNoteMedia(payload.image, "image");
-      message = createUserMessage({
-        type: "photo",
-        text: payload.text.trim() || undefined,
-        media: [media],
-      });
-    } else if (payload.audio) {
-      const file = new File(
-        [payload.audio],
-        `note-${Date.now()}.webm`,
-        { type: payload.audio.type || "audio/webm" },
-      );
-      const media = await uploadNoteMedia(file, "audio");
-      let transcript = "";
-      try {
-        const form = new FormData();
-        form.append("audio", file);
-        form.append("consentVersion", AI_CONSENT_VERSION);
-        form.append("consentSessionId", consentSessionId());
-        form.append("identityKind", userId ? "user" : "guest");
-        const response = await fetch("/api/viewing-chat/transcribe-note", {
-          method: "POST",
-          body: form,
+    try {
+      let message: ChatMessage;
+
+      if (payload.image) {
+        const media = await uploadNoteMedia(payload.image, "image");
+        message = createUserMessage({
+          type: "photo",
+          text: payload.text.trim() || undefined,
+          media: [media],
         });
-        if (response.ok) {
-          const body = (await response.json()) as { transcript?: string };
-          transcript = body.transcript?.trim() || "";
+      } else if (payload.audio) {
+        if (payload.audio.size === 0) {
+          throw new Error("empty_audio");
         }
-      } catch {
-        transcript = "";
-      }
-      message = createUserMessage({
-        type: "audio",
-        transcript: transcript || undefined,
-        text: transcript || payload.text.trim() || undefined,
-        media: [media],
-      });
-    } else if (payload.file) {
-      const media = await uploadNoteMedia(payload.file, "file");
-      message = createUserMessage({
-        type: "file",
-        text: payload.text.trim() || payload.file.name,
-        fileName: payload.file.name,
-        media: [media],
-      });
-    } else {
-      const text = payload.text.trim();
-      if (!text) return;
-      message = createUserMessage({ type: "text", text });
-    }
+        const file = new File(
+          [payload.audio],
+          `note-${Date.now()}.webm`,
+          { type: payload.audio.type || "audio/webm" },
+        );
+        const mediaId =
+          typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : `media_${Date.now()}`;
+        // Land the note in the list immediately (ephemeral blob) — never wait on
+        // IndexedDB / cloud upload before the user sees their recording.
+        const media = mediaRefFromAudioBlob(file, mediaId, file.name);
+        message = buildAudioNoteMessage({
+          audio: file,
+          caption: payload.text,
+          media,
+        });
+        const base = getLocalThread(viewingId) ?? current;
+        const withAudio = appendMessageToList(base.messages, message);
+        const saved = saveLocalMessages(viewingId, withAudio);
+        if (!saved) throw new Error("save_failed");
+        if (shownReport) {
+          patchLocalThread(viewingId, {
+            reportNotesFingerprint:
+              shownReport.notesFingerprint ?? base.reportNotesFingerprint,
+          });
+        }
+        setThread(saved);
+        setNoteProcessingHint(t.composer.transcribing);
 
-    const nextMessages = [...thread.messages, message];
-    saveLocalMessages(viewingId, nextMessages);
-    // Changing notes expires the shown report product without deleting notes.
-    if (shownReport) {
-      patchLocalThread(viewingId, {
-        reportNotesFingerprint: shownReport.notesFingerprint ?? thread.reportNotesFingerprint,
-      });
+        // Best-effort durable/cloud media — failure must not remove the note.
+        void uploadNoteMedia(file, "audio").then((uploaded) => {
+          const latest = getLocalThread(viewingId);
+          if (!latest) return;
+          const patched = latest.messages.map((item) =>
+            item.id === message.id
+              ? {
+                  ...item,
+                  media: [
+                    {
+                      ...uploaded,
+                      // Keep the same id so ephemeral + IDB lookups stay aligned.
+                      id: media.id,
+                    },
+                  ],
+                }
+              : item,
+          );
+          const next = saveLocalMessages(viewingId, patched);
+          if (next) setThread(next);
+        });
+
+        let transcript = "";
+        try {
+          const form = new FormData();
+          form.append("audio", file);
+          form.append("consentVersion", AI_CONSENT_VERSION);
+          form.append("consentSessionId", consentSessionId());
+          form.append("identityKind", userId ? "user" : "guest");
+          const response = await fetch("/api/viewing-chat/transcribe-note", {
+            method: "POST",
+            body: form,
+          });
+          if (response.ok) {
+            const body = (await response.json()) as { transcript?: string };
+            transcript = body.transcript?.trim() || "";
+          }
+        } catch {
+          transcript = "";
+        }
+
+        if (transcript) {
+          const latest = getLocalThread(viewingId);
+          if (latest) {
+            const patched = patchMessageTranscript(
+              latest.messages,
+              message.id,
+              transcript,
+              payload.text,
+            );
+            const next = saveLocalMessages(viewingId, patched);
+            if (next) setThread(next);
+          }
+        }
+        queueSync();
+        return;
+      } else if (payload.file) {
+        const media = await uploadNoteMedia(payload.file, "file");
+        message = createUserMessage({
+          type: "file",
+          text: payload.text.trim() || payload.file.name,
+          fileName: payload.file.name,
+          media: [media],
+        });
+      } else {
+        const text = payload.text.trim();
+        if (!text) return;
+        message = createUserMessage({ type: "text", text });
+      }
+
+      const latest = getLocalThread(viewingId) ?? current;
+      const nextMessages = [...latest.messages, message];
+      const saved = saveLocalMessages(viewingId, nextMessages);
+      if (!saved) throw new Error("save_failed");
+      if (shownReport) {
+        patchLocalThread(viewingId, {
+          reportNotesFingerprint:
+            shownReport.notesFingerprint ?? latest.reportNotesFingerprint,
+        });
+      }
+      setThread(saved);
+      queueSync();
+    } catch (error) {
+      console.error("[appendNote]", error);
+      setStatus(
+        error instanceof Error && error.message === "empty_audio"
+          ? c.emptyComposer
+          : c.syncRetry || "筆記儲存失敗，請再試一次",
+      );
+      throw error;
+    } finally {
+      setNoteBusy(false);
+      setNoteProcessingHint(null);
     }
-    refresh();
-    queueSync();
   }
 
   function markReportStaleFromNotes() {
@@ -662,14 +861,21 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
   function deleteNote(noteId: string) {
     if (!thread) return;
     if (!window.confirm(c.noteDeleteConfirm)) return;
-    const nextMessages = thread.messages.filter((message) => message.id !== noteId);
-    saveLocalMessages(viewingId, nextMessages);
+    // Prefer store + React state so a late cloud hydrate cannot resurrect the note
+    // from a stale in-memory `thread.messages` snapshot.
+    const latest = getLocalThread(viewingId) ?? thread;
+    const nextMessages = latest.messages.filter((message) => message.id !== noteId);
+    const saved = saveLocalMessages(viewingId, nextMessages);
+    if (!saved) {
+      setStatus(c.syncRetry || "筆記儲存失敗，請再試一次");
+      return;
+    }
     markReportStaleFromNotes();
     if (editingNoteId === noteId) {
       setEditingNoteId(null);
       setEditingText("");
     }
-    refresh();
+    setThread(saved);
     queueSync();
   }
 
@@ -985,13 +1191,29 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
                   </div>
                 ) : (
                   <>
-                    <p className="whitespace-pre-wrap text-[14px] leading-relaxed">
-                      {note.transcript ||
-                        note.text ||
-                        (note.type === "photo" ? "📷" : note.fileName) ||
+                    <p
+                      className={`whitespace-pre-wrap text-[14px] leading-relaxed ${
+                        note.type === "audio" &&
+                        !note.transcript?.trim() &&
+                        !note.text?.trim() &&
+                        noteBusy
+                          ? "font-semibold text-[#1D4ED8]"
+                          : ""
+                      }`}
+                    >
+                      {note.transcript?.trim() ||
+                        note.text?.trim() ||
+                        (note.type === "audio"
+                          ? noteBusy
+                            ? t.composer.transcribing
+                            : "…"
+                          : note.type === "photo"
+                            ? "📷"
+                            : note.fileName) ||
                         "…"}
                     </p>
-                    <NoteMedia message={note} />
+                    {/* Audio notes surface as transcript text — no mic/player chrome. */}
+                    {note.type === "audio" ? null : <NoteMedia message={note} />}
                   </>
                 )}
                 <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -1192,11 +1414,15 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
       <div className="sticky bottom-0 border-t border-black/8 bg-[#FAF6F1]">
         <ViewingChatComposer
           edgeToBottom
+          busy={noteBusy}
+          processing={noteBusy}
+          processingHint={noteProcessingHint}
           permissionCopy={t.permissions}
           labels={{
             placeholder: c.notesEmpty,
             send: c.send,
             recording: c.recording,
+            voiceToText: c.voiceToText,
             stop: c.stop,
             attach: c.attach,
             camera: c.attachCamera,
@@ -1211,6 +1437,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
             imageBadType: t.composer.imageBadType,
             emptyFile: t.mediaImport.emptyFile,
             videoTooLarge: t.mediaImport.videoTooLarge,
+            processing: t.composer.transcribing,
           }}
           onSubmit={async (payload) => {
             await appendNote(payload);

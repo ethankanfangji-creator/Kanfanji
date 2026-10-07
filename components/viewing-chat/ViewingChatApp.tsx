@@ -60,6 +60,7 @@ import {
 } from "@/lib/viewing-wizard/free-tier";
 import { buildChatStatePayload, pushViewingThread } from "@/lib/viewing-chat/cloud-push";
 import { appendChatMessages } from "@/lib/viewing-chat/append-messages";
+import { mergeMessagesForHydrate } from "@/lib/viewing-chat/merge-messages-hydrate";
 import { mergeChatMessages } from "@/lib/viewing-chat/merge-messages";
 import { GuestLimitDialog } from "@/components/viewing-chat/GuestLimitDialog";
 import { syncWithRetry } from "@/lib/viewing-chat/cloud-sync";
@@ -94,29 +95,29 @@ async function hydrateViewingThread(threadId: string, ownerUserId: string) {
     pinned: false,
   };
   const restored = applyChatStateToLocal(base, row.chat_state);
-  const localNewer =
-    Boolean(local) &&
-    local!.updatedAt >= row.updated_at &&
-    local!.cloud?.state === "synced" &&
-    local!.messages.length > 0;
-  upsertLocalThread(
-    localNewer
-      ? local!
-      : {
-          ...restored,
-          address: row.address || restored.address,
-          messages: appendChatMessages(restored.messages ?? [], row.messages ?? []),
-          report: row.report ?? restored.report,
-          metadata: row.metadata ?? restored.metadata,
-          updatedAt: row.updated_at,
-          ownerUserId,
-          cloud: {
-            state: "synced",
-            lastSyncedAt: row.updated_at,
-            revision: row.revision,
-          },
-        },
+  const freshLocal = getLocalThread(threadId);
+  const mergedMessages = mergeMessagesForHydrate(
+    freshLocal?.messages ?? restored.messages ?? [],
+    row.messages ?? [],
+    freshLocal?.updatedAt ?? local?.updatedAt ?? restored.updatedAt,
+    row.updated_at,
   );
+  const keepLocalClock =
+    Boolean(freshLocal?.updatedAt) && freshLocal!.updatedAt > row.updated_at;
+  upsertLocalThread({
+    ...restored,
+    address: row.address || restored.address,
+    messages: mergedMessages,
+    report: row.report ?? restored.report,
+    metadata: row.metadata ?? restored.metadata,
+    updatedAt: keepLocalClock ? freshLocal!.updatedAt : row.updated_at,
+    ownerUserId,
+    cloud: {
+      state: "synced",
+      lastSyncedAt: row.updated_at,
+      revision: row.revision,
+    },
+  });
   return true;
 }
 
@@ -509,13 +510,14 @@ export function ViewingChatApp({
           if (activeId === threadId) setActiveId(null);
           return { status: 200 };
         }
-        if (pushed.status === 409 && pushed.remote?.messages) {
-          const remoteMessages = pushed.remote.messages as ChatMessage[];
-          saveLocalMessages(threadId, appendChatMessages(remoteMessages, current.messages));
+        if (pushed.status === 409 && typeof pushed.revision === "number") {
+          // Keep LOCAL messages (incl. deletes); only adopt the newer revision and retry.
+          // Merging remote messages here used to resurrect notes the user just deleted.
           patchLocalThread(threadId, {
             cloud: { ...current.cloud, state: "syncing", revision: pushed.revision },
           });
           setStatus(c.syncNewer);
+          return { status: 409 };
         }
         if (pushed.status >= 200 && pushed.status < 300) {
           patchLocalThread(threadId, {
@@ -936,7 +938,6 @@ export function ViewingChatApp({
       return;
     }
     setActiveId(id);
-    const found = listLocalThreads().find((item) => item.id === id);
     if (found) setAddressDraft(found.address);
     if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
       setHistoryOpen(false);

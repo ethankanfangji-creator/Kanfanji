@@ -1097,6 +1097,7 @@ const en: Messages = {
     composerPlaceholder: "On-site notes or dialogue summary…",
     send: "Send",
     recording: "Recording",
+    voiceToText: "Voice to text",
     stop: "Stop",
     attach: "Attach",
     attachCamera: "Camera",

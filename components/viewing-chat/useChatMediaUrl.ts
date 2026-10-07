@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { getEphemeralMedia } from "@/lib/viewing-chat/ephemeral-media";
 import { getMediaBlob } from "@/lib/viewing-chat/media-library";
 import type { ChatMediaRef } from "@/lib/viewing-chat/types";
 
@@ -24,9 +25,9 @@ async function signPath(path: string): Promise<{ url: string; expiresIn: number 
 async function resolveUrl(ref: ChatMediaRef): Promise<string | null> {
   const cached = cache.get(ref.id);
   if (cached && cached.expiresAt > Date.now() + 30_000) return cached.url;
-  const blob = await getMediaBlob(ref.id);
-  if (blob) {
-    const url = URL.createObjectURL(blob);
+  const local = getEphemeralMedia(ref.id) ?? (await getMediaBlob(ref.id));
+  if (local) {
+    const url = URL.createObjectURL(local);
     cache.set(ref.id, { url, expiresAt: Number.POSITIVE_INFINITY });
     return url;
   }

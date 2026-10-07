@@ -2,6 +2,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createMockMediaPermissionAdapter,
@@ -43,6 +44,7 @@ const labels: ChatComposerLabels = {
   placeholder: "Notes…",
   send: "Send",
   recording: "Recording",
+  voiceToText: "Voice to text",
   stop: "Stop",
   attach: "Attach",
   camera: "Camera",
@@ -56,6 +58,7 @@ const labels: ChatComposerLabels = {
   imageTooLarge: "Image too large",
   emptyFile: "Empty file",
   videoTooLarge: "Video too large",
+  processing: "Transcribing…",
 };
 
 afterEach(() => {
@@ -72,11 +75,26 @@ beforeEach(() => {
     onstop: (() => void) | null = null;
     start() {
       this.state = "recording";
+      // Simulate timeslice chunk while recording.
+      Promise.resolve().then(() => {
+        if (this.state !== "recording") return;
+        this.ondataavailable?.({
+          data: new Blob(["chunk"], { type: "audio/webm" }),
+        });
+      });
+    }
+    requestData() {
+      this.ondataavailable?.({ data: new Blob(["x"], { type: "audio/webm" }) });
     }
     stop() {
       this.state = "inactive";
-      this.ondataavailable?.({ data: new Blob(["x"], { type: "audio/webm" }) });
-      this.onstop?.();
+      // Chrome-like: final dataavailable then stop, both async.
+      void Promise.resolve().then(() => {
+        this.ondataavailable?.({
+          data: new Blob(["final"], { type: "audio/webm" }),
+        });
+        this.onstop?.();
+      });
     }
     static isTypeSupported() {
       return true;
@@ -233,5 +251,86 @@ describe("ViewingChatComposer permission onboarding", () => {
 
     expect(await screen.findByText(labels.audioTooLarge)).toBeTruthy();
     expect(textarea.value).toBe("still here");
+  });
+
+  it("auto-submits microphone audio when recording stops", async () => {
+    const user = userEvent.setup();
+    markCaptureExplained("audio");
+    const adapter = createMockMediaPermissionAdapter({
+      statuses: { microphone: "granted" },
+    });
+    const onSubmit = vi.fn();
+    renderComposer(adapter, onSubmit);
+
+    const textarea = screen.getByLabelText(
+      labels.placeholder,
+    ) as HTMLTextAreaElement;
+    await user.type(textarea, "caption");
+    await user.click(screen.getByRole("button", { name: labels.recording }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: labels.stop })).toBeTruthy(),
+    );
+    await user.click(screen.getByRole("button", { name: labels.stop }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const payload = onSubmit.mock.calls[0]?.[0] as {
+      text: string;
+      audio: Blob | null;
+    };
+    expect(payload.text).toBe("caption");
+    expect(payload.audio).toBeInstanceOf(Blob);
+    expect(payload.audio?.size).toBeGreaterThan(0);
+    expect(textarea.value).toBe("");
+  });
+
+  it("still auto-submits under React Strict Mode effect remount", async () => {
+    const user = userEvent.setup();
+    markCaptureExplained("audio");
+    const adapter = createMockMediaPermissionAdapter({
+      statuses: { microphone: "granted" },
+    });
+    const onSubmit = vi.fn();
+    render(
+      <StrictMode>
+        <ViewingChatComposer
+          labels={labels}
+          permissionCopy={permissionCopy}
+          mediaAdapter={adapter}
+          onSubmit={onSubmit}
+        />
+      </StrictMode>,
+    );
+
+    await user.click(screen.getByRole("button", { name: labels.recording }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: labels.stop })).toBeTruthy(),
+    );
+    await user.click(screen.getByRole("button", { name: labels.stop }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const payload = onSubmit.mock.calls[0]?.[0] as { audio: Blob | null };
+    expect(payload.audio?.size).toBeGreaterThan(0);
+  });
+
+  it("stages imported audio for manual send instead of auto-submitting", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderComposer(undefined, onSubmit);
+
+    const input = screen.getByTestId("audio-import-input") as HTMLInputElement;
+    const clip = new File([new Uint8Array(32)], "note.webm", {
+      type: "audio/webm",
+    });
+    fireEvent.change(input, { target: { files: [clip] } });
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "remove audio" })).toBeTruthy(),
+    );
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: labels.send }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const payload = onSubmit.mock.calls[0]?.[0] as { audio: Blob | null };
+    expect(payload.audio).toBeInstanceOf(Blob);
   });
 });

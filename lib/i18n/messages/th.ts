@@ -1095,6 +1095,7 @@ const th: Messages = {
     composerPlaceholder: "บันทึกสังเกตหน้างานหรือสรุปบทสนทนา…",
     send: "ส่ง",
     recording: "กำลังอัด",
+    voiceToText: "แปลงเสียงเป็นข้อความ",
     stop: "หยุด",
     attach: "แนบ",
     attachCamera: "ถ่ายรูป",

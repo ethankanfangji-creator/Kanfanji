@@ -1077,6 +1077,7 @@ const zhHant: Messages = {
     composerPlaceholder: "記錄現場觀察、對話摘要…",
     send: "送出",
     recording: "錄音中",
+    voiceToText: "錄音轉文字",
     stop: "停止",
     attach: "附加",
     attachCamera: "照相",

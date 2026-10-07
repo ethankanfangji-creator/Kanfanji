@@ -28,6 +28,11 @@ import {
 } from "@/lib/media-permissions";
 import type { AiUiAction } from "@/lib/ai-boundary/map-ai-error-ui";
 import { AiErrorActionBar } from "@/components/ai/AiErrorActionBar";
+import {
+  attachMicDataCollector,
+  armMicStopCollector,
+  stopMicRecorder,
+} from "@/lib/viewing-chat/mic-recording";
 import type { ChatReplyRef } from "@/lib/viewing-chat/types";
 
 export type ChatComposerLabels = {
@@ -51,6 +56,8 @@ export type ChatComposerLabels = {
   replyCancel?: string;
   replyingTo?: string;
   processing?: string;
+  /** Idle voice-to-text control (replaces a bare mic affordance). */
+  voiceToText?: string;
   uploading?: string;
   retry?: string;
 };
@@ -115,6 +122,16 @@ export function ViewingChatComposer({
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  /** Skip auto-submit when MediaRecorder.stop runs during unmount. */
+  const unmountingRef = useRef(false);
+  const onSubmitRef = useRef(onSubmit);
+  onSubmitRef.current = onSubmit;
+  const labelsRef = useRef(labels);
+  labelsRef.current = labels;
+  const clearComposerDraftRef = useRef<() => void>(() => undefined);
+  const submitMicRecordingRef = useRef<(audio: Blob) => Promise<void>>(
+    async () => undefined,
+  );
 
   const TEXTAREA_MAX_PX = 168;
   const SINGLE_LINE_PX = 36;
@@ -127,8 +144,13 @@ export function ViewingChatComposer({
   const [attachOpen, setAttachOpen] = useState(false);
   const [multiline, setMultiline] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [localMicProcessing, setLocalMicProcessing] = useState(false);
   const [permissionBanner, setPermissionBanner] =
     useState<PermissionBannerState | null>(null);
+
+  // Mic onstop must not close over stale render state.
+  const draftRef = useRef({ text, image, file, busy });
+  draftRef.current = { text, image, file, busy };
 
   function resizeTextarea(nextText = text) {
     const el = textareaRef.current;
@@ -161,7 +183,11 @@ export function ViewingChatComposer({
   }, [replyTo]);
 
   useEffect(() => {
+    // React Strict Mode remounts in dev — reset so a prior cleanup does not
+    // permanently suppress mic auto-submit on the live instance.
+    unmountingRef.current = false;
     return () => {
+      unmountingRef.current = true;
       mediaRef.current.release(streamRef.current);
       if (recorderRef.current && recorderRef.current.state !== "inactive") {
         try {
@@ -205,7 +231,7 @@ export function ViewingChatComposer({
   async function beginRecording() {
     setPermissionBanner(null);
     setError(null);
-    if (busy || recording) return;
+    if (busy || recording || localMicProcessing) return;
 
     const media = mediaRef.current;
     if (!media.isMediaDevicesSupported() || !media.isMediaRecorderSupported()) {
@@ -228,27 +254,11 @@ export function ViewingChatComposer({
       ? new MediaRecorder(requested.stream, { mimeType: mime })
       : new MediaRecorder(requested.stream);
     recorderRef.current = recorder;
-    recorder.ondataavailable = (event) => {
-      if (event.data.size) chunksRef.current.push(event.data);
-    };
-    recorder.onstop = () => {
-      const blob = new Blob(chunksRef.current, {
-        type: recorder.mimeType || "audio/webm",
-      });
-      chunksRef.current = [];
-      mediaRef.current.release(streamRef.current);
-      streamRef.current = null;
-      setRecording(false);
-      if (blob.size > AI_LIMITS.audioBytes) {
-        setError(labels.audioTooLarge);
-        setAudioBlob(null);
-        return;
-      }
-      setAudioBlob(blob);
-    };
+    attachMicDataCollector(recorder, chunksRef.current);
     markCaptureExplained("audio");
     setRecording(true);
     setAudioBlob(null);
+    // timeslice keeps chunks flowing; stop() still emits a final chunk.
     recorder.start(250);
   }
 
@@ -256,7 +266,7 @@ export function ViewingChatComposer({
     setError(null);
     setAttachOpen(false);
     setPermissionBanner(null);
-    if (busy || recording) return;
+    if (busy || recording || localMicProcessing) return;
     await beginRecording();
   }
 
@@ -289,9 +299,56 @@ export function ViewingChatComposer({
   }
 
   function stopRecording() {
-    if (recorderRef.current && recorderRef.current.state !== "inactive") {
-      recorderRef.current.stop();
+    const recorder = recorderRef.current;
+    if (!recorder || recorder.state === "inactive") return;
+
+    const mimeType = recorder.mimeType || "audio/webm";
+    setError(null);
+    setLocalMicProcessing(true);
+    setRecording(false);
+
+    const blobPromise = armMicStopCollector(recorder, {
+      chunks: chunksRef.current,
+      mimeType,
+    });
+
+    try {
+      stopMicRecorder(recorder);
+    } catch {
+      setLocalMicProcessing(false);
+      mediaRef.current.release(streamRef.current);
+      streamRef.current = null;
+      recorderRef.current = null;
+      return;
     }
+
+    void blobPromise
+      .then(async (blob) => {
+        // Release only after the blob is collected — early release empties Chrome recordings.
+        mediaRef.current.release(streamRef.current);
+        streamRef.current = null;
+        if (recorderRef.current === recorder) recorderRef.current = null;
+        chunksRef.current = [];
+
+        // Only skip submit on a true unmount mid-flight — not Strict Mode remount
+        // (effect re-entry clears unmountingRef before the user can stop).
+        if (unmountingRef.current) return;
+        if (blob.size > AI_LIMITS.audioBytes) {
+          setError(labelsRef.current.audioTooLarge);
+          return;
+        }
+        if (blob.size === 0) {
+          setError(labelsRef.current.empty);
+          return;
+        }
+        await submitMicRecordingRef.current(blob);
+      })
+      .catch(() => {
+        setError(labelsRef.current.empty);
+      })
+      .finally(() => {
+        setLocalMicProcessing(false);
+      });
   }
 
   function applyPickedFile(picked: File | null | undefined) {
@@ -335,6 +392,39 @@ export function ViewingChatComposer({
     setError(null);
   }
 
+  function clearComposerDraft() {
+    setText("");
+    setAudioBlob(null);
+    setImage(null);
+    setFile(null);
+    setMultiline(false);
+    requestAnimationFrame(() => resizeTextarea(""));
+  }
+  clearComposerDraftRef.current = clearComposerDraft;
+
+  async function submitMicRecording(audio: Blob) {
+    const draft = draftRef.current;
+    setError(null);
+    setAttachOpen(false);
+    setPermissionBanner(null);
+    // Clear any staged chip immediately so stop never looks like "press Send".
+    setAudioBlob(null);
+    try {
+      await onSubmitRef.current({
+        text: draft.text.trim(),
+        audio,
+        image: draft.image,
+        file: draft.file,
+      });
+      clearComposerDraftRef.current();
+    } catch {
+      // Keep the clip recoverable if upload/transcribe throws.
+      setAudioBlob(audio);
+      setError(labelsRef.current.empty);
+    }
+  }
+  submitMicRecordingRef.current = submitMicRecording;
+
   async function handleSend() {
     if (busy || recording) return;
     if (!text.trim() && !audioBlob && !image && !file) {
@@ -350,12 +440,7 @@ export function ViewingChatComposer({
       image,
       file,
     });
-    setText("");
-    setAudioBlob(null);
-    setImage(null);
-    setFile(null);
-    setMultiline(false);
-    requestAnimationFrame(() => resizeTextarea(""));
+    clearComposerDraft();
   }
 
   const canSend = Boolean(text.trim() || audioBlob || image || file);
@@ -400,7 +485,7 @@ export function ViewingChatComposer({
               setAttachOpen(false);
               audioImportRef.current?.click();
             }}
-            icon={<Mic className="h-4 w-4" />}
+            icon={<FileUp className="h-4 w-4" />}
           />
           <AttachItem
             label={labels.uploadVideo || "Video"}
@@ -423,6 +508,9 @@ export function ViewingChatComposer({
     </div>
   );
 
+  // Transcription status lives in the mic slot — not a separate banner.
+  const voiceSlotBusy = localMicProcessing || Boolean(processingHint);
+
   const actionButtons = (
     <div className="flex shrink-0 items-center gap-0.5">
       {recording ? (
@@ -434,10 +522,26 @@ export function ViewingChatComposer({
         >
           <Square className="h-3.5 w-3.5 fill-current" />
         </button>
+      ) : voiceSlotBusy ? (
+        <span
+          role="status"
+          aria-label={
+            processingHint || labels.processing || labels.uploading || "…"
+          }
+          className="flex min-h-[var(--touch-target)] max-w-[7.5rem] items-center gap-1.5 px-1.5 text-[10px] font-semibold leading-tight text-[#1D4ED8]"
+        >
+          <span
+            className="inline-block h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-[#1D4ED8]/20 border-t-[#1D4ED8]"
+            aria-hidden
+          />
+          <span className="min-w-0 truncate animate-pulse">
+            {processingHint || labels.processing || labels.uploading || "…"}
+          </span>
+        </span>
       ) : (
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || localMicProcessing}
           aria-label={labels.recording}
           onClick={() => void openMicFlow()}
           className="flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center rounded-full text-[#4B5563] active:bg-black/5 disabled:opacity-40"
@@ -447,7 +551,7 @@ export function ViewingChatComposer({
       )}
       <button
         type="button"
-        disabled={busy || recording || !canSend}
+        disabled={busy || recording || voiceSlotBusy || !canSend}
         aria-label={labels.send}
         onClick={() => void handleSend()}
         className="flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center rounded-full bg-[#111] text-white disabled:bg-transparent disabled:text-[#D1D5DB]"
@@ -611,12 +715,18 @@ export function ViewingChatComposer({
         />
       ) : null}
 
-      {processing || processingHint ? (
+      {processing && !processingHint && !localMicProcessing ? (
         <p
-          className="mb-1.5 px-1 text-[11px] font-semibold text-[#1D4ED8]"
+          className="mb-1.5 flex items-center gap-1.5 px-1 text-[11px] font-semibold text-[#1D4ED8]"
           role="status"
         >
-          {processingHint || labels.processing || labels.uploading || "…"}
+          <span
+            className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-[#1D4ED8]/20 border-t-[#1D4ED8]"
+            aria-hidden
+          />
+          <span className="animate-pulse">
+            {labels.processing || labels.uploading || "…"}
+          </span>
         </p>
       ) : null}
 

@@ -1,4 +1,10 @@
-@import "tailwindcss";
+/* Explicit sources keep PostCSS/Tailwind from scanning large local dirs
+   (e.g. .worktrees) and reduce Turbopack PostCSS worker timeouts. */
+@import "tailwindcss" source(none);
+@source "../app";
+@source "../components";
+@source "../lib";
+
 
 *,
 *::before,

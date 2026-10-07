@@ -1077,6 +1077,7 @@ const zhHans: Messages = {
     composerPlaceholder: "记录现场观察、对话摘要…",
     send: "发送",
     recording: "录音中",
+    voiceToText: "录音转文字",
     stop: "停止",
     attach: "附加",
     attachCamera: "拍照",

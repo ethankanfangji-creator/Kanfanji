@@ -1,4 +1,5 @@
 import { coerceDecisionStatus } from "./decision-status";
+import { effectiveViewingTags, tagsInclude } from "./viewing-tags";
 import type { DecisionStatus, PortfolioScope } from "./types";
 
 export type ScopeThread = {
@@ -8,6 +9,7 @@ export type ScopeThread = {
   updatedAt: string;
   createdAt?: string;
   decisionStatus?: DecisionStatus | null;
+  tags?: string[] | null;
 };
 
 export function startOfLocalDayIso(now = new Date()): string {
@@ -52,6 +54,14 @@ export function filterThreadsByScope<T extends ScopeThread>(
     const statuses = new Set(scope.statuses ?? []);
     if (statuses.size === 0) return [];
     return threads.filter((thread) => {
+      const tags = effectiveViewingTags({
+        tags: thread.tags,
+        decisionStatus: thread.decisionStatus,
+      });
+      for (const status of statuses) {
+        if (tagsInclude(tags, status)) return true;
+      }
+      // Legacy rows that only have decisionStatus (already covered by effective tags).
       const status = coerceDecisionStatus(thread.decisionStatus);
       return status != null && statuses.has(status);
     });

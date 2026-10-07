@@ -2,6 +2,7 @@ import { formatValue } from "@/lib/viewing-chat/collection/format-value";
 import { notesTranscript } from "@/lib/viewing-chat/notes-report-text";
 import type { ViewingChatThread } from "@/lib/viewing-chat/types";
 import { coerceDecisionStatus } from "./decision-status";
+import { decisionStatusFromTags, effectiveViewingTags } from "./viewing-tags";
 import type { PortfolioFactCard, PortfolioShareComment } from "./types";
 
 const FIELD_IDS = [
@@ -46,11 +47,17 @@ export function buildPortfolioCorpus(threads: ViewingChatThread[]): PortfolioFac
       if (value) fields[fieldId] = value.slice(0, 200);
     }
     const notes = notesTranscript(thread.messages ?? []).slice(0, NOTES_EXCERPT_MAX);
+    const tags = effectiveViewingTags({
+      tags: thread.tags,
+      decisionStatus: thread.decisionStatus,
+    });
     return {
       id: thread.id,
       address: (thread.normalizedAddress || thread.address || "").trim() || thread.id,
       updatedAt: thread.updatedAt,
-      decisionStatus: coerceDecisionStatus(thread.decisionStatus),
+      decisionStatus:
+        coerceDecisionStatus(thread.decisionStatus) ?? decisionStatusFromTags(tags),
+      tags,
       price: fields.price ?? null,
       layout: fields.layout ?? null,
       area: fields.area ?? null,
@@ -114,6 +121,7 @@ export function formatCorpusForPrompt(cards: PortfolioFactCard[]): string {
         `address: ${card.address}`,
         `updatedAt: ${card.updatedAt}`,
         `decisionStatus: ${card.decisionStatus ?? "none"}`,
+        `tags: ${card.tags.length ? card.tags.join("；") : "none"}`,
         `price: ${card.price ?? "未提到"}`,
         `layout: ${card.layout ?? "未提到"}`,
         `area: ${card.area ?? "未提到"}`,
@@ -153,6 +161,10 @@ export function validateFactCards(raw: unknown): PortfolioFactCard[] {
       address,
       updatedAt: typeof row.updatedAt === "string" ? row.updatedAt : "",
       decisionStatus: coerceDecisionStatus(row.decisionStatus),
+      tags: effectiveViewingTags({
+        tags: row.tags,
+        decisionStatus: row.decisionStatus,
+      }),
       price: typeof row.price === "string" ? row.price.slice(0, 120) : null,
       layout: typeof row.layout === "string" ? row.layout.slice(0, 120) : null,
       area: typeof row.area === "string" ? row.area.slice(0, 120) : null,

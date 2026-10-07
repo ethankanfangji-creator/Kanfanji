@@ -10,14 +10,13 @@ const shortLabels = {
   nav: "Primary navigation",
   ask: "Ask",
   history: "History",
-  media: "Media",
   account: "Account",
 };
 
 afterEach(() => cleanup());
 
 describe("MobileBottomNav", () => {
-  it("renders ask/history/media/account without a New property entry", async () => {
+  it("renders ask/history/account without a New property or Media entry", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
     render(
@@ -33,7 +32,7 @@ describe("MobileBottomNav", () => {
     expect(screen.getByRole("button", { name: "Ask" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "History" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Search" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Media" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Media" })).toBeNull();
     expect(screen.getByRole("button", { name: "Account" })).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Ask" }));
@@ -43,16 +42,16 @@ describe("MobileBottomNav", () => {
   it("marks the selected tab for sighted and assistive users", () => {
     render(
       <MobileBottomNav
-        activeTab="media"
+        activeTab="history"
         onSelect={() => undefined}
         labels={shortLabels}
       />,
     );
 
-    const search = screen.getByRole("button", { name: "Media" });
-    expect(search).toHaveAttribute("aria-current", "page");
-    expect(search).toHaveAttribute("data-active", "true");
-    expect(screen.getByRole("button", { name: "History" })).not.toHaveAttribute(
+    const history = screen.getByRole("button", { name: "History" });
+    expect(history).toHaveAttribute("aria-current", "page");
+    expect(history).toHaveAttribute("data-active", "true");
+    expect(screen.getByRole("button", { name: "Ask" })).not.toHaveAttribute(
       "aria-current",
     );
   });

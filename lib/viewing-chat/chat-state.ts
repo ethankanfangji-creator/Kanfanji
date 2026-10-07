@@ -1,4 +1,8 @@
 import { coerceDecisionStatus } from "@/lib/portfolio/decision-status";
+import {
+  coerceViewingTags,
+  decisionStatusFromTags,
+} from "@/lib/portfolio/viewing-tags";
 import type { ViewingChatThread } from "./types";
 import { buildChatStatePayload } from "./cloud-push";
 
@@ -18,6 +22,7 @@ const STATE_KEYS = [
   "listingUrl",
   "reportNotesFingerprint",
   "decisionStatus",
+  "tags",
 ] as const;
 
 type StateKey = (typeof STATE_KEYS)[number];
@@ -63,6 +68,15 @@ export function mergeChatState(existing: unknown, incoming: Record<string, unkno
     }
     if (key === "decisionStatus") {
       next.decisionStatus = coerceDecisionStatus(value);
+      continue;
+    }
+    if (key === "tags") {
+      const tags = coerceViewingTags(value);
+      next.tags = tags;
+      // Keep legacy status aligned when tags are the source of truth.
+      if (Object.hasOwn(incoming, "tags") && !Object.hasOwn(incoming, "decisionStatus")) {
+        next.decisionStatus = decisionStatusFromTags(tags);
+      }
       continue;
     }
     if (value == null) continue;

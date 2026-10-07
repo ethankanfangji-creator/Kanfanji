@@ -12,7 +12,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { ArrowLeft } from "lucide-react";
+import { BackHomeLink } from "@/components/ui/BackHomeLink";
 import { useI18n } from "@/components/I18nProvider";
 import { PageContainer } from "@/components/ui/primitives";
 import {
@@ -238,14 +238,7 @@ export function ChatComparePage() {
   return (
     <div className="min-h-screen w-full bg-[var(--color-canvas)] text-[var(--color-text)]">
       <PageContainer className="py-6 pb-16">
-        <button
-          type="button"
-          onClick={onBack}
-          className="inline-flex min-h-[var(--touch-target)] items-center gap-1 text-[12px] font-medium text-[#6B7280]"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          {lite.compareBack}
-        </button>
+        <BackHomeLink label={lite.compareBack} onClick={onBack} />
         <h1 className="mt-2 text-[20px] font-[800] tracking-tight">{lite.compareTitle}</h1>
         {gate.kind === "allowed" && found.length >= 2 ? (
           <button

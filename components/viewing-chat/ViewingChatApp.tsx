@@ -20,7 +20,6 @@ import {
   type MobileNavTabId,
 } from "@/components/viewing-chat/shell/MobileBottomNav";
 import { MobileHistoryDrawer } from "@/components/viewing-chat/shell/MobileHistoryDrawer";
-import { MediaLibraryPanel } from "@/components/viewing-chat/MediaLibraryPanel";
 import { track } from "@/lib/analytics/client";
 import type { AddressSource, AnalyticsRegion } from "@/lib/analytics/events";
 import {
@@ -207,7 +206,6 @@ export function ViewingChatApp({
   const [compareMode, setCompareMode] = useState(false);
   const [compareItemMax, setCompareItemMax] = useState(2);
   const [compareSelectedIds, setCompareSelectedIds] = useState<string[]>([]);
-  const [mediaOpen, setMediaOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [mobileNavTab, setMobileNavTab] = useState<MobileNavTabId | null>(null);
@@ -444,7 +442,6 @@ export function ViewingChatApp({
 
   function closeMobileOverlays() {
     setHistoryOpen(false);
-    setMediaOpen(false);
     setAccountOpen(false);
   }
 
@@ -456,19 +453,11 @@ export function ViewingChatApp({
       return;
     }
     if (tab === "history") {
-      setMediaOpen(false);
       setAccountOpen(false);
       setHistoryOpen(true);
       return;
     }
-    if (tab === "media") {
-      setHistoryOpen(false);
-      setAccountOpen(false);
-      setMediaOpen(true);
-      return;
-    }
     setHistoryOpen(false);
-    setMediaOpen(false);
     setAccountOpen(true);
   }
 
@@ -606,7 +595,6 @@ export function ViewingChatApp({
   function goToNewProperty() {
     // Desktop sidebar stays open; close mobile history drawer + covering sheets.
     if (isMobileViewport) setHistoryOpen(false);
-    setMediaOpen(false);
     setAccountOpen(false);
     setMobileNavTab(null);
     if (viewingId) {
@@ -1103,13 +1091,8 @@ export function ViewingChatApp({
           sidebarOpen={historyOpen}
           onToggleSidebar={() => {
             setHistoryOpen((v) => !v);
-            setMediaOpen(false);
           }}
           onNew={goToNewProperty}
-          onOpenMedia={() => {
-            setMediaOpen(true);
-          }}
-          mediaOpen={mediaOpen}
           threads={visibleThreads}
           activeId={activeId}
           onSelectThread={selectThread}
@@ -1237,17 +1220,14 @@ export function ViewingChatApp({
         activeTab={
           accountOpen
             ? "account"
-            : mediaOpen
-              ? "media"
-              : historyOpen && isMobileViewport
-                ? "history"
-                : mobileNavTab
+            : historyOpen && isMobileViewport
+              ? "history"
+              : mobileNavTab
         }
         labels={{
           nav: c.mobileNavLabel,
           ask: c.tabAsk,
           history: c.tabHistory,
-          media: c.tabMedia,
           account: c.tabAccount,
         }}
         onSelect={handleMobileNav}
@@ -1294,24 +1274,6 @@ export function ViewingChatApp({
           setMobileNavTab(null);
         }}
       />
-
-      {mediaOpen ? (
-        <MediaLibraryPanel
-          onClose={() => {
-            setMediaOpen(false);
-            setMobileNavTab(null);
-          }}
-          railExpanded={historyOpen}
-          labels={{
-            title: c.mediaLibrary,
-            hint: c.mediaLibraryHint,
-            empty: c.mediaLibraryEmpty,
-            close: c.searchClose,
-            delete: c.mediaLibraryDelete,
-            failed: c.mediaLibraryFailed,
-          }}
-        />
-      ) : null}
     </div>
   );
 }

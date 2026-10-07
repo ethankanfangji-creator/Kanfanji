@@ -106,6 +106,7 @@ describe("POST /api/portfolio/ask", () => {
               address: "A",
               updatedAt: new Date().toISOString(),
               decisionStatus: null,
+              tags: [],
               price: null,
               layout: null,
               area: null,

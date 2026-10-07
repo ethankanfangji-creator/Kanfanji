@@ -867,6 +867,9 @@ export type Messages = {
     decisionShortlist: string;
     decisionPassed: string;
     decisionRevisit: string;
+    tagsPlaceholder: string;
+    tagsFrequent: string;
+    tagsAddAria: string;
     newChat: string;
     historyTitle: string;
     historyEmpty: string;
@@ -961,8 +964,13 @@ export type Messages = {
     confirmAddress: string;
     generateReport: string;
     generatingReport: string;
+    /** Shown when Generate report is disabled because there are no user notes yet. */
+    generateReportNeedNotes: string;
     briefingTitle: string;
     briefingLoading: string;
+    briefingLoadingStageLocate: string;
+    briefingLoadingStageSearch: string;
+    briefingLoadingStageWrite: string;
     briefingEmpty: string;
     briefingListingCta: string;
     briefingListingUrlLabel: string;
@@ -1023,12 +1031,6 @@ export type Messages = {
     chatSearchPlaceholder: string;
     chatSearchPrev: string;
     chatSearchNext: string;
-    mediaLibrary: string;
-    mediaLibraryHint: string;
-    mediaLibraryEmpty: string;
-    mediaLibraryUpload: string;
-    mediaLibraryDelete: string;
-    mediaLibraryFailed: string;
     /** Short label for the mobile bottom tab (new). */
     tabNew: string;
     /** Short label for the mobile bottom tab (ask portfolio). */
@@ -1037,8 +1039,6 @@ export type Messages = {
     tabHistory: string;
     /** Short label for the mobile bottom tab (search). */
     tabSearch: string;
-    /** Short label for the mobile bottom tab (media). */
-    tabMedia: string;
     /** Short label for the mobile bottom tab (account). */
     tabAccount: string;
     /** Accessible name for the mobile bottom tab bar. */
@@ -1066,6 +1066,8 @@ export type Messages = {
     importAudio: string;
     emptyComposer: string;
     micDenied: string;
+    /** Voice note saved but Whisper transcription failed. */
+    transcriptFailed: string;
     reply: string;
     replyCancel: string;
     replyMenuCancel: string;

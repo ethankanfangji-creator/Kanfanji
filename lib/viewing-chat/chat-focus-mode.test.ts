@@ -5,7 +5,6 @@ describe("isChatFocusMode", () => {
   const base = {
     hasActiveThread: true,
     historyOpen: false,
-    mediaOpen: false,
     accountOpen: false,
     isMobileViewport: true,
   };
@@ -19,7 +18,6 @@ describe("isChatFocusMode", () => {
   });
 
   it("exits when a mobile overlay is open", () => {
-    expect(isChatFocusMode({ ...base, mediaOpen: true })).toBe(false);
     expect(isChatFocusMode({ ...base, accountOpen: true })).toBe(false);
     expect(isChatFocusMode({ ...base, historyOpen: true })).toBe(false);
   });

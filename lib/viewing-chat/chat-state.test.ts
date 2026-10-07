@@ -67,6 +67,16 @@ describe("chat state round trip", () => {
     expect(invalid.decisionStatus).toBeNull();
   });
 
+  it("round-trips tags and syncs decisionStatus from suggestion tags", () => {
+    const withTags = { ...thread, tags: ["太吵", "liked"], decisionStatus: null };
+    const saved = buildChatStatePayload(withTags);
+    expect(saved.tags).toEqual(["太吵", "liked"]);
+    expect(saved.decisionStatus).toBe("liked");
+    const loaded = applyChatStateToLocal(thread, saved);
+    expect(loaded.tags).toEqual(["太吵", "liked"]);
+    expect(loaded.decisionStatus).toBe("liked");
+  });
+
   it("round-trips unit identity fields", () => {
     const withUnit = {
       ...thread,

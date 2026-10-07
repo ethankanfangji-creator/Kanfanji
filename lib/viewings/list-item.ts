@@ -1,5 +1,9 @@
 import { extractConfirmedMapCoords } from "@/lib/map/open-in-maps";
 import { coerceDecisionStatus } from "@/lib/portfolio/decision-status";
+import {
+  decisionStatusFromTags,
+  effectiveViewingTags,
+} from "@/lib/portfolio/viewing-tags";
 import type { DecisionStatus } from "@/lib/portfolio/types";
 
 /** Lean row for `/viewings` browse UI — no chat_state / messages blob. */
@@ -11,6 +15,7 @@ export type ViewingListItem = {
   photo_urls: string[];
   video_urls: string[];
   decisionStatus: DecisionStatus | null;
+  tags: string[];
   hasReport: boolean;
   /** Confirmed site pin (chat_state.sitePin) or property coords — for map cover. */
   lat: number | null;
@@ -56,6 +61,10 @@ export function toViewingListItem(row: Record<string, unknown>): ViewingListItem
   const lat = coords?.lat ?? null;
   const lng = coords?.lng ?? null;
 
+  const tags = effectiveViewingTags({
+    tags: chatState?.tags,
+    decisionStatus: chatState?.decisionStatus,
+  });
   return {
     id,
     address,
@@ -65,7 +74,9 @@ export function toViewingListItem(row: Record<string, unknown>): ViewingListItem
       typeof row.created_at === "string" ? row.created_at : new Date(0).toISOString(),
     photo_urls: asStringArray(row.photo_urls),
     video_urls: asStringArray(row.video_urls),
-    decisionStatus: coerceDecisionStatus(chatState?.decisionStatus),
+    decisionStatus:
+      coerceDecisionStatus(chatState?.decisionStatus) ?? decisionStatusFromTags(tags),
+    tags,
     hasReport: hasReportPayload(row),
     lat,
     lng,

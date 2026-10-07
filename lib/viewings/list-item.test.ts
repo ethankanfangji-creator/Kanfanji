@@ -20,11 +20,26 @@ describe("toViewingListItem", () => {
     expect(item).toMatchObject({
       id: "v1",
       decisionStatus: "shortlist",
+      tags: ["shortlist"],
       hasReport: true,
       photo_urls: ["https://example.com/a.jpg"],
       lat: 49.2815,
       lng: -122.8512,
     });
+  });
+
+  it("reads freeform tags and derives decisionStatus from suggestions", () => {
+    const item = toViewingListItem({
+      id: "v3",
+      address: "2 Tag Ave",
+      updated_at: "2026-10-01T00:00:00.000Z",
+      created_at: "2026-09-01T00:00:00.000Z",
+      photo_urls: [],
+      video_urls: [],
+      chat_state: { v: 1, tags: ["太吵", "liked"] },
+    });
+    expect(item?.tags).toEqual(["太吵", "liked"]);
+    expect(item?.decisionStatus).toBe("liked");
   });
 
   it("treats reportNotesFingerprint as hasReport", () => {

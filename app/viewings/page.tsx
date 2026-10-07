@@ -1,11 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ArrowLeft } from "lucide-react";
 import { ClientAuthBar } from "@/components/ClientAuthBar";
 import { useI18n } from "@/components/I18nProvider";
+import { BackHomeLink } from "@/components/ui/BackHomeLink";
 import { PageContainer } from "@/components/ui/primitives";
 import { ViewingsIndex } from "@/components/viewings/ViewingsIndex";
 import type { ViewingListItem } from "@/lib/viewings/list-item";
@@ -46,12 +45,7 @@ export default function ViewingsPage() {
       <PageContainer className="pb-28 pt-6">
         <div className="mb-5 flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <Link
-              href="/"
-              className="mb-2 inline-flex min-h-[var(--touch-target)] items-center gap-1 text-[var(--font-size-xs)] font-medium text-[var(--color-text-muted)]"
-            >
-              <ArrowLeft className="h-3.5 w-3.5" /> {messages.viewings.back}
-            </Link>
+            <BackHomeLink label={messages.viewings.back} className="mb-2" />
             <h1 className="text-[22px] font-[800] leading-[1.15] tracking-tight">
               {messages.viewings.title}
             </h1>

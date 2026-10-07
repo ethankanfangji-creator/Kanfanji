@@ -56,8 +56,22 @@ describe("buildPortfolioCorpus", () => {
     expect(cards[0].layout).toBe("3房2廳");
     expect(cards[0].pros).toEqual(["採光佳"]);
     expect(cards[0].decisionStatus).toBe("shortlist");
+    expect(cards[0].tags).toEqual(["shortlist"]);
     expect(cards[0].notesExcerpt).toContain("客廳很亮");
     expect(cards[0].shareComments).toEqual([]);
+  });
+
+  it("prefers explicit freeform tags over legacy decisionStatus alone", () => {
+    const cards = buildPortfolioCorpus([
+      thread({
+        id: "v2",
+        address: "9 Tag St",
+        decisionStatus: "liked",
+        tags: ["liked", "太吵", "適合長輩"],
+      }),
+    ]);
+    expect(cards[0].tags).toEqual(["liked", "太吵", "適合長輩"]);
+    expect(formatCorpusForPrompt(cards)).toContain("tags: liked；太吵；適合長輩");
   });
 });
 

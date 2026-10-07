@@ -2,19 +2,17 @@
 
 import type { ReactNode } from "react";
 import {
-  Database,
   History,
   MessageSquareText,
   UserRound,
 } from "lucide-react";
 
-export type MobileNavTabId = "ask" | "history" | "media" | "account";
+export type MobileNavTabId = "ask" | "history" | "account";
 
 export type MobileNavLabels = {
   nav: string;
   ask: string;
   history: string;
-  media: string;
   account: string;
 };
 
@@ -56,11 +54,6 @@ export function MobileBottomNav({
       id: "history",
       label: labels.history,
       icon: <History className="h-[1.15rem] w-[1.15rem]" strokeWidth={2} aria-hidden />,
-    },
-    {
-      id: "media",
-      label: labels.media,
-      icon: <Database className="h-[1.15rem] w-[1.15rem]" strokeWidth={2} aria-hidden />,
     },
     {
       id: "account",

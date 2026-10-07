@@ -11,6 +11,7 @@ function item(
     photo_urls: [],
     video_urls: [],
     decisionStatus: null,
+    tags: [],
     hasReport: false,
     lat: null,
     lng: null,
@@ -45,27 +46,41 @@ describe("filterAndSortViewings", () => {
   it("filters by address substring", () => {
     const result = filterAndSortViewings(pool, {
       query: "westwood",
-      decision: "all",
+      tag: "all",
       hasReportOnly: false,
       sort: "updated_desc",
     });
     expect(result.map((row) => row.id)).toEqual(["a"]);
   });
 
-  it("filters by decision and hasReport", () => {
+  it("filters by tag and hasReport", () => {
     const result = filterAndSortViewings(pool, {
       query: "",
-      decision: "shortlist",
+      tag: "shortlist",
       hasReportOnly: true,
       sort: "updated_desc",
     });
     expect(result.map((row) => row.id)).toEqual(["c"]);
   });
 
+  it("filters by freeform tag on tags[]", () => {
+    const tagged = [
+      item({ id: "t1", address: "A", tags: ["liked", "太吵"] }),
+      item({ id: "t2", address: "B", tags: ["passed"] }),
+    ];
+    const result = filterAndSortViewings(tagged, {
+      query: "",
+      tag: "太吵",
+      hasReportOnly: false,
+      sort: "updated_desc",
+    });
+    expect(result.map((row) => row.id)).toEqual(["t1"]);
+  });
+
   it("sorts by address ascending", () => {
     const result = filterAndSortViewings(pool, {
       query: "",
-      decision: "all",
+      tag: "all",
       hasReportOnly: false,
       sort: "address_asc",
     });
@@ -75,7 +90,7 @@ describe("filterAndSortViewings", () => {
   it("sorts by updated_at descending by default", () => {
     const result = filterAndSortViewings(pool, {
       query: "",
-      decision: "all",
+      tag: "all",
       hasReportOnly: false,
       sort: "updated_desc",
     });

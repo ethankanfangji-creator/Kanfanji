@@ -15,6 +15,24 @@ export {
   toggleDecisionStatus,
 } from "./decision-status";
 export {
+  VIEWING_TAG_MAX_CHARS,
+  VIEWING_TAGS_MAX,
+  VIEWING_TAG_SUGGESTION_IDS,
+  addViewingTag,
+  coerceViewingTags,
+  collectFrequentViewingTags,
+  decisionStatusFromTags,
+  effectiveViewingTags,
+  isSuggestionTagId,
+  normalizeTagKey,
+  removeViewingTag,
+  tagsInclude,
+  toggleViewingTag,
+  viewingTagsPatch,
+  type FrequentTagsSource,
+  type ViewingTagSuggestionId,
+} from "./viewing-tags";
+export {
   daysAgoIso,
   defaultPortfolioScope,
   filterThreadsByScope,

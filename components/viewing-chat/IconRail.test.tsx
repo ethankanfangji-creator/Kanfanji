@@ -61,7 +61,6 @@ function renderRail(extra?: {
         sidebarOpen
         onToggleSidebar={vi.fn()}
         onNew={vi.fn()}
-        onOpenMedia={vi.fn()}
         threads={["a", "b", "c", "d"].map((id) => thread(id, `道路${id}`))}
         activeId={null}
         onSelectThread={onSelectThread}

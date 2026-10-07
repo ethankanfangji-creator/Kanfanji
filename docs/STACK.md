@@ -1,11 +1,12 @@
 # Kanfangji stack & service boundaries
 
-Last updated: 2026-09-19. Living inventory for agents and humans.
+Last updated: 2026-10-05. Living inventory for agents and humans.
 
 ## Runtime stack
 
 | Layer | Choice | Notes |
 | --- | --- | --- |
+| Node.js | 22+ | `.nvmrc` + `package.json` `engines`. Node 20 can make tests look broadly broken. |
 | Framework | Next.js 16 (App Router) + React 19 + TypeScript | See `package.json` |
 | Styling | Tailwind CSS 4 | Mobile-first wizard UI |
 | Database | Supabase Postgres + RLS | SQL under `supabase/migrations/` (+ legacy `migrate-*.sql`) |

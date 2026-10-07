@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  Database,
   LifeBuoy,
   List,
   LogIn,
@@ -106,8 +105,6 @@ export function IconRail({
   sidebarOpen,
   onToggleSidebar,
   onNew,
-  onOpenMedia,
-  mediaOpen,
   threads,
   activeId,
   onSelectThread,
@@ -122,8 +119,6 @@ export function IconRail({
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
   onNew: () => void;
-  onOpenMedia: () => void;
-  mediaOpen?: boolean;
   threads: ViewingChatThread[];
   activeId: string | null;
   onSelectThread: (id: string) => void;
@@ -216,14 +211,6 @@ export function IconRail({
         >
           <MessageSquareText className="h-5 w-5" strokeWidth={2} />
         </RailButton>
-        <RailButton
-          label={messages.chat.mediaLibrary}
-          active={mediaOpen}
-          expanded={expanded}
-          onClick={onOpenMedia}
-        >
-          <Database className="h-5 w-5" strokeWidth={2} />
-        </RailButton>
         <RailButton label={messages.viewings.navLabel} href="/viewings" expanded={expanded}>
           <List className="h-5 w-5" strokeWidth={2} />
         </RailButton>
@@ -234,7 +221,6 @@ export function IconRail({
         >
           <Share2 className="h-5 w-5" strokeWidth={2} />
         </RailButton>
-        <NotificationsBell expanded={expanded} />
       </div>
 
       {expanded ? (
@@ -447,6 +433,11 @@ export function IconRail({
                     <Share2 className="h-3.5 w-3.5 shrink-0" />
                     {messages.nav.sharesHub}
                   </Link>
+                  {user ? (
+                    <div className="-mx-1">
+                      <NotificationsBell expanded rail={false} />
+                    </div>
+                  ) : null}
                   <a
                     href={supportMailto(locale, user?.email)}
                     onClick={() => setProfileOpen(false)}

@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import {
-  ArrowLeft,
   Clock3,
   Copy,
   ExternalLink,
@@ -16,6 +15,7 @@ import {
 } from "lucide-react";
 import { ClientAuthBar } from "@/components/ClientAuthBar";
 import { useI18n } from "@/components/I18nProvider";
+import { BackHomeLink } from "@/components/ui/BackHomeLink";
 import { PageContainer } from "@/components/ui/primitives";
 import { formatMessage } from "@/lib/i18n";
 import { shortenAddressLabel } from "@/lib/shorten-address";
@@ -373,12 +373,7 @@ export function SharesHub() {
       <PageContainer narrow className="relative pb-28 pt-6">
         <div className="mb-5 flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <Link
-              href="/"
-              className="mb-2 inline-flex min-h-[var(--touch-target)] items-center gap-1 text-[var(--font-size-xs)] font-medium text-[var(--color-text-muted)]"
-            >
-              <ArrowLeft className="h-3.5 w-3.5" /> {labels.back}
-            </Link>
+            <BackHomeLink label={labels.back} className="mb-2" />
             <h1 className="text-[22px] font-[800] leading-[1.15] tracking-tight">
               {labels.title}
             </h1>

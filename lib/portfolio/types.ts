@@ -1,4 +1,7 @@
-/** Decision status — shortlist buckets, not freeform feature tags. */
+/**
+ * Built-in suggestion ids (also legacy decision buckets).
+ * Freeform user tags are plain strings on the viewing — see viewing-tags.ts.
+ */
 export const DECISION_STATUSES = ["liked", "shortlist", "passed", "revisit"] as const;
 export type DecisionStatus = (typeof DECISION_STATUSES)[number];
 
@@ -25,6 +28,8 @@ export type PortfolioFactCard = {
   address: string;
   updatedAt: string;
   decisionStatus: DecisionStatus | null;
+  /** User conclusions / labels (suggestion ids + freeform). */
+  tags: string[];
   price: string | null;
   layout: string | null;
   area: string | null;

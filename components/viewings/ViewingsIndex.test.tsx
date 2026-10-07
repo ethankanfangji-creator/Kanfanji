@@ -26,6 +26,7 @@ function item(
     photo_urls: [],
     video_urls: [],
     decisionStatus: null,
+    tags: [],
     hasReport: false,
     lat: null,
     lng: null,
@@ -65,7 +66,7 @@ describe("ViewingsIndex", () => {
     ).toBeTruthy();
   });
 
-  it("filters by decision chip", async () => {
+  it("shows only tags that appear in the list and filters by them", async () => {
     const user = userEvent.setup();
     render(
       <I18nProvider>
@@ -73,13 +74,13 @@ describe("ViewingsIndex", () => {
           viewings={[
             item({
               id: "1",
-              address: "Liked Home",
-              decisionStatus: "liked",
+              address: "Noisy Home",
+              tags: ["太吵", "liked"],
             }),
             item({
               id: "2",
-              address: "Passed Home",
-              decisionStatus: "passed",
+              address: "Quiet Home",
+              tags: ["採光好"],
             }),
           ]}
           loading={false}
@@ -88,9 +89,14 @@ describe("ViewingsIndex", () => {
       </I18nProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: /喜歡/ }));
-    expect(screen.getByText("Liked Home")).toBeTruthy();
-    expect(screen.queryByText("Passed Home")).toBeNull();
+    expect(screen.getByRole("button", { name: "太吵" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "採光好" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /喜歡/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /淘汰/ })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "太吵" }));
+    expect(screen.getByText("Noisy Home")).toBeTruthy();
+    expect(screen.queryByText("Quiet Home")).toBeNull();
   });
 
   it("uses OSM tile map cover when pin coords exist", () => {

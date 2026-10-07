@@ -1,19 +1,24 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Check, Pencil, Share2, ThumbsDown, ThumbsUp, Trash2, X } from "lucide-react";
+import { Check, Pencil, Share2, ThumbsDown, ThumbsUp, Trash2, X } from "lucide-react";
 import { useI18n } from "@/components/I18nProvider";
-import { DecisionStatusPicker } from "@/components/portfolio/DecisionStatusPicker";
+import { ViewingTagsPicker } from "@/components/portfolio/ViewingTagsPicker";
+import { BackHomeLink } from "@/components/ui/BackHomeLink";
 import { ReportSectionsView } from "@/components/viewing-chat/ReportSectionsView";
 import { ShareReportCommentsPanel } from "@/components/viewing-chat/ShareReportCommentsPanel";
 import { ShareReportDialog } from "@/components/viewing-chat/ShareReportDialog";
 import { ViewingChatComposer } from "@/components/viewing-chat/ViewingChatComposer";
 import { useChatMediaUrl } from "@/components/viewing-chat/useChatMediaUrl";
+import { BriefingLoadingPanel } from "@/components/viewing-session/BriefingLoadingPanel";
 import { AI_CONSENT_VERSION } from "@/lib/ai-boundary/client";
 import { track } from "@/lib/analytics/client";
-import type { DecisionStatus } from "@/lib/portfolio";
+import {
+  collectFrequentViewingTags,
+  effectiveViewingTags,
+  viewingTagsPatch,
+} from "@/lib/portfolio";
 import {
   briefingDisplaySources,
   briefingDisplaySummary,
@@ -31,6 +36,7 @@ import { applyChatStateToLocal } from "@/lib/viewing-chat/chat-state";
 import { buildChatStatePayload, pushViewingThread } from "@/lib/viewing-chat/cloud-push";
 import {
   getLocalThread,
+  listLocalThreads,
   patchLocalThread,
   saveLocalMessages,
   threadVisibleToAccount,
@@ -180,6 +186,8 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
   const [reportBusy, setReportBusy] = useState(false);
   const [shownReport, setShownReport] = useState<ChatReportSnapshot | null>(null);
   const [status, setStatus] = useState("");
+  const [noteBusy, setNoteBusy] = useState(false);
+  const [noteProcessingHint, setNoteProcessingHint] = useState<string | null>(null);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
   const [feedbackPrompt, setFeedbackPrompt] = useState<null | "briefing" | "report">(null);
@@ -189,8 +197,6 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
   const [shareBusy, setShareBusy] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
-  const [noteBusy, setNoteBusy] = useState(false);
-  const [noteProcessingHint, setNoteProcessingHint] = useState<string | null>(null);
   const syncTimer = useRef(0);
   const notesEndRef = useRef<HTMLDivElement>(null);
 
@@ -960,7 +966,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
   }
 
   async function generateReport() {
-    if (!thread) return;
+    if (!thread || notes.length === 0) return;
     setReportBusy(true);
     setStatus(c.generatingReport);
     try {
@@ -1017,9 +1023,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
     return (
       <div className="flex min-h-[100svh] flex-col items-center justify-center gap-3 bg-[#FAF6F1] px-6 text-center">
         <p className="text-[15px] font-bold">找不到這則看房。</p>
-        <Link href="/" className="text-[13px] font-bold underline">
-          {t.loginPage.backHome}
-        </Link>
+        <BackHomeLink label={t.loginPage.backHome} />
       </div>
     );
   }
@@ -1027,29 +1031,38 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
   return (
     <div className="mx-auto flex min-h-[100svh] w-full max-w-[520px] flex-col bg-[#FAF6F1] text-[#1A1A1A]">
       <header className="sticky top-0 z-10 border-b border-black/8 bg-[#FAF6F1]/95 px-4 py-3 backdrop-blur">
-        <Link
-          href="/"
-          className="inline-flex min-h-[var(--touch-target)] items-center gap-1 text-[12px] font-medium text-[#6B7280]"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" /> {t.loginPage.backHome}
-        </Link>
+        <BackHomeLink label={t.loginPage.backHome} />
         <h1 className="mt-2 text-[18px] font-bold leading-snug">{thread.address}</h1>
         <div className="mt-3">
-          <DecisionStatusPicker
-            value={thread.decisionStatus ?? null}
-            labels={{
-              label: t.portfolio.decisionLabel,
-              none: t.portfolio.decisionNone,
+          <ViewingTagsPicker
+            value={effectiveViewingTags({
+              tags: thread.tags,
+              decisionStatus: thread.decisionStatus,
+            })}
+            frequentTags={collectFrequentViewingTags(listLocalThreads(), {
+              exclude: effectiveViewingTags({
+                tags: thread.tags,
+                decisionStatus: thread.decisionStatus,
+              }),
+            })}
+            displayLabels={{
               liked: t.portfolio.decisionLiked,
               shortlist: t.portfolio.decisionShortlist,
               passed: t.portfolio.decisionPassed,
               revisit: t.portfolio.decisionRevisit,
             }}
-            onChange={(next: DecisionStatus | null) => {
-              patchLocalThread(viewingId, { decisionStatus: next });
+            labels={{
+              label: t.portfolio.decisionLabel,
+              placeholder: t.portfolio.tagsPlaceholder,
+              frequent: t.portfolio.tagsFrequent,
+              addAria: t.portfolio.tagsAddAria,
+            }}
+            onChange={(next) => {
+              const patch = viewingTagsPatch(next);
+              patchLocalThread(viewingId, patch);
               track({
                 name: "decision_status_changed",
-                props: { status: next ?? "none", surface: "session" },
+                props: { status: patch.decisionStatus ?? "none", surface: "session" },
               });
               queueSync();
               refresh();
@@ -1059,11 +1072,28 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
       </header>
 
       <section className="border-b border-black/8 px-4 py-4" aria-labelledby="briefing-heading">
-        <h2 id="briefing-heading" className="text-[13px] font-bold tracking-wide">
+        <h2
+          id="briefing-heading"
+          className="flex items-center gap-2 text-[13px] font-bold tracking-wide"
+        >
           {c.briefingTitle}
+          {briefingBusy && briefingHasContent(briefing) ? (
+            <span
+              className="inline-block h-3 w-3 rounded-full border-2 border-black/15 border-t-[#1A1A1A] animate-spin"
+              aria-label={c.briefingLoading}
+              role="status"
+            />
+          ) : null}
         </h2>
         {briefingBusy && !briefingHasContent(briefing) ? (
-          <p className="mt-3 text-[13px] text-[#6B7280]">{c.briefingLoading}</p>
+          <BriefingLoadingPanel
+            ariaLabel={c.briefingLoading}
+            stages={[
+              c.briefingLoadingStageLocate,
+              c.briefingLoadingStageSearch,
+              c.briefingLoadingStageWrite,
+            ]}
+          />
         ) : briefing ? (
           !briefingHasContent(briefing) ? (
             <p className="mt-3 text-[13px] text-[#6B7280]">{c.briefingEmpty}</p>
@@ -1398,12 +1428,23 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
         )}
         <button
           type="button"
-          disabled={reportBusy}
+          disabled={reportBusy || notes.length === 0}
           onClick={() => void generateReport()}
+          title={notes.length === 0 ? c.generateReportNeedNotes : undefined}
+          aria-describedby={notes.length === 0 ? "generate-report-need-notes" : undefined}
           className="mt-3 h-11 w-full rounded-full bg-black text-[14px] font-bold text-white disabled:opacity-40"
         >
           {reportBusy ? c.generatingReport : c.generateReport}
         </button>
+        {notes.length === 0 && !reportBusy ? (
+          <p
+            id="generate-report-need-notes"
+            className="mt-2 text-center text-[12px] font-semibold text-[#6B7280]"
+            role="status"
+          >
+            {c.generateReportNeedNotes}
+          </p>
+        ) : null}
         {status ? (
           <p className="mt-2 text-center text-[12px] font-semibold text-[#92400E]" role="status">
             {status}

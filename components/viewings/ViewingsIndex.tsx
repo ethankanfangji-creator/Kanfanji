@@ -1,16 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Camera, MapPin, Search, Video } from "lucide-react";
 import { useI18n } from "@/components/I18nProvider";
 import { formatMessage } from "@/lib/i18n";
-import type { DecisionStatus } from "@/lib/portfolio/types";
+import { displayViewingTag } from "@/components/portfolio/ViewingTagsPicker";
+import {
+  collectFrequentViewingTags,
+  normalizeTagKey,
+} from "@/lib/portfolio/viewing-tags";
 import { shortenAddressLabel } from "@/lib/shorten-address";
 import {
   filterAndSortViewings,
-  type ViewingListDecisionFilter,
   type ViewingListSort,
+  type ViewingListTagFilter,
 } from "@/lib/viewings/list-filter";
 import {
   viewingListCover,
@@ -18,19 +22,7 @@ import {
 } from "@/lib/viewings/list-item";
 import { ViewingMapCover } from "@/components/viewings/ViewingMapCover";
 
-const DECISION_CHIP_ORDER: DecisionStatus[] = [
-  "liked",
-  "shortlist",
-  "passed",
-  "revisit",
-];
-
-const DECISION_DOT: Record<DecisionStatus, string> = {
-  liked: "bg-emerald-500",
-  shortlist: "bg-sky-500",
-  passed: "bg-stone-400",
-  revisit: "bg-amber-500",
-};
+const FREQUENT_FILTER_LIMIT = 8;
 
 function formatWhen(iso: string, locale: string) {
   return new Intl.DateTimeFormat(
@@ -102,36 +94,50 @@ export function ViewingsIndex({
   const v = messages.viewings;
   const p = messages.portfolio;
   const [query, setQuery] = useState("");
-  const [decision, setDecision] = useState<ViewingListDecisionFilter>("all");
+  const [tagFilter, setTagFilter] = useState<ViewingListTagFilter>("all");
   const [hasReportOnly, setHasReportOnly] = useState(false);
   const [sort, setSort] = useState<ViewingListSort>("updated_desc");
+
+  const displayLabels = useMemo(
+    () => ({
+      liked: p.decisionLiked,
+      shortlist: p.decisionShortlist,
+      passed: p.decisionPassed,
+      revisit: p.decisionRevisit,
+    }),
+    [p.decisionLiked, p.decisionPassed, p.decisionRevisit, p.decisionShortlist],
+  );
+
+  const frequentTags = useMemo(
+    () =>
+      collectFrequentViewingTags(viewings, {
+        limit: FREQUENT_FILTER_LIMIT,
+      }),
+    [viewings],
+  );
+
+  // Drop stale tag filter when that tag no longer appears in the list.
+  useEffect(() => {
+    if (tagFilter === "all") return;
+    const stillPresent = frequentTags.some(
+      (tag) => normalizeTagKey(tag) === normalizeTagKey(tagFilter),
+    );
+    if (!stillPresent) setTagFilter("all");
+  }, [frequentTags, tagFilter]);
 
   const filtered = useMemo(
     () =>
       filterAndSortViewings(viewings, {
         query,
-        decision,
+        tag: tagFilter,
         hasReportOnly,
         sort,
       }),
-    [viewings, query, decision, hasReportOnly, sort],
+    [viewings, query, tagFilter, hasReportOnly, sort],
   );
 
-  const decisionLabel = (status: DecisionStatus) => {
-    switch (status) {
-      case "liked":
-        return p.decisionLiked;
-      case "shortlist":
-        return p.decisionShortlist;
-      case "passed":
-        return p.decisionPassed;
-      case "revisit":
-        return p.decisionRevisit;
-    }
-  };
-
   const filtersActive =
-    Boolean(query.trim()) || decision !== "all" || hasReportOnly;
+    Boolean(query.trim()) || tagFilter !== "all" || hasReportOnly;
 
   return (
     <div className="space-y-4">
@@ -153,22 +159,21 @@ export function ViewingsIndex({
         </div>
 
         <div className="-mx-1 flex items-center gap-1.5 overflow-x-auto px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <Chip active={decision === "all"} onClick={() => setDecision("all")}>
+          <Chip active={tagFilter === "all"} onClick={() => setTagFilter("all")}>
             {v.filterAll}
           </Chip>
-          {DECISION_CHIP_ORDER.map((status) => (
-            <Chip
-              key={status}
-              active={decision === status}
-              onClick={() => setDecision(status)}
-            >
-              <span
-                className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full ${DECISION_DOT[status]}`}
-                aria-hidden
-              />
-              {decisionLabel(status)}
-            </Chip>
-          ))}
+          {frequentTags.map((tag) => {
+            const active = normalizeTagKey(tagFilter) === normalizeTagKey(tag);
+            return (
+              <Chip
+                key={tag}
+                active={active}
+                onClick={() => setTagFilter(active ? "all" : tag)}
+              >
+                {displayViewingTag(tag, displayLabels)}
+              </Chip>
+            );
+          })}
           <Chip
             active={hasReportOnly}
             onClick={() => setHasReportOnly((current) => !current)}
@@ -230,7 +235,7 @@ export function ViewingsIndex({
               type="button"
               onClick={() => {
                 setQuery("");
-                setDecision("all");
+                setTagFilter("all");
                 setHasReportOnly(false);
               }}
               className="mt-3 text-[13px] font-bold underline"
@@ -270,15 +275,21 @@ export function ViewingsIndex({
                     {formatWhen(viewing.updated_at, locale)}
                   </p>
                   <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-[#6B7280]">
-                    {viewing.decisionStatus ? (
-                      <span className="inline-flex items-center gap-1 font-semibold text-[#374151]">
+                    {(viewing.tags?.length
+                      ? viewing.tags
+                      : viewing.decisionStatus
+                        ? [viewing.decisionStatus]
+                        : []
+                    )
+                      .slice(0, 3)
+                      .map((tag) => (
                         <span
-                          className={`inline-block h-1.5 w-1.5 rounded-full ${DECISION_DOT[viewing.decisionStatus]}`}
-                          aria-hidden
-                        />
-                        {decisionLabel(viewing.decisionStatus)}
-                      </span>
-                    ) : null}
+                          key={tag}
+                          className="inline-flex items-center gap-1 font-semibold text-[#374151]"
+                        >
+                          {displayViewingTag(tag, displayLabels)}
+                        </span>
+                      ))}
                     {viewing.hasReport ? (
                       <span className="rounded-full bg-black/5 px-1.5 py-0.5 font-semibold">
                         {v.filterHasReport}

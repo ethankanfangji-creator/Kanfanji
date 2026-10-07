@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, History, Plus, ThumbsDown, ThumbsUp, X } from "lucide-react";
+import { History, Plus, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { useI18n } from "@/components/I18nProvider";
-import { DecisionStatusPicker } from "@/components/portfolio/DecisionStatusPicker";
+import { ViewingTagsPicker } from "@/components/portfolio/ViewingTagsPicker";
+import { BackHomeLink } from "@/components/ui/BackHomeLink";
 import { AI_CONSENT_VERSION } from "@/lib/ai-boundary/client";
 import {
   aiErrorUiCopyFromBoundary,
@@ -36,6 +37,9 @@ import {
   startOfLocalDayIso,
   titleFromTurns,
   upsertPortfolioSession,
+  collectFrequentViewingTags,
+  effectiveViewingTags,
+  viewingTagsPatch,
   type DecisionStatus,
   type PortfolioAskResult,
   type PortfolioChatTurn,
@@ -268,14 +272,15 @@ export function PortfolioAskApp() {
     if (turns.length > 0) setScopeHint(true);
   }
 
-  async function persistDecision(threadId: string, status: DecisionStatus | null) {
+  async function persistTags(threadId: string, tags: string[]) {
     const existing = listLocalThreads().find((row) => row.id === threadId);
     if (!existing || !threadVisibleToAccount(existing, userId)) return;
-    patchLocalThread(threadId, { decisionStatus: status });
+    const patch = viewingTagsPatch(tags);
+    patchLocalThread(threadId, patch);
     refreshThreads();
     track({
       name: "decision_status_changed",
-      props: { status: status ?? "none", surface: "ask" },
+      props: { status: patch.decisionStatus ?? "none", surface: "ask" },
     });
     const thread = listLocalThreads().find((row) => row.id === threadId);
     if (!thread || !userId || thread.id.startsWith("local_")) return;
@@ -553,13 +558,7 @@ export function PortfolioAskApp() {
     <div className="flex min-h-[100dvh] flex-col bg-[#FAFAF8] text-[#111]">
       <header className="sticky top-0 z-10 border-b border-black/8 bg-[#FAFAF8]/95 backdrop-blur">
         <div className="mx-auto flex max-w-2xl items-center gap-2 px-4 py-3">
-          <Link
-            href="/"
-            className="flex h-10 w-10 items-center justify-center rounded-2xl text-[#374151] hover:bg-black/5"
-            aria-label={p.backHome}
-          >
-            <ArrowLeft className="h-5 w-5" strokeWidth={2} />
-          </Link>
+          <BackHomeLink label={p.backHome} className="shrink-0" />
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-[17px] font-bold tracking-tight">{p.title}</h1>
             <p className="truncate text-[12px] text-[#6B7280]">
@@ -665,18 +664,31 @@ export function PortfolioAskApp() {
                           </div>
                           {thread ? (
                             <div className="mt-2">
-                              <DecisionStatusPicker
+                              <ViewingTagsPicker
                                 compact
-                                value={thread.decisionStatus ?? null}
-                                labels={{
-                                  label: p.decisionLabel,
-                                  none: p.decisionNone,
+                                value={effectiveViewingTags({
+                                  tags: thread.tags,
+                                  decisionStatus: thread.decisionStatus,
+                                })}
+                                frequentTags={collectFrequentViewingTags(threads, {
+                                  exclude: effectiveViewingTags({
+                                    tags: thread.tags,
+                                    decisionStatus: thread.decisionStatus,
+                                  }),
+                                })}
+                                displayLabels={{
                                   liked: p.decisionLiked,
                                   shortlist: p.decisionShortlist,
                                   passed: p.decisionPassed,
                                   revisit: p.decisionRevisit,
                                 }}
-                                onChange={(next) => void persistDecision(id, next)}
+                                labels={{
+                                  label: p.decisionLabel,
+                                  placeholder: p.tagsPlaceholder,
+                                  frequent: p.tagsFrequent,
+                                  addAria: p.tagsAddAria,
+                                }}
+                                onChange={(next) => void persistTags(id, next)}
                               />
                             </div>
                           ) : null}

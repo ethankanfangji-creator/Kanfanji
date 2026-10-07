@@ -7,6 +7,7 @@ const card: PortfolioFactCard = {
   address: "1 Main",
   updatedAt: "2026-10-02T00:00:00.000Z",
   decisionStatus: null,
+  tags: [],
   price: "1400000",
   layout: "3房",
   area: null,

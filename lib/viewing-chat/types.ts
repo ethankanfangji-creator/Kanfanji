@@ -237,10 +237,15 @@ export type ViewingChatThread = {
   /** Fingerprint of notes that produced the current report, if any. */
   reportNotesFingerprint?: string | null;
   /**
-   * Decision bucket for portfolio Q&A scope (liked / shortlist / passed / revisit).
-   * Not freeform feature tags — those stay in notes for AI to extract.
+   * Legacy decision bucket — still dual-written from suggestion tags for
+   * property_signals + older filters. Prefer `tags` for new reads.
    */
   decisionStatus?: import("@/lib/portfolio/types").DecisionStatus | null;
+  /**
+   * User labels / small conclusions about this home (freeform + suggestion ids).
+   * Shared vocabulary across homes so Ask can group (“太吵”, “備選”, …).
+   */
+  tags?: string[];
 };
 
 export const DEFAULT_QUESTION_BANK: Array<Omit<QuestionBankItem, "answer" | "justDiscussed">> = [

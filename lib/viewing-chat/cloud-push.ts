@@ -1,3 +1,9 @@
+import {
+  coerceViewingTags,
+  decisionStatusFromTags,
+} from "@/lib/portfolio/viewing-tags";
+import { coerceDecisionStatus } from "@/lib/portfolio/decision-status";
+
 export type CloudRow = {
   messages?: unknown[];
   revision?: number;
@@ -24,7 +30,12 @@ export function buildChatStatePayload(thread: {
   listingUrl?: string | null;
   reportNotesFingerprint?: string | null;
   decisionStatus?: string | null;
+  tags?: string[] | null;
 }) {
+  const tags = coerceViewingTags(thread.tags);
+  const decisionStatus =
+    coerceDecisionStatus(thread.decisionStatus) ??
+    (tags.length ? decisionStatusFromTags(tags) : null);
   return {
     v: 1 as const,
     normalizedAddress: thread.normalizedAddress ?? thread.address,
@@ -36,7 +47,8 @@ export function buildChatStatePayload(thread: {
     briefing: thread.briefing ?? null,
     listingUrl: thread.listingUrl?.trim() || null,
     reportNotesFingerprint: thread.reportNotesFingerprint ?? null,
-    decisionStatus: thread.decisionStatus ?? null,
+    decisionStatus,
+    tags,
     ...(thread.sitePin ? { sitePin: thread.sitePin } : {}),
     ...(thread.unitKey ? { unitKey: thread.unitKey } : {}),
     ...(thread.unitLabel ? { unitLabel: thread.unitLabel } : {}),

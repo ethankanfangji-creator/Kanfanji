@@ -57,7 +57,11 @@ import {
   canStartLocalViewing,
   FREE_VIEWING_LIMIT,
 } from "@/lib/viewing-wizard/free-tier";
-import { buildChatStatePayload, pushViewingThread } from "@/lib/viewing-chat/cloud-push";
+import {
+  buildChatStatePayload,
+  pushViewingThread,
+  withCloudSyncState,
+} from "@/lib/viewing-chat/cloud-push";
 import { appendChatMessages } from "@/lib/viewing-chat/append-messages";
 import { mergeMessagesForHydrate } from "@/lib/viewing-chat/merge-messages-hydrate";
 import { mergeChatMessages } from "@/lib/viewing-chat/merge-messages";
@@ -522,7 +526,8 @@ export function ViewingChatApp({
       },
     });
     if (result !== "synced") {
-      patchLocalThread(threadId, { cloud: { state: result } });
+      const latest = getLocalThread(threadId);
+      patchLocalThread(threadId, { cloud: withCloudSyncState(latest?.cloud, result) });
     }
     refreshLocal();
   }
@@ -751,7 +756,11 @@ export function ViewingChatApp({
         else setStatus(c.syncRetry);
       })
       .catch(() => {
-        patchLocalThread(thread.id, { cloud: { state: "failed" }, ownerUserId: userId });
+        const latest = getLocalThread(thread.id);
+        patchLocalThread(thread.id, {
+          cloud: withCloudSyncState(latest?.cloud, "failed"),
+          ownerUserId: userId,
+        });
         refreshLocal();
         setStatus(c.syncRetry);
       });

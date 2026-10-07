@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ViewingChatThread } from "@/lib/viewing-chat/types";
+import { filterThreadsForAccount } from "@/lib/viewing-chat/local-store";
 import {
   buildPortfolioCorpus,
   formatCorpusForPrompt,
@@ -134,5 +135,47 @@ describe("validateFactCards", () => {
   it("defaults shareComments when omitted", () => {
     const cards = validateFactCards([{ id: "ok_2", address: "B" }]);
     expect(cards[0].shareComments).toEqual([]);
+  });
+
+  it("does not put another account's leftover notes into the Ask corpus", () => {
+    const cards = buildPortfolioCorpus(
+      filterThreadsForAccount(
+        [
+          thread({
+            id: "alice-home",
+            address: "12 Secret Lane",
+            ownerUserId: "alice",
+            messages: [
+              {
+                id: "n1",
+                role: "user",
+                type: "text",
+                timestamp: "2026-10-02T00:00:00.000Z",
+                text: "預算只有 Alice 知道",
+              },
+            ],
+          }),
+          thread({
+            id: "bob-home",
+            address: "88 Shared St",
+            ownerUserId: "bob",
+            messages: [
+              {
+                id: "n2",
+                role: "user",
+                type: "text",
+                timestamp: "2026-10-02T00:00:00.000Z",
+                text: "Bob 的筆記",
+              },
+            ],
+          }),
+        ],
+        "bob",
+      ),
+    );
+    expect(cards.map((card) => card.id)).toEqual(["bob-home"]);
+    expect(cards[0].notesExcerpt).toContain("Bob 的筆記");
+    expect(JSON.stringify(cards)).not.toContain("Alice");
+    expect(JSON.stringify(cards)).not.toContain("Secret Lane");
   });
 });

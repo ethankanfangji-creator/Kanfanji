@@ -39,11 +39,13 @@ import { applyChatStateToLocal } from "@/lib/viewing-chat/chat-state";
 import {
   createLocalThread,
   deleteLocalThread,
+  filterThreadsForAccount,
   getLocalThread,
   listLocalThreads,
   patchLocalThread,
   saveLocalMessages,
   setLocalThreadPinned,
+  threadVisibleToAccount,
   upsertLocalThread,
 } from "@/lib/viewing-chat/local-store";
 import { getMediaBlob, removeMediaByThread } from "@/lib/viewing-chat/media-library";
@@ -214,9 +216,13 @@ export function ViewingChatApp({
   const threadCreations = useRef(new Map<string, Promise<void>>());
   const claimNoticeRef = useRef("");
 
+  const visibleThreads = useMemo(
+    () => filterThreadsForAccount(threads, userId),
+    [threads, userId],
+  );
   const active = useMemo(
-    () => threads.find((thread) => thread.id === activeId) ?? null,
-    [threads, activeId],
+    () => visibleThreads.find((thread) => thread.id === activeId) ?? null,
+    [visibleThreads, activeId],
   );
 
   useEffect(() => {
@@ -639,11 +645,7 @@ export function ViewingChatApp({
       ...(identity.unitLabel ? { unitLabel: identity.unitLabel } : {}),
       ...(identity.placeId ? { placeId: identity.placeId } : {}),
     };
-    const pool = listLocalThreads().filter((thread) =>
-      userId
-        ? thread.ownerUserId === userId || !thread.ownerUserId
-        : !thread.ownerUserId,
-    );
+    const pool = filterThreadsForAccount(listLocalThreads(), userId);
     const duplicate = pool.find(
       (thread) =>
         sameViewingAddress(thread.address, trimmed) ||
@@ -927,6 +929,8 @@ export function ViewingChatApp({
   }
 
   function selectThread(id: string) {
+    const found = listLocalThreads().find((item) => item.id === id);
+    if (found && !threadVisibleToAccount(found, userId)) return;
     if (id !== viewingId) {
       router.push(`/viewings/${id}`);
       return;
@@ -1105,7 +1109,7 @@ export function ViewingChatApp({
             setMediaOpen(true);
           }}
           mediaOpen={mediaOpen}
-          threads={threads}
+          threads={visibleThreads}
           activeId={activeId}
           onSelectThread={selectThread}
           onDeleteThread={deleteThread}
@@ -1250,7 +1254,7 @@ export function ViewingChatApp({
 
       <MobileHistoryDrawer
         open={historyOpen && isMobileViewport}
-        threads={threads}
+        threads={visibleThreads}
         activeId={activeId}
         onClose={closeHistoryDrawer}
         onSelectThread={selectThread}

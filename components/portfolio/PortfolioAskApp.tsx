@@ -51,8 +51,10 @@ import {
 } from "@/lib/portfolio/session-sync";
 import { filterHistoryThreads } from "@/lib/viewing-chat/history-filter";
 import {
+  filterThreadsForAccount,
   listLocalThreads,
   patchLocalThread,
+  threadVisibleToAccount,
 } from "@/lib/viewing-chat/local-store";
 import { buildChatStatePayload, pushViewingThread } from "@/lib/viewing-chat/cloud-push";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
@@ -212,14 +214,18 @@ export function PortfolioAskApp() {
     return () => subscription.unsubscribe();
   }, [refreshSessionList]);
 
+  const visibleThreads = useMemo(
+    () => filterThreadsForAccount(threads, userId),
+    [threads, userId],
+  );
   const scopedThreads = useMemo(
-    () => filterThreadsByScope(threads, scope),
-    [threads, scope],
+    () => filterThreadsByScope(visibleThreads, scope),
+    [visibleThreads, scope],
   );
   const cards = useMemo(() => buildPortfolioCorpus(scopedThreads), [scopedThreads]);
   const addressFiltered = useMemo(
-    () => filterHistoryThreads(threads, draftQuery).slice(0, 60),
-    [threads, draftQuery],
+    () => filterHistoryThreads(visibleThreads, draftQuery).slice(0, 60),
+    [visibleThreads, draftQuery],
   );
 
   const hiddenCount = showOlder ? 0 : Math.max(0, turns.length - VISIBLE_TURNS);
@@ -263,6 +269,8 @@ export function PortfolioAskApp() {
   }
 
   async function persistDecision(threadId: string, status: DecisionStatus | null) {
+    const existing = listLocalThreads().find((row) => row.id === threadId);
+    if (!existing || !threadVisibleToAccount(existing, userId)) return;
     patchLocalThread(threadId, { decisionStatus: status });
     refreshThreads();
     track({
@@ -638,7 +646,7 @@ export function PortfolioAskApp() {
                   </p>
                   <ul className="space-y-2">
                     {turn.matchedIds.map((id) => {
-                      const thread = threads.find((row) => row.id === id);
+                      const thread = visibleThreads.find((row) => row.id === id);
                       const title = shortenAddressLabel(
                         thread?.normalizedAddress || thread?.address || id,
                       );
@@ -714,7 +722,7 @@ export function PortfolioAskApp() {
                           className="font-semibold text-[#111] underline-offset-2 hover:underline"
                         >
                           {shortenAddressLabel(
-                            threads.find((row) => row.id === cite.viewingId)?.address ||
+                            visibleThreads.find((row) => row.id === cite.viewingId)?.address ||
                               cite.viewingId,
                           )}
                         </Link>

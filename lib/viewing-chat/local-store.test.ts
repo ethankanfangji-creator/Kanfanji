@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { createLocalThread, listLocalThreads, LocalStoreFullError, upsertLocalThread } from "./local-store";
+import {
+  createLocalThread,
+  filterThreadsForAccount,
+  listLocalThreads,
+  LocalStoreFullError,
+  threadVisibleToAccount,
+  upsertLocalThread,
+} from "./local-store";
 
 function memoryStorage() {
   const data = new Map<string, string>();
@@ -45,5 +52,28 @@ describe("local thread store", () => {
       metadata: null,
       ownerUserId: "user",
     })).toThrow(LocalStoreFullError);
+  });
+});
+
+describe("filterThreadsForAccount", () => {
+  const guest = { id: "g", ownerUserId: null };
+  const alice = { id: "a", ownerUserId: "alice" };
+  const bob = { id: "b", ownerUserId: "bob" };
+
+  it("hides another account's leftover threads from a signed-in user", () => {
+    expect(filterThreadsForAccount([guest, alice, bob], "bob").map((row) => row.id)).toEqual([
+      "g",
+      "b",
+    ]);
+  });
+
+  it("hides owned threads while signed out", () => {
+    expect(filterThreadsForAccount([guest, alice], null).map((row) => row.id)).toEqual(["g"]);
+  });
+
+  it("keeps unclaimed guest rows for the signed-in account", () => {
+    expect(threadVisibleToAccount(guest, "bob")).toBe(true);
+    expect(threadVisibleToAccount(alice, "bob")).toBe(false);
+    expect(threadVisibleToAccount(bob, "bob")).toBe(true);
   });
 });

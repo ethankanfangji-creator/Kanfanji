@@ -34,6 +34,7 @@ import {
   getLocalThread,
   patchLocalThread,
   saveLocalMessages,
+  threadVisibleToAccount,
   upsertLocalThread,
 } from "@/lib/viewing-chat/local-store";
 import { addMediaFile } from "@/lib/viewing-chat/media-library";
@@ -503,7 +504,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
         return;
       }
       const local = getLocalThread(viewingId);
-      if (!local) {
+      if (!local || !threadVisibleToAccount(local, uid)) {
         setMissing(true);
         setReady(true);
         return;

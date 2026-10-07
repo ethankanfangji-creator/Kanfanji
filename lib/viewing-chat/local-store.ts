@@ -92,6 +92,27 @@ export function listLocalThreads(): ViewingChatThread[] {
   });
 }
 
+/**
+ * Local threads visible to the current account.
+ * Signed-in users see their own rows plus unclaimed guest rows; signed-out
+ * users see only guest rows. Another account's leftover cache must stay hidden.
+ */
+export function threadVisibleToAccount(
+  thread: Pick<ViewingChatThread, "ownerUserId">,
+  userId: string | null | undefined,
+): boolean {
+  return userId
+    ? thread.ownerUserId === userId || !thread.ownerUserId
+    : !thread.ownerUserId;
+}
+
+export function filterThreadsForAccount<T extends Pick<ViewingChatThread, "ownerUserId">>(
+  threads: T[],
+  userId: string | null | undefined,
+): T[] {
+  return threads.filter((thread) => threadVisibleToAccount(thread, userId));
+}
+
 export function getLocalThread(id: string): ViewingChatThread | null {
   return readAll().find((t) => t.id === id) ?? null;
 }

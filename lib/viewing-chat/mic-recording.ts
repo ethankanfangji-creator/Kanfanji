@@ -13,6 +13,17 @@ export type MicRecorderLike = {
   requestData?: () => void;
 };
 
+/**
+ * DOM MediaRecorder handlers use BlobEvent; under strictFunctionTypes that is
+ * not assignable to our mock-friendly `{ data: Blob }` shape. Accept both and
+ * normalize at the boundary.
+ */
+type MicRecorderInput = MediaRecorder | MicRecorderLike;
+
+function asMicRecorderLike(recorder: MicRecorderInput): MicRecorderLike {
+  return recorder as MicRecorderLike;
+}
+
 /** Build a blob from recorded chunks; empty if nothing was captured. */
 export function blobFromChunks(chunks: BlobPart[], mimeType: string): Blob {
   return new Blob(chunks, { type: mimeType || "audio/webm" });
@@ -20,10 +31,10 @@ export function blobFromChunks(chunks: BlobPart[], mimeType: string): Blob {
 
 /** Wire timeslice collection onto a recorder (call before start). */
 export function attachMicDataCollector(
-  recorder: MicRecorderLike,
+  recorder: MicRecorderInput,
   chunks: BlobPart[],
 ): void {
-  recorder.ondataavailable = (event) => {
+  asMicRecorderLike(recorder).ondataavailable = (event) => {
     if (event.data?.size) chunks.push(event.data);
   };
 }
@@ -37,7 +48,7 @@ export function attachMicDataCollector(
  * dataavailable in a macrotask around onstop.
  */
 export function armMicStopCollector(
-  recorder: MicRecorderLike,
+  recorder: MicRecorderInput,
   options: {
     chunks: BlobPart[];
     mimeType: string;
@@ -53,6 +64,7 @@ export function armMicStopCollector(
     });
   const emptyRetryMs = options.emptyRetryMs ?? 80;
   const emptyRetryAttempts = options.emptyRetryAttempts ?? 4;
+  const mic = asMicRecorderLike(recorder);
 
   return new Promise<Blob>((resolve) => {
     let settled = false;
@@ -63,9 +75,9 @@ export function armMicStopCollector(
     };
 
     // Keep collecting (including the final chunk emitted on stop).
-    attachMicDataCollector(recorder, options.chunks);
+    attachMicDataCollector(mic, options.chunks);
 
-    recorder.onstop = () => {
+    mic.onstop = () => {
       const trySettle = (attempt: number) => {
         const blob = blobFromChunks(options.chunks, options.mimeType);
         if (blob.size > 0 || attempt >= emptyRetryAttempts) {
@@ -80,13 +92,14 @@ export function armMicStopCollector(
 }
 
 /** Flush pending timeslice data then stop. Safe if requestData is missing. */
-export function stopMicRecorder(recorder: MicRecorderLike): void {
+export function stopMicRecorder(recorder: MicRecorderInput): void {
+  const mic = asMicRecorderLike(recorder);
   try {
-    if (recorder.state === "recording" && typeof recorder.requestData === "function") {
-      recorder.requestData();
+    if (mic.state === "recording" && typeof mic.requestData === "function") {
+      mic.requestData();
     }
   } catch {
     // Some engines throw if requestData races with stop — ignore.
   }
-  recorder.stop();
+  mic.stop();
 }

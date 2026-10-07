@@ -6,7 +6,7 @@ import {
   readJsonObject,
   RequestValidationError,
 } from "@/lib/http/validation";
-import { mergeChatMessages } from "@/lib/viewing-chat/merge-messages";
+import { resolveThreadMessages } from "@/lib/viewing-chat/merge-messages";
 import { getViewingRole } from "@/lib/collaboration/server";
 import {
   assertChatBodySize,
@@ -87,7 +87,9 @@ export async function PUT(
     const existing = Array.isArray(current.data.messages)
       ? (current.data.messages as ChatMessage[])
       : [];
-    const merged = messages ? mergeChatMessages(existing, messages) : undefined;
+    const merged = messages
+      ? resolveThreadMessages({ isOwner, existing, incoming: messages })
+      : undefined;
     const nextChatState =
       isOwner && chatState
         ? mergeChatState(current.data.chat_state, chatState)

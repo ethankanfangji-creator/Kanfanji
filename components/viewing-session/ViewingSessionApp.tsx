@@ -33,7 +33,11 @@ import {
 } from "@/lib/viewing-chat/briefing";
 import { localPreferenceBlock } from "@/lib/viewing-chat/ai-preferences";
 import { applyChatStateToLocal } from "@/lib/viewing-chat/chat-state";
-import { buildChatStatePayload, pushViewingThread } from "@/lib/viewing-chat/cloud-push";
+import {
+  buildChatStatePayload,
+  pushViewingThreadWithConflictRetry,
+} from "@/lib/viewing-chat/cloud-push";
+import { localNotesAreAuthoritative } from "@/lib/viewing-chat/merge-messages";
 import {
   getLocalThread,
   listLocalThreads,
@@ -75,9 +79,12 @@ function consentSessionId(): string {
   return next;
 }
 
-async function hydrateViewingThread(threadId: string, ownerUserId: string) {
+async function hydrateViewingThread(
+  threadId: string,
+  ownerUserId: string,
+): Promise<{ ok: boolean; needsSync: boolean }> {
   const detail = await fetch(`/api/viewing-chat/threads/${threadId}`);
-  if (!detail.ok) return false;
+  if (!detail.ok) return { ok: false, needsSync: false };
   const row = (await detail.json()) as {
     id: string;
     address: string;
@@ -103,15 +110,24 @@ async function hydrateViewingThread(threadId: string, ownerUserId: string) {
   const restored = applyChatStateToLocal(base, row.chat_state);
   // Re-read after the network round-trip — user may have deleted notes meanwhile.
   const freshLocal = getLocalThread(threadId);
-  const mergedMessages = mergeMessagesForHydrate(
-    freshLocal?.messages ?? restored.messages ?? [],
-    row.messages ?? [],
-    freshLocal?.updatedAt ?? local?.updatedAt ?? restored.updatedAt,
-    row.updated_at,
-  );
-  const keepLocalClock =
-    Boolean(freshLocal?.updatedAt) &&
-    (freshLocal!.updatedAt > row.updated_at);
+  const localUpdatedAt =
+    freshLocal?.updatedAt ?? local?.updatedAt ?? restored.updatedAt;
+  const localCloudState = freshLocal?.cloud?.state ?? local?.cloud?.state;
+  const keepLocalNotes = localNotesAreAuthoritative({
+    hasLocalMessages: Boolean(freshLocal ?? local),
+    localUpdatedAt,
+    remoteUpdatedAt: row.updated_at,
+    localCloudState,
+  });
+  const localMessages = freshLocal?.messages ?? restored.messages ?? [];
+  const mergedMessages = keepLocalNotes
+    ? localMessages
+    : mergeMessagesForHydrate(
+        localMessages,
+        row.messages ?? [],
+        localUpdatedAt,
+        row.updated_at,
+      );
   upsertLocalThread({
     ...restored,
     address: row.address || restored.address,
@@ -119,15 +135,23 @@ async function hydrateViewingThread(threadId: string, ownerUserId: string) {
     report: row.report ?? restored.report,
     metadata: row.metadata ?? restored.metadata,
     // Keep the newer clock so a just-deleted local note is not treated as stale.
-    updatedAt: keepLocalClock ? freshLocal!.updatedAt : row.updated_at,
+    updatedAt: keepLocalNotes && (freshLocal ?? local)
+      ? (freshLocal ?? local)!.updatedAt
+      : row.updated_at,
     ownerUserId,
-    cloud: {
-      state: "synced",
-      lastSyncedAt: row.updated_at,
-      revision: row.revision,
-    },
+    cloud: keepLocalNotes
+      ? {
+          state: "syncing",
+          lastSyncedAt: (freshLocal ?? local)?.cloud?.lastSyncedAt ?? null,
+          revision: row.revision,
+        }
+      : {
+          state: "synced",
+          lastSyncedAt: row.updated_at,
+          revision: row.revision,
+        },
   });
-  return true;
+  return { ok: true, needsSync: keepLocalNotes };
 }
 
 function NoteMedia({ message }: { message: ChatMessage }) {
@@ -307,59 +331,45 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
     }
   }
 
+  async function flushCloudSync(ownerId: string | null) {
+    if (!ownerId) return false;
+    const current = getLocalThread(viewingId);
+    if (!current) return false;
+    const pushed = await pushViewingThreadWithConflictRetry({
+      threadId: viewingId,
+      address: current.address,
+      baseRevision: current.cloud?.revision,
+      previouslySynced:
+        current.cloud?.state === "synced" || typeof current.cloud?.revision === "number",
+      messages: current.messages,
+      chatState: buildChatStatePayload(current),
+      clientUpdatedAt: new Date().toISOString(),
+      report: current.report,
+      metadata: current.metadata,
+    });
+    if (pushed.status >= 200 && pushed.status < 300) {
+      patchLocalThread(viewingId, {
+        ownerUserId: ownerId,
+        cloud: {
+          state: "synced",
+          lastSyncedAt: new Date().toISOString(),
+          revision: pushed.revision,
+        },
+      });
+      refresh();
+      return true;
+    }
+    if (pushed.status === 409) {
+      patchLocalThread(viewingId, { cloud: { state: "failed" } });
+    }
+    return false;
+  }
+
   function queueSync() {
     if (!userId) return;
     window.clearTimeout(syncTimer.current);
     syncTimer.current = window.setTimeout(() => {
-      void (async () => {
-        const pushOnce = async () => {
-          const current = getLocalThread(viewingId);
-          if (!current) return null;
-          return {
-            current,
-            pushed: await pushViewingThread({
-              threadId: viewingId,
-              address: current.address,
-              baseRevision: current.cloud?.revision,
-              previouslySynced:
-                current.cloud?.state === "synced" ||
-                typeof current.cloud?.revision === "number",
-              messages: current.messages,
-              chatState: buildChatStatePayload(current),
-              clientUpdatedAt: new Date().toISOString(),
-              report: current.report,
-              metadata: current.metadata,
-            }),
-          };
-        };
-
-        let result = await pushOnce();
-        if (!result) return;
-        // Conflict: adopt remote revision and re-push LOCAL messages (incl. deletes).
-        // Never merge remote messages over local — that resurrects deleted notes.
-        if (result.pushed.status === 409 && typeof result.pushed.revision === "number") {
-          patchLocalThread(viewingId, {
-            cloud: {
-              state: "syncing",
-              lastSyncedAt: result.current.cloud?.lastSyncedAt,
-              revision: result.pushed.revision,
-            },
-          });
-          result = await pushOnce();
-          if (!result) return;
-        }
-        if (result.pushed.status >= 200 && result.pushed.status < 300) {
-          patchLocalThread(viewingId, {
-            ownerUserId: userId,
-            cloud: {
-              state: "synced",
-              lastSyncedAt: new Date().toISOString(),
-              revision: result.pushed.revision,
-            },
-          });
-          refresh();
-        }
-      })();
+      void flushCloudSync(userId);
     }, 600);
   }
 
@@ -368,7 +378,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
     if (!current) return false;
     if (current.cloud?.state === "synced") return true;
     const previouslySynced = typeof current.cloud?.revision === "number";
-    const pushed = await pushViewingThread({
+    const pushed = await pushViewingThreadWithConflictRetry({
       threadId: viewingId,
       address: current.address,
       baseRevision: current.cloud?.revision,
@@ -583,12 +593,17 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
       if (cancelled) return;
 
       if (uid) {
-        const ok = await hydrateViewingThread(viewingId, uid);
+        const hydrated = await hydrateViewingThread(viewingId, uid);
         if (cancelled) return;
-        if (!ok && !getLocalThread(viewingId)) {
+        if (!hydrated.ok && !getLocalThread(viewingId)) {
           setMissing(true);
           setReady(true);
           return;
+        }
+        if (hydrated.needsSync) {
+          window.setTimeout(() => {
+            void flushCloudSync(uid);
+          }, 0);
         }
       } else if (!getLocalThread(viewingId)) {
         setMissing(true);
@@ -988,6 +1003,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
       const data = (await response.json()) as {
         report?: ChatReportSnapshot;
         notesFingerprint?: string;
+        revision?: number;
         error?: string;
       };
       if (!response.ok || !data.report) {
@@ -998,6 +1014,15 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
       patchLocalThread(viewingId, {
         report: data.report,
         reportNotesFingerprint: fingerprintNext,
+        ...(typeof data.revision === "number"
+          ? {
+              cloud: {
+                state: "synced" as const,
+                lastSyncedAt: new Date().toISOString(),
+                revision: data.revision,
+              },
+            }
+          : {}),
       });
       // Keep report as a product — do not append AI report bubbles into the notes stream.
       setShownReport({ ...data.report, notesFingerprint: fingerprintNext });

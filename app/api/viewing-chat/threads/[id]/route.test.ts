@@ -137,6 +137,39 @@ describe("PUT /api/viewing-chat/threads/:id", () => {
     expect(patch.chat_state.pinned).toBe(true);
   });
 
+  it("writes the owner's note snapshot so edits and deletes persist", async () => {
+    const leftover = {
+      ...message,
+      id: "m2",
+      text: "should be deleted",
+    };
+    query.maybeSingle.mockResolvedValueOnce({
+      data: {
+        id: "11111111-1111-4111-8111-111111111111",
+        user_id: "owner-1",
+        messages: [message, leftover],
+        revision: 2,
+        chat_state: { v: 1 },
+      },
+      error: null,
+    });
+    const edited = { ...message, text: "採光其實不好" };
+    const response = await PUT(
+      new Request("http://test/threads/id", {
+        method: "PUT",
+        body: JSON.stringify({
+          baseRevision: 2,
+          messages: [edited],
+          chatState: { v: 1 },
+        }),
+      }),
+      { params: Promise.resolve({ id: "11111111-1111-4111-8111-111111111111" }) },
+    );
+    expect(response.status).toBe(200);
+    const patch = query.update.mock.calls.at(-1)?.[0] as { messages: Array<{ id: string; text: string }> };
+    expect(patch.messages).toEqual([edited]);
+  });
+
   it("requires a base revision when the row already exists", async () => {
     const response = await PUT(
       new Request("http://test/threads/id", {

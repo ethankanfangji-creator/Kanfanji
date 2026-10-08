@@ -10,10 +10,20 @@ export async function deleteViewingThread(input: {
     deleteLocalThread(input.id);
     return "local";
   }
-  const response = await (input.fetchImpl ?? fetch)(`/api/viewing-chat/threads/${input.id}`, {
-    method: "DELETE",
-  });
-  if (!response.ok) return "failed";
-  deleteLocalThread(input.id);
-  return "removed";
+  try {
+    const response = await (input.fetchImpl ?? fetch)(`/api/viewing-chat/threads/${input.id}`, {
+      method: "DELETE",
+    });
+    // 404: never created, already deleted elsewhere, or claim never landed.
+    // Treat it as gone so history delete cannot get stuck on a local-only row.
+    if (response.status === 404) {
+      deleteLocalThread(input.id);
+      return "removed";
+    }
+    if (!response.ok) return "failed";
+    deleteLocalThread(input.id);
+    return "removed";
+  } catch {
+    return "failed";
+  }
 }

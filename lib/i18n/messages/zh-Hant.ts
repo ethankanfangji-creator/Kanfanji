@@ -1047,6 +1047,7 @@ const zhHant: Messages = {
     reportHighlight: "最大亮點",
     reportBiggestQuestion: "最大疑問",
     reportOverall: "整體",
+    reportYourRating: "你的總評",
     reportVerdict: "初步判斷",
     reportNextSteps: "下一步",
     reportMetaViewingDate: "看房日期",

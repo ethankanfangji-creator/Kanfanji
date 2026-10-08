@@ -3,11 +3,12 @@ import { worldPoint } from "@/lib/map-pin";
 const TILE = 256;
 
 /**
- * OpenStreetMap raster tile URL (same source as PinDropMap).
- * Prefer client rendering for list covers — OSM tiles work without GOOGLE_MAPS_API_KEY.
+ * App-proxied OSM raster tile (see `/api/map/tile`).
+ * Do not point the browser at tile.openstreetmap.org — it 403s many apps.
  */
 export function osmTileUrl(z: number, x: number, y: number): string {
-  return `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
+  const absX = ((x % 2 ** z) + 2 ** z) % 2 ** z;
+  return `/api/map/tile?z=${z}&x=${absX}&y=${y}`;
 }
 
 export function mapTilesForCenter(input: {

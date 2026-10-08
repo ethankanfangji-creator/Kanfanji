@@ -128,7 +128,11 @@ const SHARE_SECTION_MAX_CHARS = 8_000;
 const SHARE_LIST_LIMIT = 20;
 
 function scrubShareText(value: string, max = 300): string {
-  return value.replace(/[\u0000-\u001F]/g, "").slice(0, max);
+  // Keep newlines/tabs — wiping them collapses markdown sections into one line,
+  // so `## 標題` + body becomes one giant heading and paragraphs disappear.
+  return value
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "")
+    .slice(0, max);
 }
 
 function scrubOptionalSection(value: unknown): string | undefined {

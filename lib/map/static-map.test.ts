@@ -7,9 +7,7 @@ import {
 
 describe("osm tiles", () => {
   it("builds tile URLs", () => {
-    expect(osmTileUrl(16, 10557, 22085)).toBe(
-      "https://tile.openstreetmap.org/16/10557/22085.png",
-    );
+    expect(osmTileUrl(16, 10557, 22085)).toBe("/api/map/tile?z=16&x=10557&y=22085");
   });
 
   it("places the center near the middle of the tile mosaic", () => {

@@ -77,6 +77,18 @@ describe("chat state round trip", () => {
     expect(loaded.decisionStatus).toBe("liked");
   });
 
+  it("round-trips overallRating and clears invalid values", () => {
+    const withRating = { ...thread, overallRating: 4 };
+    const saved = buildChatStatePayload(withRating);
+    expect(saved.overallRating).toBe(4);
+    const loaded = applyChatStateToLocal(thread, saved);
+    expect(loaded.overallRating).toBe(4);
+    const cleared = mergeChatState(saved, { v: 1, overallRating: null });
+    expect(cleared.overallRating).toBeNull();
+    const invalid = mergeChatState(saved, { v: 1, overallRating: 9 });
+    expect(invalid.overallRating).toBeNull();
+  });
+
   it("round-trips unit identity fields", () => {
     const withUnit = {
       ...thread,

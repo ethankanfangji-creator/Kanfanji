@@ -99,7 +99,7 @@ describe("ViewingsIndex", () => {
     expect(screen.queryByText("Quiet Home")).toBeNull();
   });
 
-  it("uses OSM tile map cover when pin coords exist", () => {
+  it("uses proxied OSM tile map cover when pin coords exist", () => {
     const { container } = render(
       <I18nProvider>
         <ViewingsIndex
@@ -117,9 +117,7 @@ describe("ViewingsIndex", () => {
         />
       </I18nProvider>,
     );
-    const tile = container.querySelector(
-      'img[src^="https://tile.openstreetmap.org/"]',
-    );
+    const tile = container.querySelector('img[src^="/api/map/tile?"]');
     expect(tile).toBeTruthy();
   });
 });

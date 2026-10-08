@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { latLngFromMapClick, panCenter, worldPoint } from "@/lib/map-pin";
+import { osmTileUrl } from "@/lib/map/static-map";
 
 const TILE = 256;
 const MIN_ZOOM = 15;
@@ -173,12 +174,11 @@ export function PinDropMap({
         }}
       >
         {tiles.map((tile) => (
-          // OSM tiles are a third-party grid; next/image cannot rewrite them.
           // eslint-disable-next-line @next/next/no-img-element
           <img
             key={`${tile.x}:${tile.y}:${view.zoom}`}
             alt=""
-            src={`https://tile.openstreetmap.org/${view.zoom}/${tile.x}/${tile.y}.png`}
+            src={osmTileUrl(view.zoom, tile.x, tile.y)}
             className="pointer-events-none absolute h-64 w-64 max-w-none select-none"
             style={{ left: tile.left, top: tile.top }}
             draggable={false}
@@ -200,14 +200,7 @@ export function PinDropMap({
           />
         ) : null}
       </div>
-      <a
-        href="https://www.openstreetmap.org/copyright"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="block px-3 py-1.5 text-[10px] text-[#6B7280] underline-offset-2 hover:underline"
-      >
-        © OpenStreetMap
-      </a>
+      <p className="px-3 py-1.5 text-[10px] text-[#6B7280]">© OpenStreetMap</p>
     </div>
   );
 }

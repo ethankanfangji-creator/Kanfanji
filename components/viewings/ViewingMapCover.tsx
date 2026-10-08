@@ -6,7 +6,7 @@ import { mapTilesForCenter, osmTileUrl } from "@/lib/map/static-map";
 
 const ZOOM = 16;
 
-/** Non-interactive OSM tile cover with pin on the confirmed coordinate. */
+/** Non-interactive map cover via app-proxied OSM tiles. */
 export function ViewingMapCover({ lat, lng }: { lat: number; lng: number }) {
   const frameRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 320, height: 180 });

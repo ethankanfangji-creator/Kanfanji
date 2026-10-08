@@ -10,6 +10,7 @@ import {
   Loader2,
   Pencil,
   Share2,
+  Star,
   ThumbsDown,
   ThumbsUp,
   Trash2,
@@ -1217,6 +1218,12 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
     );
   }
 
+  function setOverallRating(value: number | null) {
+    patchLocalThread(viewingId, { overallRating: value });
+    refresh();
+    queueSync();
+  }
+
   function setReportFeedback(value: ChatReportFeedback) {
     if (!shownReport) return;
     if (shownReport.feedback === value) {
@@ -1699,6 +1706,35 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
         <h2 id="report-heading" className="text-[13px] font-bold tracking-wide">
           {c.reportTitle}
         </h2>
+        <div className="mt-3 rounded-2xl bg-white px-4 py-3 shadow-[0_4px_16px_rgba(0,0,0,0.04)]">
+          <p className="text-[12px] font-bold text-[#374151]">{c.reportYourRating}</p>
+          <div className="mt-1.5 flex items-center gap-1" role="group" aria-label={c.reportYourRating}>
+            {[1, 2, 3, 4, 5].map((n) => {
+              const active = (thread?.overallRating ?? 0) >= n;
+              return (
+                <button
+                  key={n}
+                  type="button"
+                  aria-label={`${c.reportYourRating}: ${n} / 5`}
+                  aria-pressed={(thread?.overallRating ?? null) === n}
+                  onClick={() =>
+                    setOverallRating(thread?.overallRating === n ? null : n)
+                  }
+                  className="inline-flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center rounded-full active:bg-black/5"
+                >
+                  <Star
+                    className={`h-6 w-6 ${
+                      active
+                        ? "fill-[#B45309] text-[#B45309]"
+                        : "fill-none text-[#D1D5DB]"
+                    }`}
+                    aria-hidden
+                  />
+                </button>
+              );
+            })}
+          </div>
+        </div>
         {!shownReport ? (
           <p className="mt-2 text-[13px] text-[#6B7280]">{c.reportNone}</p>
         ) : (

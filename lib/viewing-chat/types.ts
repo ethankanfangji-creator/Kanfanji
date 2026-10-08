@@ -247,6 +247,11 @@ export type ViewingChatThread = {
    * Shared vocabulary across homes so Ask can group (“太吵”, “備選”, …).
    */
   tags?: string[];
+  /**
+   * User's own 1–5 overall rating for this home (not the AI report scorecard).
+   * Null / missing = not rated yet.
+   */
+  overallRating?: number | null;
 };
 
 export const DEFAULT_QUESTION_BANK: Array<Omit<QuestionBankItem, "answer" | "justDiscussed">> = [

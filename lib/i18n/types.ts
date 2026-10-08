@@ -1017,6 +1017,8 @@ export type Messages = {
     reportHighlight: string;
     reportBiggestQuestion: string;
     reportOverall: string;
+    /** User's own 1–5 rating (separate from AI scorecard). */
+    reportYourRating: string;
     reportVerdict: string;
     reportNextSteps: string;
     reportMetaViewingDate: string;

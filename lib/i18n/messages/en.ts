@@ -1068,6 +1068,7 @@ const en: Messages = {
     reportHighlight: "Biggest strength",
     reportBiggestQuestion: "Biggest question",
     reportOverall: "Overall",
+    reportYourRating: "Your rating",
     reportVerdict: "Preliminary verdict",
     reportNextSteps: "Next steps",
     reportMetaViewingDate: "Viewing date",

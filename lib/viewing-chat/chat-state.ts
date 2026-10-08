@@ -3,6 +3,7 @@ import {
   coerceViewingTags,
   decisionStatusFromTags,
 } from "@/lib/portfolio/viewing-tags";
+import { coerceOverallRating } from "./overall-rating";
 import type { ViewingChatThread } from "./types";
 import { buildChatStatePayload } from "./cloud-push";
 
@@ -23,6 +24,7 @@ const STATE_KEYS = [
   "reportNotesFingerprint",
   "decisionStatus",
   "tags",
+  "overallRating",
 ] as const;
 
 type StateKey = (typeof STATE_KEYS)[number];
@@ -77,6 +79,10 @@ export function mergeChatState(existing: unknown, incoming: Record<string, unkno
       if (Object.hasOwn(incoming, "tags") && !Object.hasOwn(incoming, "decisionStatus")) {
         next.decisionStatus = decisionStatusFromTags(tags);
       }
+      continue;
+    }
+    if (key === "overallRating") {
+      next.overallRating = coerceOverallRating(value);
       continue;
     }
     if (value == null) continue;

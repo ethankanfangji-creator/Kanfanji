@@ -1047,6 +1047,7 @@ const zhHans: Messages = {
     reportHighlight: "最大亮点",
     reportBiggestQuestion: "最大疑问",
     reportOverall: "整体",
+    reportYourRating: "你的总评",
     reportVerdict: "初步判断",
     reportNextSteps: "下一步",
     reportMetaViewingDate: "看房日期",

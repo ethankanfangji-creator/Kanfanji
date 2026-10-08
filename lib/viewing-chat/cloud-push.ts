@@ -3,6 +3,7 @@ import {
   decisionStatusFromTags,
 } from "@/lib/portfolio/viewing-tags";
 import { coerceDecisionStatus } from "@/lib/portfolio/decision-status";
+import { coerceOverallRating } from "@/lib/viewing-chat/overall-rating";
 
 export type CloudRow = {
   messages?: unknown[];
@@ -31,11 +32,13 @@ export function buildChatStatePayload(thread: {
   reportNotesFingerprint?: string | null;
   decisionStatus?: string | null;
   tags?: string[] | null;
+  overallRating?: number | null;
 }) {
   const tags = coerceViewingTags(thread.tags);
   const decisionStatus =
     coerceDecisionStatus(thread.decisionStatus) ??
     (tags.length ? decisionStatusFromTags(tags) : null);
+  const overallRating = coerceOverallRating(thread.overallRating);
   return {
     v: 1 as const,
     normalizedAddress: thread.normalizedAddress ?? thread.address,
@@ -49,6 +52,7 @@ export function buildChatStatePayload(thread: {
     reportNotesFingerprint: thread.reportNotesFingerprint ?? null,
     decisionStatus,
     tags,
+    overallRating,
     ...(thread.sitePin ? { sitePin: thread.sitePin } : {}),
     ...(thread.unitKey ? { unitKey: thread.unitKey } : {}),
     ...(thread.unitLabel ? { unitLabel: thread.unitLabel } : {}),

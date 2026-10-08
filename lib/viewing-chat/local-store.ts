@@ -6,6 +6,7 @@ import type { PropertyIntel } from "@/lib/property-intel/types";
 import type { PropertyReport } from "@/lib/property-facts/report-types";
 import type { ChatMessage, ChatReportSnapshot, ViewingChatThread } from "./types";
 import { isExpiredGuestThread } from "./guest-retention";
+import { coerceOverallRating } from "./overall-rating";
 
 const STORAGE_KEY = "kanfangji.viewingChat.threads.v1";
 
@@ -52,6 +53,7 @@ function readAll(): ViewingChatThread[] {
       turnWarnings: Array.isArray(thread.turnWarnings) ? thread.turnWarnings : [],
       decisionStatus: thread.decisionStatus ?? null,
       tags: Array.isArray(thread.tags) ? thread.tags : [],
+      overallRating: coerceOverallRating(thread.overallRating),
     }));
   } catch {
     return [];

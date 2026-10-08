@@ -1066,6 +1066,7 @@ const th: Messages = {
     reportHighlight: "จุดเด่นที่สุด",
     reportBiggestQuestion: "คำถามใหญ่ที่สุด",
     reportOverall: "ภาพรวม",
+    reportYourRating: "คะแนนของคุณ",
     reportVerdict: "ข้อสรุปเบื้องต้น",
     reportNextSteps: "ขั้นตอนถัดไป",
     reportMetaViewingDate: "วันที่ชมบ้าน",

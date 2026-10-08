@@ -1,7 +1,11 @@
 "use client";
 
 import { ReportMarkdown } from "@/components/viewing-chat/ReportMarkdown";
-import { formatStars, hasSectionedReport } from "@/lib/viewing-chat/report-sections";
+import {
+  formatStars,
+  hasSectionedReport,
+  stripLeadingMarkdownHeading,
+} from "@/lib/viewing-chat/report-sections";
 import type { ChatReportMeta, ChatReportSnapshot } from "@/lib/viewing-chat/types";
 
 export type ReportSectionLabels = {
@@ -99,12 +103,14 @@ export function ReportSectionsView({
           ))}
         </dl>
       ) : null}
-      {/* Markdown sections: AI-written ## headings only — no fixed UI titles. */}
-      <MarkdownBlock markdown={report.overview} />
-      <MarkdownBlock markdown={report.interior} />
-      <MarkdownBlock markdown={report.outdoorLand} />
-      <MarkdownBlock markdown={report.transitLifestyle} />
-      <MarkdownBlock markdown={report.pricing} />
+      <MarkdownSection title={labels.overview} markdown={report.overview} />
+      <MarkdownSection title={labels.interior} markdown={report.interior} />
+      <MarkdownSection title={labels.outdoorLand} markdown={report.outdoorLand} />
+      <MarkdownSection
+        title={labels.transitLifestyle}
+        markdown={report.transitLifestyle}
+      />
+      <MarkdownSection title={labels.pricing} markdown={report.pricing} />
       <BulletSection title={labels.pros} items={report.pros} tone="pros" />
       <BulletSection title={labels.risks} items={report.risks} tone="risks" />
       {showScores && scores ? (
@@ -143,15 +149,21 @@ export function ReportSectionsView({
           ) : null}
         </div>
       ) : null}
-      <MarkdownBlock markdown={report.verdict} />
+      <MarkdownSection title={labels.verdict} markdown={report.verdict} />
       <BulletSection title={labels.nextSteps} items={report.nextSteps} tone="next" />
     </div>
   );
 }
 
-function MarkdownBlock({ markdown }: { markdown?: string }) {
-  if (!markdown?.trim()) return null;
-  return <ReportMarkdown text={markdown} />;
+function MarkdownSection({ title, markdown }: { title: string; markdown?: string }) {
+  const body = markdown?.trim() ? stripLeadingMarkdownHeading(markdown) : "";
+  if (!body) return null;
+  return (
+    <div>
+      <p className="mb-1 text-[12px] font-bold text-[#374151]">{title}</p>
+      <ReportMarkdown text={body} />
+    </div>
+  );
 }
 
 function BulletSection({

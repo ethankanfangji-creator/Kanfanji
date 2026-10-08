@@ -6,6 +6,7 @@ import {
   normalizeReportMeta,
   normalizeReportScores,
   reportFollowUpsForLegacy,
+  stripLeadingMarkdownHeading,
 } from "./report-sections";
 
 describe("report-sections", () => {
@@ -49,6 +50,22 @@ describe("report-sections", () => {
       highlight: "土地大",
       biggestQuestion: "價格合理嗎",
     });
+  });
+
+  it("strips leading markdown headings from section bodies", () => {
+    expect(
+      stripLeadingMarkdownHeading("## 物業基本概況\n\nLand-forward home."),
+    ).toBe("Land-forward home.");
+    expect(
+      stripLeadingMarkdownHeading(
+        "# 1167 Victory Drive — 看房評估報告\n## 室內觀察\n\nBright kitchen.",
+      ),
+    ).toBe("Bright kitchen.");
+    expect(stripLeadingMarkdownHeading("No heading here.")).toBe("No heading here.");
+    // Legacy share scrub removed newlines — keep body, only drop `#` markers.
+    expect(
+      stripLeadingMarkdownHeading("## 物業基本概況1968年建造，廚房翻新。"),
+    ).toBe("物業基本概況1968年建造，廚房翻新。");
   });
 
   it("assembles markdown with scorecard and without 目前卡點", () => {

@@ -122,7 +122,9 @@ describe("buildChatReportPublication", () => {
     expect(snapshot.version).toBe(3);
     expect(snapshot.title).toBe("1167 Victory Drive — 看房評估報告");
     expect(snapshot.overview).toContain("採光佳");
+    expect(snapshot.overview).toContain("\n");
     expect(snapshot.interior).toContain("廚房新");
+    expect(snapshot.interior).toMatch(/^## 室內\n/);
     expect(snapshot.pros).toEqual(["light", "yard", "kitchen", "quiet"]);
     expect(snapshot.risks).toEqual(["noise", "HOA"]);
     expect(snapshot.scores?.items).toHaveLength(2);

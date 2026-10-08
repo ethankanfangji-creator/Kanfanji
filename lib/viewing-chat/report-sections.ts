@@ -75,6 +75,26 @@ export function formatStars(score: number): string {
   return `${"★".repeat(full)}${half ? "½" : ""}${"☆".repeat(Math.max(0, 5 - full - (half ? 1 : 0)))}`;
 }
 
+/**
+ * Drop leading ATX headings so UI section labels are not duplicated when the
+ * model also wrote `## 物業基本概況` (or a full `# report title`) into the body.
+ *
+ * Only peels headings that end at a newline. For legacy share snapshots that
+ * lost newlines in scrubbing (`## 標題正文…` on one line), strip the `#`
+ * markers only so the body is not eaten as a heading.
+ */
+export function stripLeadingMarkdownHeading(markdown: string): string {
+  const text = markdown.replace(/\r\n/g, "\n").trim();
+  if (!text) return "";
+  const strippedBreaks = text.replace(/^(#{1,3}[ \t]+[^\n]+\n+)+/, "").trim();
+  if (strippedBreaks !== text) return strippedBreaks || text;
+  // Legacy share scrub removed newlines (`## 標題正文` on one line).
+  if (!text.includes("\n") && /^#{1,3}[ \t]+/.test(text)) {
+    return text.replace(/^(#{1,3}[ \t]+)+/, "").trim() || text;
+  }
+  return text;
+}
+
 export function hasSectionedReport(
   report: Pick<
     ChatReportSnapshot,

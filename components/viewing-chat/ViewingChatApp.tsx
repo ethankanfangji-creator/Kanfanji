@@ -65,7 +65,13 @@ import {
 import { appendChatMessages } from "@/lib/viewing-chat/append-messages";
 import { mergeMessagesForHydrate } from "@/lib/viewing-chat/merge-messages-hydrate";
 import { mergeChatMessages } from "@/lib/viewing-chat/merge-messages";
+import { ClaimLimitDialog } from "@/components/viewing-chat/ClaimLimitDialog";
 import { GuestLimitDialog } from "@/components/viewing-chat/GuestLimitDialog";
+import {
+  consumeClaimLimitNotice,
+  hasBlockedLimitThreads,
+} from "@/lib/viewing-chat/claim-limit-notice";
+import { startProCheckout } from "@/lib/viewing-chat/start-pro-checkout";
 import { syncWithRetry } from "@/lib/viewing-chat/cloud-sync";
 import { sweepExpiredGuestThreads } from "@/lib/viewing-chat/sweep-guest-threads";
 import type { ChatMessage, ViewingChatThread } from "@/lib/viewing-chat/types";
@@ -202,6 +208,7 @@ export function ViewingChatApp({
     droppedPin: { lat: number; lng: number } | null;
   } | null>(null);
   const [proLimitOpen, setProLimitOpen] = useState(false);
+  const [claimLimitOpen, setClaimLimitOpen] = useState(false);
   const [guestLimitOpen, setGuestLimitOpen] = useState(false);
   const [addressCue, setAddressCue] = useState(false);
   const [addressFocusToken, setAddressFocusToken] = useState(0);
@@ -217,7 +224,6 @@ export function ViewingChatApp({
   const [userId, setUserId] = useState<string | null>(null);
   const syncTimers = useRef(new Map<string, number>());
   const threadCreations = useRef(new Map<string, Promise<void>>());
-  const claimNoticeRef = useRef("");
 
   const visibleThreads = useMemo(
     () => filterThreadsForAccount(threads, userId),
@@ -256,9 +262,10 @@ export function ViewingChatApp({
       if (viewingId) await hydrateViewingThread(viewingId, userId);
       if (cancelled) return;
       refreshLocal();
-      if (claim.blocked > 0 && !sessionStorage.getItem("kf.claim.notice")) {
-        sessionStorage.setItem("kf.claim.notice", "1");
-        setStatus(claimNoticeRef.current);
+      const overLimit =
+        claim.blocked > 0 || hasBlockedLimitThreads(userId);
+      if (consumeClaimLimitNotice(overLimit)) {
+        setClaimLimitOpen(true);
       }
       if (viewingId) {
         setActiveId(viewingId);
@@ -1047,8 +1054,6 @@ export function ViewingChatApp({
     refreshLocal();
   }
 
-  claimNoticeRef.current = c.claimLimitNotice;
-
   return (
     <div
       ref={shellRef}
@@ -1065,6 +1070,29 @@ export function ViewingChatApp({
         />
       ) : null}
 
+      {claimLimitOpen ? (
+        <ClaimLimitDialog
+          title={c.claimLimitTitle}
+          body={c.claimLimitBody}
+          upgradeLabel={c.claimLimitUpgrade}
+          manageLabel={c.claimLimitManage}
+          laterLabel={c.claimLimitLater}
+          onLater={() => setClaimLimitOpen(false)}
+          onManage={() => {
+            setClaimLimitOpen(false);
+            setHistoryOpen(true);
+            router.push("/");
+          }}
+          onUpgrade={() => {
+            setClaimLimitOpen(false);
+            void (async () => {
+              const result = await startProCheckout("claim_limit");
+              if (!result.ok) setStatus(result.error || t.paywall.syncFailed);
+            })();
+          }}
+        />
+      ) : null}
+
       {proLimitOpen ? (
         <GuestLimitDialog
           title={c.proLimitTitle}
@@ -1075,21 +1103,8 @@ export function ViewingChatApp({
           onConfirm={() => {
             setProLimitOpen(false);
             void (async () => {
-              try {
-                const response = await fetch("/api/create-checkout-session", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ trigger: "paywall" }),
-                });
-                const payload = (await response.json()) as { url?: string; error?: string };
-                if (payload.url) {
-                  window.location.href = payload.url;
-                  return;
-                }
-                setStatus(payload.error || t.paywall.syncFailed);
-              } catch {
-                setStatus(t.paywall.syncFailed);
-              }
+              const result = await startProCheckout("paywall");
+              if (!result.ok) setStatus(result.error || t.paywall.syncFailed);
             })();
           }}
         />

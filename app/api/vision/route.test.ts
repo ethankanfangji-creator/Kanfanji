@@ -92,6 +92,19 @@ describe("POST /api/vision AI boundary", () => {
     expect(await response.json()).toMatchObject({ jobId: "media-1" });
   });
 
+  it("returns a caption in caption mode", async () => {
+    completion.mockResolvedValue({
+      choices: [{ message: { content: "Ceiling shows a brown water stain." } }],
+    });
+    const response = await POST(request(body({ mode: "caption", locale: "en" })));
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      mode: "caption",
+      caption: "Ceiling shows a brown water stain.",
+      jobId: "media-1",
+    });
+  });
+
   it("embeds English output-language lock in the vision prompt", async () => {
     await POST(request(body({ locale: "en" })));
     expect(completion).toHaveBeenCalled();

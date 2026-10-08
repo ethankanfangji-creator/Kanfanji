@@ -189,7 +189,7 @@ async function removeViewingObjects(
   viewingId: string,
 ) {
   const bucket = admin.storage.from("viewing-media");
-  for (const folder of ["photos", "videos", "audios"]) {
+  for (const folder of ["photos", "videos", "audios", "files"]) {
     const prefix = `${userId}/${viewingId}/${folder}`;
     const names: string[] = [];
     for (let offset = 0; ; offset += 100) {

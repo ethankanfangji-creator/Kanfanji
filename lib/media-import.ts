@@ -1,6 +1,8 @@
 export const MEDIA_IMPORT_LIMITS = {
   photoBytes: 25 * 1024 * 1024,
   videoBytes: 250 * 1024 * 1024,
+  /** Generic attach-any-file ceiling (docs, zip, etc.). */
+  fileBytes: 50 * 1024 * 1024,
 } as const;
 
 export type ImportedMediaKind = "photo" | "video";
@@ -11,6 +13,28 @@ export function takeInputFiles(
   const files = Array.from(input.files ?? []);
   input.value = "";
   return files;
+}
+
+/** True when a composer file attachment should become a first-class video note. */
+export function isVideoAttachment(file: Pick<File, "type" | "name">): boolean {
+  if (file.type.toLowerCase().startsWith("video/")) return true;
+  return /\.(mp4|webm|mov|m4v|mkv)$/i.test(file.name || "");
+}
+
+/** Formats the explicit「讀檔」extractor can turn into note text. */
+export function isReadableAttachment(file: Pick<File, "type" | "name">): boolean {
+  const mime = (file.type || "").toLowerCase();
+  const name = file.name || "";
+  if (mime === "application/pdf" || /\.pdf$/i.test(name)) return true;
+  if (
+    mime === "text/plain" ||
+    mime === "text/markdown" ||
+    mime === "text/csv" ||
+    mime === "application/json"
+  ) {
+    return true;
+  }
+  return /\.(txt|md|csv|json)$/i.test(name);
 }
 
 export function validateImportedMedia(file: File, kind: ImportedMediaKind): string | null {

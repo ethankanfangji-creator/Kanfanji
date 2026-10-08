@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it } from "vitest";
-import { mapMediaImportErrorCode, takeInputFiles } from "./media-import";
+import {
+  isReadableAttachment,
+  isVideoAttachment,
+  mapMediaImportErrorCode,
+  takeInputFiles,
+} from "./media-import";
 
 describe("takeInputFiles", () => {
   it("snapshots Safari's live FileList before resetting the input", () => {
@@ -21,6 +26,33 @@ describe("takeInputFiles", () => {
 
     expect(takeInputFiles(input)).toEqual([photo]);
     expect(input.files).toHaveLength(0);
+  });
+});
+
+describe("isVideoAttachment", () => {
+  it("detects MIME and common extensions", () => {
+    expect(
+      isVideoAttachment({ type: "video/mp4", name: "clip.bin" }),
+    ).toBe(true);
+    expect(isVideoAttachment({ type: "", name: "walkthrough.MOV" })).toBe(true);
+    expect(isVideoAttachment({ type: "application/pdf", name: "a.pdf" })).toBe(
+      false,
+    );
+  });
+});
+
+describe("isReadableAttachment", () => {
+  it("allows pdf and plain text only", () => {
+    expect(isReadableAttachment({ type: "application/pdf", name: "a.pdf" })).toBe(
+      true,
+    );
+    expect(isReadableAttachment({ type: "text/plain", name: "n.txt" })).toBe(true);
+    expect(
+      isReadableAttachment({
+        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        name: "a.docx",
+      }),
+    ).toBe(false);
   });
 });
 

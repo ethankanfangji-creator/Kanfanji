@@ -14,6 +14,7 @@ describe("isViewingMediaPath", () => {
     ).toBe(true);
     expect(isViewingMediaPath("user-1/viewing-1/videos/a.mp4")).toBe(true);
     expect(isViewingMediaPath("user-1/viewing-1/audios/a.webm")).toBe(true);
+    expect(isViewingMediaPath("user-1/viewing-1/files/doc.pdf")).toBe(true);
   });
 
   it("rejects short or unknown folders", () => {

@@ -20,7 +20,7 @@ async function requireAuthedClient() {
   return { supabase, user };
 }
 
-export type MediaFolder = "photos" | "videos" | "audios";
+export type MediaFolder = "photos" | "videos" | "audios" | "files";
 
 export async function uploadViewingFile(
   viewingId: string,

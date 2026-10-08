@@ -375,6 +375,7 @@ export type Messages = {
     emptyFile: string;
     photoTooLarge: string;
     videoTooLarge: string;
+    fileTooLarge: string;
   };
   offline: {
     offline: string;
@@ -966,6 +967,8 @@ export type Messages = {
     generatingReport: string;
     /** Shown when Generate report is disabled because there are no user notes yet. */
     generateReportNeedNotes: string;
+    /** Shown when Generate report is disabled because the report already matches current notes. */
+    generateReportUpToDate: string;
     briefingTitle: string;
     briefingLoading: string;
     briefingLoadingStageLocate: string;
@@ -986,6 +989,19 @@ export type Messages = {
     noteDeleteConfirm: string;
     noteSave: string;
     noteCancel: string;
+    /** Background vision caption for a photo note. */
+    autoCaptioning: string;
+    autoCaptionLabel: string;
+    /** Explicit extract action on an attached file note. */
+    readFile: string;
+    readingFile: string;
+    readFileFailed: string;
+    readFileMissing: string;
+    readFileHint: string;
+    fileAttachOnly: string;
+    fileAttachOnlyHint: string;
+    openAttachment: string;
+    downloadAttachment: string;
     reportTitle: string;
     reportStale: string;
     reportUnseen: string;
@@ -1064,6 +1080,7 @@ export type Messages = {
     attachVideo: string;
     photo: string;
     importAudio: string;
+    /** Composer empty-state hint (text / mic / photo / file). */
     emptyComposer: string;
     micDenied: string;
     /** Voice note saved but Whisper transcription failed. */
@@ -1201,6 +1218,11 @@ export type Messages = {
     proLimitUpgrade: string;
     deleteFailed: string;
     claimLimitNotice: string;
+    claimLimitTitle: string;
+    claimLimitBody: string;
+    claimLimitUpgrade: string;
+    claimLimitManage: string;
+    claimLimitLater: string;
     viewingNotFound: string;
     syncNewer: string;
     initialReportTitle: string;
@@ -1224,6 +1246,8 @@ export type Messages = {
     shareReopen: string;
     sharePublish: string;
     sharePublishDone: string;
+    /** After regenerating a report while an active share link exists. */
+    sharePublishAfterReport: string;
     shareCopy: string;
     shareCopyFailed: string;
     shareCopied: string;

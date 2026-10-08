@@ -26,6 +26,7 @@ export type ChatMessageType =
   | "text"
   | "audio"
   | "photo"
+  | "video"
   | "file"
   | "fill"
   | "new_card"
@@ -111,7 +112,7 @@ export type ChatReportSnapshot = {
   generatedAt: string;
   /** Fingerprint of user notes used to build this report — mismatch means stale. */
   notesFingerprint?: string;
-  /** Image/video refs from notes at generation time (for report gallery). */
+  /** Image/video/file refs from notes at generation time (for report gallery). */
   mediaRefs?: ChatMediaRef[];
   /** Monotonic version written to viewing_report_versions when persisted. */
   version?: number;
@@ -297,6 +298,7 @@ export function messageReplyPreview(message: ChatMessage, maxLen = 80): string {
     message.transcript?.trim() ||
     message.text?.trim() ||
     (message.type === "photo" ? "📷" : "") ||
+    (message.type === "video" ? "▶" : "") ||
     (message.type === "file" ? `📎 ${message.fileName || "file"}` : "") ||
     message.question?.trim() ||
     "";
@@ -320,6 +322,7 @@ export function canReplyToMessage(message: ChatMessage): boolean {
     message.text?.trim() ||
       message.transcript?.trim() ||
       message.type === "photo" ||
+      message.type === "video" ||
       message.type === "file" ||
       message.question?.trim(),
   );

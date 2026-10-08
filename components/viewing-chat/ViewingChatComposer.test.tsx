@@ -159,7 +159,9 @@ describe("ViewingChatComposer permission onboarding", () => {
     await user.click(screen.getByRole("button", { name: labels.recording }));
 
     expect(screen.queryByText(permissionCopy.titleMic)).toBeNull();
-    expect(screen.queryByText(permissionCopy.importInstead)).toBeNull();
+    expect(
+      await screen.findByRole("button", { name: permissionCopy.importInstead }),
+    ).toBeTruthy();
     expect(textarea.value).toBe("keep this note");
   });
 
@@ -174,7 +176,9 @@ describe("ViewingChatComposer permission onboarding", () => {
     await user.click(screen.getByRole("button", { name: labels.recording }));
 
     expect(screen.queryByText(permissionCopy.titleMic)).toBeNull();
-    expect(screen.queryByText(permissionCopy.importInstead)).toBeNull();
+    expect(
+      await screen.findByRole("button", { name: permissionCopy.importInstead }),
+    ).toBeTruthy();
     await waitFor(() => expect(requestSpy).toHaveBeenCalled());
   });
 
@@ -194,42 +198,20 @@ describe("ViewingChatComposer permission onboarding", () => {
     expect(screen.getByRole("button", { name: labels.stop })).toBeTruthy();
   });
 
-  it("opens the camera capture input so the browser can ask for permission", async () => {
+  it("opens the photo picker from a two-item attach menu", async () => {
     const user = userEvent.setup();
-    const adapter = createMockMediaPermissionAdapter({
-      statuses: { camera: "prompt" },
-    });
-    renderComposer(adapter);
+    renderComposer();
 
-    const camera = screen.getByTestId("camera-capture-input") as HTMLInputElement;
-    const clickSpy = vi.spyOn(camera, "click");
-
-    await user.click(screen.getByRole("button", { name: labels.attach }));
-    await user.click(screen.getByRole("menuitem", { name: labels.camera }));
-
-    expect(screen.queryByText(permissionCopy.titleCamera)).toBeNull();
-    await waitFor(() => expect(clickSpy).toHaveBeenCalled());
-  });
-
-  it("offers gallery import when the camera is already blocked", async () => {
-    const user = userEvent.setup();
-    const adapter = createMockMediaPermissionAdapter({
-      statuses: { camera: "blocked" },
-    });
-    renderComposer(adapter);
-
-    await user.click(screen.getByRole("button", { name: labels.attach }));
-    await user.click(screen.getByRole("menuitem", { name: labels.camera }));
-
-    expect(await screen.findByText(permissionCopy.status.blocked)).toBeTruthy();
-    const gallery = screen.getByTestId(
-      "photo-gallery-input",
-    ) as HTMLInputElement;
+    const gallery = screen.getByTestId("photo-gallery-input") as HTMLInputElement;
     const clickSpy = vi.spyOn(gallery, "click");
-    await user.click(
-      screen.getByRole("button", { name: permissionCopy.importInstead }),
-    );
-    expect(clickSpy).toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: labels.attach }));
+    expect(screen.getByRole("menuitem", { name: labels.uploadImage })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: labels.uploadFile })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: labels.uploadVideo })).toBeNull();
+
+    await user.click(screen.getByRole("menuitem", { name: labels.uploadImage }));
+    await waitFor(() => expect(clickSpy).toHaveBeenCalled());
   });
 
   it("rejects oversized audio imports without clearing text", async () => {

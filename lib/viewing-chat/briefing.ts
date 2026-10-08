@@ -205,6 +205,7 @@ export function notesFingerprint(messages: ChatMessage[]): string {
         message.transcript?.trim() ||
         message.text?.trim() ||
         (message.type === "photo" ? `photo:${message.media?.[0]?.id ?? message.id}` : "") ||
+        (message.type === "video" ? `video:${message.media?.[0]?.id ?? message.id}` : "") ||
         (message.type === "audio" ? `audio:${message.media?.[0]?.id ?? message.id}` : "") ||
         (message.type === "file" ? `file:${message.fileName ?? message.id}` : "") ||
         "";

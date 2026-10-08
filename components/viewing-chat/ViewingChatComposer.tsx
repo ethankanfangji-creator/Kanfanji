@@ -1,14 +1,12 @@
 "use client";
 
 import {
-  Camera,
   FileUp,
   ImagePlus,
   Mic,
   Plus,
   Send,
   Square,
-  Video,
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -19,9 +17,9 @@ import type { PermissionCopy } from "@/components/media/PermissionPreflight";
 import { selectSupportedAudioMimeType } from "@/components/media/useMediaCapture";
 import { AI_LIMITS } from "@/lib/ai-boundary/config";
 import { MEDIA_IMPORT_LIMITS } from "@/lib/media-import";
+
 import {
   createBrowserMediaPermissionAdapter,
-  isBlockingPermissionStatus,
   markCaptureExplained,
   type MediaPermissionAdapter,
   type MediaPermissionStatus,
@@ -53,6 +51,7 @@ export type ChatComposerLabels = {
   imageBadType?: string;
   emptyFile?: string;
   videoTooLarge?: string;
+  fileTooLarge?: string;
   replyCancel?: string;
   replyingTo?: string;
   processing?: string;
@@ -110,9 +109,7 @@ export function ViewingChatComposer({
   mediaAdapter?: MediaPermissionAdapter;
   edgeToBottom?: boolean;
 }) {
-  const cameraRef = useRef<HTMLInputElement>(null);
   const imageRef = useRef<HTMLInputElement>(null);
-  const videoRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const audioImportRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -217,17 +214,6 @@ export function ViewingChatComposer({
     };
   }, [attachOpen]);
 
-  function showPermissionBanner(
-    status: MediaPermissionStatus,
-    fallback: "audio" | "photo",
-  ) {
-    setPermissionBanner({
-      status,
-      fallback,
-      message: permissionCopy.status[status] || labels.micDenied,
-    });
-  }
-
   async function beginRecording() {
     setPermissionBanner(null);
     setError(null);
@@ -244,6 +230,11 @@ export function ViewingChatComposer({
     });
     if (!requested.ok) {
       setRecording(false);
+      setPermissionBanner({
+        status: requested.status,
+        fallback: "audio",
+        message: permissionCopy.status[requested.status] || labels.micDenied,
+      });
       return;
     }
 
@@ -270,27 +261,13 @@ export function ViewingChatComposer({
     await beginRecording();
   }
 
-  async function openCameraFlow() {
+  function openPhotoPicker() {
     setError(null);
     setAttachOpen(false);
     setPermissionBanner(null);
     if (busy || recording) return;
-
-    const media = mediaRef.current;
-    let status: MediaPermissionStatus = "prompt";
-    if (media.isMediaDevicesSupported()) {
-      status = await media.query("camera");
-    }
-
-    // Permanently blocked — offer gallery instead of a dead OS picker.
-    if (isBlockingPermissionStatus(status)) {
-      showPermissionBanner(status, "photo");
-      return;
-    }
-
-    // Let the browser/OS ask for camera when the capture input opens.
-    markCaptureExplained("video");
-    cameraRef.current?.click();
+    // No capture= attribute — OS sheet offers camera or album.
+    imageRef.current?.click();
   }
 
   function focusTextFallback() {
@@ -384,8 +361,11 @@ export function ViewingChatComposer({
         setError(labels.videoTooLarge || labels.empty);
         return;
       }
+    } else if (picked.size > MEDIA_IMPORT_LIMITS.fileBytes) {
+      setError(labels.fileTooLarge || labels.empty);
+      return;
     }
-    // Video and other docs travel as file attachments
+    // Any other type is attach-only; session promotes video/* to a video note.
     setFile(picked);
     setImage(null);
     setPermissionBanner(null);
@@ -467,33 +447,9 @@ export function ViewingChatComposer({
           className="absolute bottom-[calc(100%+8px)] left-0 z-20 flex min-w-[9.5rem] flex-col overflow-hidden rounded-2xl border border-black/8 bg-white py-1 shadow-[0_8px_28px_rgba(0,0,0,0.12)]"
         >
           <AttachItem
-            label={labels.camera}
-            onClick={() => void openCameraFlow()}
-            icon={<Camera className="h-4 w-4" />}
-          />
-          <AttachItem
-            label={labels.uploadImage}
-            onClick={() => {
-              setAttachOpen(false);
-              imageRef.current?.click();
-            }}
+            label={labels.uploadImage || labels.camera}
+            onClick={openPhotoPicker}
             icon={<ImagePlus className="h-4 w-4" />}
-          />
-          <AttachItem
-            label={labels.importAudio}
-            onClick={() => {
-              setAttachOpen(false);
-              audioImportRef.current?.click();
-            }}
-            icon={<FileUp className="h-4 w-4" />}
-          />
-          <AttachItem
-            label={labels.uploadVideo || "Video"}
-            onClick={() => {
-              setAttachOpen(false);
-              videoRef.current?.click();
-            }}
-            icon={<Video className="h-4 w-4" />}
           />
           <AttachItem
             label={labels.uploadFile}
@@ -528,10 +484,10 @@ export function ViewingChatComposer({
           aria-label={
             processingHint || labels.processing || labels.uploading || "…"
           }
-          className="flex min-h-[var(--touch-target)] max-w-[7.5rem] items-center gap-1.5 px-1.5 text-[10px] font-semibold leading-tight text-[#1D4ED8]"
+          className="flex min-h-[var(--touch-target)] max-w-[7.5rem] items-center gap-1.5 px-1.5 text-[10px] font-semibold leading-tight text-[#4B5563]"
         >
           <span
-            className="inline-block h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-[#1D4ED8]/20 border-t-[#1D4ED8]"
+            className="inline-block h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-black/15 border-t-[#1A1A1A]"
             aria-hidden
           />
           <span className="min-w-0 truncate animate-pulse">
@@ -635,19 +591,6 @@ export function ViewingChatComposer({
       )}
 
       <input
-        ref={cameraRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        data-testid="camera-capture-input"
-        onChange={(event) => {
-          applyPickedFile(event.target.files?.[0]);
-          event.target.value = "";
-          setAttachOpen(false);
-        }}
-      />
-      <input
         ref={imageRef}
         type="file"
         accept="image/jpeg,image/png,image/webp,image/heic,image/*"
@@ -672,21 +615,11 @@ export function ViewingChatComposer({
         }}
       />
       <input
-        ref={videoRef}
-        type="file"
-        accept="video/mp4,video/webm,video/quicktime,video/*"
-        className="hidden"
-        onChange={(event) => {
-          applyPickedFile(event.target.files?.[0]);
-          event.target.value = "";
-          setAttachOpen(false);
-        }}
-      />
-      <input
         ref={fileRef}
         type="file"
-        accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.txt,.m4a,.mp3,.wav,.webm,.mp4,.mov"
+        accept="*/*"
         className="hidden"
+        data-testid="file-attach-input"
         onChange={(event) => {
           applyPickedFile(event.target.files?.[0]);
           event.target.value = "";
@@ -717,11 +650,11 @@ export function ViewingChatComposer({
 
       {processing && !processingHint && !localMicProcessing ? (
         <p
-          className="mb-1.5 flex items-center gap-1.5 px-1 text-[11px] font-semibold text-[#1D4ED8]"
+          className="mb-1.5 flex items-center gap-1.5 px-1 text-[11px] font-semibold text-[#4B5563]"
           role="status"
         >
           <span
-            className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-[#1D4ED8]/20 border-t-[#1D4ED8]"
+            className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-black/15 border-t-[#1A1A1A]"
             aria-hidden
           />
           <span className="animate-pulse">

@@ -2,13 +2,15 @@ import { userNotesOnly } from "@/lib/viewing-chat/briefing";
 import type { BriefingFoundFact } from "@/lib/viewing-chat/briefing-facts";
 import type { ChatMediaRef, ChatMessage } from "@/lib/viewing-chat/types";
 
-/** Collect image/video media from user notes for the report gallery. */
+/** Collect image/video/file media from user notes for the report gallery. */
 export function collectReportMediaRefs(messages: ChatMessage[]): ChatMediaRef[] {
   const seen = new Set<string>();
   const refs: ChatMediaRef[] = [];
   for (const message of userNotesOnly(messages)) {
     for (const item of message.media ?? []) {
-      if (item.kind !== "image" && item.kind !== "video") continue;
+      if (item.kind !== "image" && item.kind !== "video" && item.kind !== "file") {
+        continue;
+      }
       const key = item.path || item.id;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -22,34 +24,35 @@ export function collectReportMediaRefs(messages: ChatMessage[]): ChatMediaRef[] 
 export function notesTranscript(messages: ChatMessage[]): string {
   return userNotesOnly(messages)
     .map((message) => {
-      const caption =
-        message.transcript?.trim() ||
-        message.text?.trim() ||
-        message.analysis?.trim() ||
-        "";
       const mediaKind = message.media?.[0]?.kind;
       const isPhoto = message.type === "photo" || mediaKind === "image";
-      const isVideo = mediaKind === "video";
+      const isVideo = message.type === "video" || mediaKind === "video";
+      const bits = [
+        message.transcript?.trim(),
+        message.text?.trim(),
+        message.analysis?.trim(),
+      ].filter((item): item is string => Boolean(item));
+      const detail = [...new Set(bits)].join(" — ");
       // Never emit bare "[照片]" / "[影片]" — models copy those tokens into the report body.
       if (isPhoto) {
-        const detail = caption || message.analysis?.trim() || "";
         return detail
           ? `- (現場照片說明) ${detail}`
           : "- (現場照片，無文字說明；請勿在報告正文寫「照片」占位)";
       }
       if (isVideo) {
-        const detail = caption || message.analysis?.trim() || "";
         return detail
           ? `- (現場影片說明) ${detail}`
           : "- (現場影片，無文字說明；請勿在報告正文寫「影片」占位)";
       }
       if (message.type === "audio") {
-        return caption ? `- ${caption}` : "- (語音筆記)";
+        return detail ? `- ${detail}` : "- (語音筆記)";
       }
       if (message.type === "file") {
-        return `- (檔案：${message.fileName || caption || "file"})`;
+        return detail
+          ? `- (檔案：${message.fileName || "file"}) ${detail}`
+          : `- (檔案：${message.fileName || "file"})`;
       }
-      return caption ? `- ${caption}` : "";
+      return detail ? `- ${detail}` : "";
     })
     .filter(Boolean)
     .join("\n")

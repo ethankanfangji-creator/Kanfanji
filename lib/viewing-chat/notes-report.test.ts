@@ -73,7 +73,7 @@ describe("notes-only report inputs", () => {
       ],
     });
     const fileVideo = createUserMessage({
-      type: "file",
+      type: "video",
       fileName: "clip.mp4",
       media: [
         {
@@ -86,8 +86,41 @@ describe("notes-only report inputs", () => {
         },
       ],
     });
-    const refs = collectReportMediaRefs([photo, fileVideo]);
-    expect(refs.map((item) => item.kind)).toEqual(["image", "video"]);
+    const doc = createUserMessage({
+      type: "file",
+      fileName: "hoa.pdf",
+      media: [
+        {
+          id: "m-doc",
+          kind: "file",
+          name: "hoa.pdf",
+          mime: "application/pdf",
+          size: 3,
+          path: "u/v/files/hoa.pdf",
+        },
+      ],
+    });
+    const refs = collectReportMediaRefs([photo, fileVideo, doc]);
+    expect(refs.map((item) => item.kind)).toEqual(["image", "video", "file"]);
+  });
+
+  it("describes video notes without placeholder tokens", () => {
+    const video = createUserMessage({
+      type: "video",
+      media: [
+        {
+          id: "m3",
+          kind: "video",
+          name: "clip.mp4",
+          mime: "video/mp4",
+          size: 2,
+          path: "v2",
+        },
+      ],
+    });
+    const transcript = notesTranscript([video]);
+    expect(transcript).not.toMatch(/\[影片\]/);
+    expect(transcript).toContain("無文字說明");
   });
 
   it("moves negotiation phrasing out of risks into followUps", () => {

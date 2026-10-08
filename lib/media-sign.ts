@@ -1,6 +1,6 @@
 /**
  * Signed URL helpers for private `viewing-media` objects.
- * Paths are ownerId/viewingId/{photos|videos|audios}/filename — never public URLs.
+ * Paths are ownerId/viewingId/{photos|videos|audios|files}/filename — never public URLs.
  */
 
 export const MEDIA_SIGNED_TTL_SECONDS = 60 * 60; // 1 hour (app playback)
@@ -10,7 +10,12 @@ export function isViewingMediaPath(path: string): boolean {
   const parts = path.replace(/^\/+/, "").split("/").filter(Boolean);
   if (parts.length < 4) return false;
   const folder = parts[2];
-  return folder === "photos" || folder === "videos" || folder === "audios";
+  return (
+    folder === "photos" ||
+    folder === "videos" ||
+    folder === "audios" ||
+    folder === "files"
+  );
 }
 
 /** Owner folder must match auth user unless admin/service signs for share. */

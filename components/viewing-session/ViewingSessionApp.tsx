@@ -2,17 +2,37 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Pencil, Share2, ThumbsDown, ThumbsUp, Trash2, X } from "lucide-react";
+import {
+  Check,
+  Download,
+  ExternalLink,
+  FileSearch,
+  Loader2,
+  Pencil,
+  Share2,
+  ThumbsDown,
+  ThumbsUp,
+  Trash2,
+  X,
+} from "lucide-react";
 import { useI18n } from "@/components/I18nProvider";
 import { ViewingTagsPicker } from "@/components/portfolio/ViewingTagsPicker";
 import { BackHomeLink } from "@/components/ui/BackHomeLink";
 import { ReportSectionsView } from "@/components/viewing-chat/ReportSectionsView";
 import { ShareReportCommentsPanel } from "@/components/viewing-chat/ShareReportCommentsPanel";
+import { ClaimLimitDialog } from "@/components/viewing-chat/ClaimLimitDialog";
 import { ShareReportDialog } from "@/components/viewing-chat/ShareReportDialog";
 import { ViewingChatComposer } from "@/components/viewing-chat/ViewingChatComposer";
+import { claimAccountThreads } from "@/lib/viewing-chat/claim-account";
+import {
+  consumeClaimLimitNotice,
+  hasBlockedLimitThreads,
+} from "@/lib/viewing-chat/claim-limit-notice";
+import { startProCheckout } from "@/lib/viewing-chat/start-pro-checkout";
 import { useChatMediaUrl } from "@/components/viewing-chat/useChatMediaUrl";
 import { BriefingLoadingPanel } from "@/components/viewing-session/BriefingLoadingPanel";
 import { AI_CONSENT_VERSION } from "@/lib/ai-boundary/client";
+import { blobToDataUrl, normalizeImageForAi } from "@/lib/ai-boundary/browser";
 import { track } from "@/lib/analytics/client";
 import {
   collectFrequentViewingTags,
@@ -53,10 +73,12 @@ import {
   mediaRefFromAudioBlob,
   patchMessageTranscript,
 } from "@/lib/viewing-chat/append-audio-note";
-import { putEphemeralMedia } from "@/lib/viewing-chat/ephemeral-media";
-import { addMediaFile } from "@/lib/viewing-chat/media-library";
+import { getEphemeralMedia, putEphemeralMedia } from "@/lib/viewing-chat/ephemeral-media";
+import { guestDaysLeft } from "@/lib/viewing-chat/guest-retention";
+import { addMediaFile, getMediaBlob } from "@/lib/viewing-chat/media-library";
 import { submitAiFeedback } from "@/lib/viewing-chat/submit-ai-feedback";
 import { uploadViewingFile, appendViewingPath } from "@/lib/media";
+import { isReadableAttachment, isVideoAttachment } from "@/lib/media-import";
 import { getSupabase } from "@/lib/supabase";
 import {
   createUserMessage,
@@ -154,6 +176,10 @@ async function hydrateViewingThread(
   return { ok: true, needsSync: keepLocalNotes };
 }
 
+/** Compact note footer actions — same visual weight, keeps timestamp optically centered. */
+const noteActionIconClass =
+  "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[#6B7280] hover:bg-black/5 hover:text-[#1A1A1A]";
+
 function NoteMedia({ message }: { message: ChatMessage }) {
   const ref = message.media?.[0] ?? null;
   const { url } = useChatMediaUrl(ref);
@@ -162,7 +188,7 @@ function NoteMedia({ message }: { message: ChatMessage }) {
     // eslint-disable-next-line @next/next/no-img-element
     return <img src={url} alt="" className="mt-2 max-h-56 w-full rounded-xl object-cover" />;
   }
-  if (kind === "video" && url) {
+  if ((message.type === "video" || kind === "video") && url) {
     return <video className="mt-2 max-h-56 w-full rounded-xl" controls preload="metadata" src={url} />;
   }
   if (message.type === "audio" && url) {
@@ -171,18 +197,109 @@ function NoteMedia({ message }: { message: ChatMessage }) {
   return null;
 }
 
-function ReportGallery({ refs }: { refs: NonNullable<ChatReportSnapshot["mediaRefs"]> }) {
+function NoteFileActions({
+  message,
+  openLabel,
+  downloadLabel,
+}: {
+  message: ChatMessage;
+  openLabel: string;
+  downloadLabel: string;
+}) {
+  const ref = message.media?.[0] ?? null;
+  const { url } = useChatMediaUrl(ref);
+  if (!url) return null;
+  const name = ref?.name || message.fileName || "file";
+  return (
+    <>
+      <a
+        href={url}
+        target="_blank"
+        rel="noreferrer"
+        aria-label={openLabel}
+        title={openLabel}
+        className={noteActionIconClass}
+      >
+        <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+      </a>
+      <a
+        href={url}
+        download={name}
+        aria-label={downloadLabel}
+        title={downloadLabel}
+        className={noteActionIconClass}
+      >
+        <Download className="h-3.5 w-3.5" aria-hidden />
+      </a>
+    </>
+  );
+}
+
+function ReportGallery({
+  refs,
+  openLabel,
+  downloadLabel,
+}: {
+  refs: NonNullable<ChatReportSnapshot["mediaRefs"]>;
+  openLabel?: string;
+  downloadLabel?: string;
+}) {
   return (
     <div className="flex gap-2 overflow-x-auto pb-1">
       {refs.map((item) => (
-        <ReportGalleryItem key={item.path || item.id} item={item} />
+        <ReportGalleryItem
+          key={item.path || item.id}
+          item={item}
+          openLabel={openLabel}
+          downloadLabel={downloadLabel}
+        />
       ))}
     </div>
   );
 }
 
-function ReportGalleryItem({ item }: { item: NonNullable<ChatReportSnapshot["mediaRefs"]>[number] }) {
+function ReportGalleryItem({
+  item,
+  openLabel,
+  downloadLabel,
+}: {
+  item: NonNullable<ChatReportSnapshot["mediaRefs"]>[number];
+  openLabel?: string;
+  downloadLabel?: string;
+}) {
   const { url } = useChatMediaUrl(item);
+  if (item.kind === "file") {
+    return (
+      <div className="flex h-20 min-w-[9rem] shrink-0 flex-col justify-center gap-1 rounded-lg bg-black/5 px-2.5 py-2">
+        <p className="truncate text-[11px] font-semibold text-[#111]">{item.name || "file"}</p>
+        {url ? (
+          <div className="flex items-center gap-0.5">
+            <a
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={openLabel || "Open"}
+              title={openLabel || "Open"}
+              className={noteActionIconClass}
+            >
+              <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+            </a>
+            <a
+              href={url}
+              download={item.name || "file"}
+              aria-label={downloadLabel || "Download"}
+              title={downloadLabel || "Download"}
+              className={noteActionIconClass}
+            >
+              <Download className="h-3.5 w-3.5" aria-hidden />
+            </a>
+          </div>
+        ) : (
+          <p className="text-[10px] text-[#9CA3AF]">…</p>
+        )}
+      </div>
+    );
+  }
   if (!url) {
     return (
       <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-lg bg-black/5 text-[11px] text-[#6B7280]">
@@ -212,6 +329,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
   const [status, setStatus] = useState("");
   const [noteBusy, setNoteBusy] = useState(false);
   const [noteProcessingHint, setNoteProcessingHint] = useState<string | null>(null);
+  const [mediaBusyIds, setMediaBusyIds] = useState<Record<string, "caption" | "read">>({});
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
   const [feedbackPrompt, setFeedbackPrompt] = useState<null | "briefing" | "report">(null);
@@ -221,6 +339,9 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
   const [shareBusy, setShareBusy] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
+  const [sharePublishHint, setSharePublishHint] = useState(false);
+  const [guestSaveHint, setGuestSaveHint] = useState(false);
+  const [claimLimitOpen, setClaimLimitOpen] = useState(false);
   const syncTimer = useRef(0);
   const notesEndRef = useRef<HTMLDivElement>(null);
 
@@ -232,11 +353,13 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
     () => (thread ? notesFingerprint(thread.messages) : ""),
     [thread],
   );
+  const reportFingerprint =
+    shownReport?.notesFingerprint ?? thread?.reportNotesFingerprint ?? null;
   const reportStale = Boolean(
-    shownReport &&
-      fingerprint &&
-      (shownReport.notesFingerprint ?? thread?.reportNotesFingerprint) &&
-      (shownReport.notesFingerprint ?? thread?.reportNotesFingerprint) !== fingerprint,
+    shownReport && fingerprint && reportFingerprint && reportFingerprint !== fingerprint,
+  );
+  const reportUpToDate = Boolean(
+    shownReport && fingerprint && reportFingerprint === fingerprint,
   );
 
   function refresh() {
@@ -664,9 +787,132 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
     notesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [notes.length]);
 
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    void (async () => {
+      const claim = await claimAccountThreads(userId);
+      if (cancelled) return;
+      const overLimit = claim.blocked > 0 || hasBlockedLimitThreads(userId);
+      if (consumeClaimLimitNotice(overLimit)) {
+        setClaimLimitOpen(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  function patchNoteFields(
+    messageId: string,
+    patch: Partial<Pick<ChatMessage, "text" | "analysis" | "transcript">>,
+  ) {
+    const latest = getLocalThread(viewingId);
+    if (!latest) return;
+    const nextMessages = latest.messages.map((item) =>
+      item.id === messageId ? { ...item, ...patch } : item,
+    );
+    const next = saveLocalMessages(viewingId, nextMessages);
+    if (next) setThread(next);
+    markReportStaleFromNotes();
+    queueSync();
+  }
+
+  async function runPhotoAutocaption(messageId: string, image: File) {
+    setMediaBusyIds((prev) => ({ ...prev, [messageId]: "caption" }));
+    try {
+      const normalized = await normalizeImageForAi(image);
+      const dataUrl = await blobToDataUrl(normalized);
+      const response = await fetch("/api/vision", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "caption",
+          base64: dataUrl,
+          tag: "on-site",
+          locale,
+          market: "OTHER",
+          mediaId: messageId,
+          consentVersion: AI_CONSENT_VERSION,
+          consentSessionId: consentSessionId(),
+          identityKind: userId ? "user" : "guest",
+        }),
+      });
+      if (!response.ok) return;
+      const body = (await response.json()) as { caption?: string };
+      const caption = body.caption?.trim();
+      if (!caption) return;
+      const latest = getLocalThread(viewingId);
+      const existing = latest?.messages.find((item) => item.id === messageId);
+      const hadUserText = Boolean(existing?.text?.trim());
+      patchNoteFields(messageId, {
+        analysis: caption,
+        ...(hadUserText ? {} : { text: caption }),
+      });
+    } catch {
+      // Best-effort — photo note remains without caption.
+    } finally {
+      setMediaBusyIds((prev) => {
+        const next = { ...prev };
+        delete next[messageId];
+        return next;
+      });
+    }
+  }
+
+  async function readAttachedFile(note: ChatMessage) {
+    const media = note.media?.[0];
+    if (!media || note.type !== "file") return;
+    const blob =
+      getEphemeralMedia(media.id) ?? (await getMediaBlob(media.id).catch(() => null));
+    if (!blob) {
+      setStatus(c.readFileMissing || c.syncRetry || "找不到檔案");
+      return;
+    }
+    setMediaBusyIds((prev) => ({ ...prev, [note.id]: "read" }));
+    setStatus(c.readingFile || "");
+    try {
+      const file = new File([blob], media.name || note.fileName || "file", {
+        type: media.mime || blob.type || "application/octet-stream",
+      });
+      const form = new FormData();
+      form.append("file", file);
+      form.append("consentVersion", AI_CONSENT_VERSION);
+      form.append("consentSessionId", consentSessionId());
+      form.append("identityKind", userId ? "user" : "guest");
+      form.append("locale", locale);
+      const response = await fetch("/api/viewing-chat/read-file", {
+        method: "POST",
+        body: form,
+      });
+      const body = (await response.json().catch(() => null)) as {
+        text?: string;
+        error?: string;
+      } | null;
+      if (!response.ok || !body?.text?.trim()) {
+        setStatus(body?.error || c.readFileFailed || c.syncRetry || "讀檔失敗");
+        return;
+      }
+      const text = body.text.trim();
+      patchNoteFields(note.id, {
+        analysis: text,
+        text: note.text?.trim() && note.text !== note.fileName ? note.text : text,
+      });
+      setStatus("");
+    } catch {
+      setStatus(c.readFileFailed || c.syncRetry || "讀檔失敗");
+    } finally {
+      setMediaBusyIds((prev) => {
+        const next = { ...prev };
+        delete next[note.id];
+        return next;
+      });
+    }
+  }
+
   async function uploadNoteMedia(
     file: File,
-    kind: "image" | "audio" | "file",
+    kind: "image" | "video" | "audio" | "file",
   ) {
     let id =
       typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -676,7 +922,13 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
     let name = file.name || "upload";
     let size = file.size;
     let mediaKind: "image" | "video" | "audio" | "file" =
-      kind === "image" ? "image" : kind === "audio" ? "audio" : "file";
+      kind === "image"
+        ? "image"
+        : kind === "video"
+          ? "video"
+          : kind === "audio"
+            ? "audio"
+            : "file";
 
     try {
       const saved = await addMediaFile(file, viewingId, thread?.address ?? "");
@@ -692,12 +944,30 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
     putEphemeralMedia(id, file);
 
     let path: string | null = null;
-    if (userId && kind !== "file") {
+    if (userId) {
       try {
-        const folder = kind === "audio" ? "audios" : "photos";
-        const column = kind === "audio" ? "audio_urls" : "photo_urls";
-        path = await uploadViewingFile(viewingId, folder, file, id);
-        await appendViewingPath(viewingId, column, path);
+        const folder =
+          kind === "audio"
+            ? "audios"
+            : kind === "video"
+              ? "videos"
+              : kind === "file"
+                ? "files"
+                : "photos";
+        const storageName =
+          kind === "file"
+            ? `${id}.${(file.name.split(".").pop() || "bin").replace(/[^\w.-]+/g, "").slice(0, 12) || "bin"}`
+            : id;
+        path = await uploadViewingFile(viewingId, folder, file, storageName);
+        if (kind !== "file") {
+          const column =
+            kind === "audio"
+              ? "audio_urls"
+              : kind === "video"
+                ? "video_urls"
+                : "photo_urls";
+          await appendViewingPath(viewingId, column, path);
+        }
       } catch {
         path = null;
       }
@@ -730,6 +1000,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
 
     setStatus("");
     setNoteBusy(true);
+    // Composer fallback label is uploadProcessing; only audio needs the STT copy.
     setNoteProcessingHint(payload.audio ? t.composer.transcribing : null);
 
     try {
@@ -833,19 +1104,30 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
         queueSync();
         return;
       } else if (payload.file) {
-        const media = await uploadNoteMedia(payload.file, "file");
-        message = createUserMessage({
-          type: "file",
-          text: payload.text.trim() || payload.file.name,
-          fileName: payload.file.name,
-          media: [media],
-        });
+        if (isVideoAttachment(payload.file)) {
+          const media = await uploadNoteMedia(payload.file, "video");
+          message = createUserMessage({
+            type: "video",
+            text: payload.text.trim() || undefined,
+            fileName: payload.file.name,
+            media: [{ ...media, kind: "video" }],
+          });
+        } else {
+          const media = await uploadNoteMedia(payload.file, "file");
+          message = createUserMessage({
+            type: "file",
+            text: payload.text.trim() || undefined,
+            fileName: payload.file.name,
+            media: [media],
+          });
+        }
       } else {
         const text = payload.text.trim();
         if (!text) return;
         message = createUserMessage({ type: "text", text });
       }
 
+      const imageForCaption = payload.image;
       const latest = getLocalThread(viewingId) ?? current;
       const nextMessages = [...latest.messages, message];
       const saved = saveLocalMessages(viewingId, nextMessages);
@@ -857,6 +1139,9 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
         });
       }
       setThread(saved);
+      if (imageForCaption && message.type === "photo") {
+        void runPhotoAutocaption(message.id, imageForCaption);
+      }
       queueSync();
     } catch (error) {
       console.error("[appendNote]", error);
@@ -901,7 +1186,8 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
   }
 
   function beginEditNote(note: ChatMessage) {
-    const body = note.transcript?.trim() || note.text?.trim() || "";
+    const body =
+      note.transcript?.trim() || note.text?.trim() || note.analysis?.trim() || "";
     setEditingNoteId(note.id);
     setEditingText(body);
   }
@@ -926,7 +1212,9 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
   }
 
   function canEditNote(note: ChatMessage): boolean {
-    return Boolean(note.text?.trim() || note.transcript?.trim());
+    return Boolean(
+      note.text?.trim() || note.transcript?.trim() || note.analysis?.trim(),
+    );
   }
 
   function setReportFeedback(value: ChatReportFeedback) {
@@ -980,10 +1268,28 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
     });
   }
 
+  async function viewingHasActiveShareLink(): Promise<boolean> {
+    if (!userId) return false;
+    try {
+      const response = await fetch(
+        `/api/share/links?viewingId=${encodeURIComponent(viewingId)}`,
+      );
+      if (!response.ok) return false;
+      const payload = (await response.json()) as {
+        url?: string | null;
+        link?: { status?: string } | null;
+      };
+      return Boolean(payload.url && payload.link?.status === "active");
+    } catch {
+      return false;
+    }
+  }
+
   async function generateReport() {
     if (!thread || notes.length === 0) return;
     setReportBusy(true);
-    setStatus(c.generatingReport);
+    setStatus("");
+    setSharePublishHint(false);
     try {
       const response = await fetch("/api/viewing-chat/report", {
         method: "POST",
@@ -1007,7 +1313,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
         error?: string;
       };
       if (!response.ok || !data.report) {
-        setStatus(data.error || c.generatingReport);
+        setStatus(data.error || c.reportFailed);
         return;
       }
       const fingerprintNext = data.notesFingerprint ?? notesFingerprint(thread.messages);
@@ -1029,8 +1335,14 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
       setStatus("");
       refresh();
       queueSync();
+      if (!userId) {
+        setGuestSaveHint(true);
+      }
+      if (await viewingHasActiveShareLink()) {
+        setSharePublishHint(true);
+      }
     } catch {
-      setStatus(c.generatingReport);
+      setStatus(c.reportFailed);
     } finally {
       setReportBusy(false);
     }
@@ -1207,11 +1519,28 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
           {notes.length === 0 ? (
             <p className="text-[13px] text-[#6B7280]">{c.notesEmpty}</p>
           ) : (
-            notes.map((note) => (
+            notes.map((note) => {
+              const showAttachOnlyBadge =
+                note.type === "file" &&
+                editingNoteId !== note.id &&
+                !note.analysis?.trim() &&
+                !isReadableAttachment({
+                  type: note.media?.[0]?.mime || "",
+                  name: note.media?.[0]?.name || note.fileName || "",
+                });
+              return (
               <article
                 key={note.id}
-                className="rounded-2xl bg-white px-4 py-3 shadow-[0_4px_16px_rgba(0,0,0,0.04)]"
+                className="relative rounded-2xl bg-white px-4 py-3 shadow-[0_4px_16px_rgba(0,0,0,0.04)]"
               >
+                {showAttachOnlyBadge ? (
+                  <span
+                    className="absolute right-3 top-3 z-[1] rounded-full bg-[#F3F4F6] px-2 py-0.5 text-[10px] font-medium text-[#6B7280]"
+                    title={c.fileAttachOnlyHint}
+                  >
+                    {c.fileAttachOnly || "已保存"}
+                  </span>
+                ) : null}
                 {editingNoteId === note.id ? (
                   <div className="space-y-2">
                     <textarea
@@ -1248,42 +1577,100 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
                   <>
                     <p
                       className={`whitespace-pre-wrap text-[14px] leading-relaxed ${
-                        note.type === "audio" &&
-                        !note.transcript?.trim() &&
-                        !note.text?.trim() &&
-                        noteBusy
-                          ? "font-semibold text-[#1D4ED8]"
+                        showAttachOnlyBadge ? "pr-14" : ""
+                      } ${
+                        (note.type === "audio" &&
+                          !note.transcript?.trim() &&
+                          !note.text?.trim() &&
+                          noteBusy) ||
+                        (note.type === "photo" && mediaBusyIds[note.id] === "caption")
+                          ? "font-semibold text-[#4B5563] animate-pulse"
                           : ""
                       }`}
                     >
                       {note.transcript?.trim() ||
                         note.text?.trim() ||
+                        note.analysis?.trim() ||
                         (note.type === "audio"
                           ? noteBusy
                             ? t.composer.transcribing
                             : "…"
                           : note.type === "photo"
-                            ? "📷"
-                            : note.fileName) ||
+                            ? mediaBusyIds[note.id] === "caption"
+                              ? c.autoCaptioning || "…"
+                              : "📷"
+                            : note.type === "video"
+                              ? "▶"
+                              : note.fileName) ||
                         "…"}
                     </p>
+                    {note.type === "photo" &&
+                    note.analysis?.trim() &&
+                    note.text?.trim() &&
+                    note.analysis.trim() !== note.text.trim() ? (
+                      <p className="mt-1 text-[12px] text-[#6B7280]">
+                        {c.autoCaptionLabel || "AI"}: {note.analysis.trim()}
+                      </p>
+                    ) : null}
+                    {note.type === "file" && note.analysis?.trim() ? (
+                      <p className="mt-1 whitespace-pre-wrap text-[12px] text-[#6B7280]">
+                        {note.analysis.trim().slice(0, 600)}
+                        {note.analysis.trim().length > 600 ? "…" : ""}
+                      </p>
+                    ) : null}
                     {/* Audio notes surface as transcript text — no mic/player chrome. */}
-                    {note.type === "audio" ? null : <NoteMedia message={note} />}
+                    {note.type === "audio" || note.type === "file" ? null : (
+                      <NoteMedia message={note} />
+                    )}
                   </>
                 )}
-                <div className="mt-2 flex flex-wrap items-center gap-3">
-                  <p className="text-[10px] text-[#9CA3AF]">
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <p className="min-w-0 truncate text-[10px] leading-8 text-[#9CA3AF]">
                     {new Date(note.timestamp).toLocaleString()}
                   </p>
                   {editingNoteId !== note.id ? (
-                    <div className="ml-auto flex items-center gap-1">
+                    <div className="flex shrink-0 items-center gap-0.5">
+                      {note.type === "file" ? (
+                        <NoteFileActions
+                          message={note}
+                          openLabel={c.openAttachment}
+                          downloadLabel={c.downloadAttachment}
+                        />
+                      ) : null}
+                      {note.type === "file" &&
+                      !note.analysis?.trim() &&
+                      isReadableAttachment({
+                        type: note.media?.[0]?.mime || "",
+                        name: note.media?.[0]?.name || note.fileName || "",
+                      }) ? (
+                        <button
+                          type="button"
+                          disabled={Boolean(mediaBusyIds[note.id])}
+                          onClick={() => void readAttachedFile(note)}
+                          aria-label={
+                            mediaBusyIds[note.id] === "read"
+                              ? c.readingFile
+                              : c.readFile
+                          }
+                          title={c.readFileHint}
+                          className={`${noteActionIconClass} disabled:opacity-40 ${
+                            mediaBusyIds[note.id] === "read" ? "text-[#1D4ED8]" : ""
+                          }`}
+                        >
+                          {mediaBusyIds[note.id] === "read" ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                          ) : (
+                            <FileSearch className="h-3.5 w-3.5" aria-hidden />
+                          )}
+                        </button>
+                      ) : null}
                       {canEditNote(note) ? (
                         <button
                           type="button"
                           onClick={() => beginEditNote(note)}
                           aria-label={c.noteEdit}
                           title={c.noteEdit}
-                          className="inline-flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center rounded-full text-[#6B7280] hover:bg-black/5 hover:text-[#1A1A1A]"
+                          className={noteActionIconClass}
                         >
                           <Pencil className="h-3.5 w-3.5" aria-hidden />
                         </button>
@@ -1293,7 +1680,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
                         onClick={() => deleteNote(note.id)}
                         aria-label={c.noteDelete}
                         title={c.noteDelete}
-                        className="inline-flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center rounded-full text-[#9CA3AF] hover:bg-[#FEE2E2] hover:text-[#991B1B]"
+                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[#9CA3AF] hover:bg-[#FEE2E2] hover:text-[#991B1B]"
                       >
                         <Trash2 className="h-3.5 w-3.5" aria-hidden />
                       </button>
@@ -1301,7 +1688,8 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
                   ) : null}
                 </div>
               </article>
-            ))
+              );
+            })
           )}
           <div ref={notesEndRef} />
         </div>
@@ -1364,7 +1752,11 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
             {(shownReport.mediaRefs?.length ?? 0) > 0 ? (
               <div>
                 <p className="mb-1 text-[12px] font-bold text-[#374151]">{c.reportMedia}</p>
-                <ReportGallery refs={shownReport.mediaRefs ?? []} />
+                <ReportGallery
+                  refs={shownReport.mediaRefs ?? []}
+                  openLabel={c.openAttachment}
+                  downloadLabel={c.downloadAttachment}
+                />
               </div>
             ) : null}
             <div className="flex items-center gap-1 pt-1">
@@ -1453,12 +1845,28 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
         )}
         <button
           type="button"
-          disabled={reportBusy || notes.length === 0}
+          disabled={reportBusy || notes.length === 0 || reportUpToDate}
           onClick={() => void generateReport()}
-          title={notes.length === 0 ? c.generateReportNeedNotes : undefined}
-          aria-describedby={notes.length === 0 ? "generate-report-need-notes" : undefined}
-          className="mt-3 h-11 w-full rounded-full bg-black text-[14px] font-bold text-white disabled:opacity-40"
+          title={
+            notes.length === 0
+              ? c.generateReportNeedNotes
+              : reportUpToDate
+                ? c.generateReportUpToDate
+                : undefined
+          }
+          aria-describedby={
+            notes.length === 0
+              ? "generate-report-need-notes"
+              : reportUpToDate
+                ? "generate-report-up-to-date"
+                : undefined
+          }
+          aria-busy={reportBusy || undefined}
+          className="mt-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-black text-[14px] font-bold text-white disabled:opacity-40"
         >
+          {reportBusy ? (
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+          ) : null}
           {reportBusy ? c.generatingReport : c.generateReport}
         </button>
         {notes.length === 0 && !reportBusy ? (
@@ -1469,6 +1877,59 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
           >
             {c.generateReportNeedNotes}
           </p>
+        ) : null}
+        {reportUpToDate && !reportBusy ? (
+          <p
+            id="generate-report-up-to-date"
+            className="mt-2 text-center text-[12px] font-semibold text-[#6B7280]"
+            role="status"
+          >
+            {c.generateReportUpToDate}
+          </p>
+        ) : null}
+        {guestSaveHint && !userId && thread ? (
+          <div
+            className="mt-2 space-y-2 rounded-xl bg-[#FEF3C7] px-3 py-2.5 text-center"
+            role="status"
+          >
+            <p className="text-[12px] font-semibold text-[#92400E]">
+              {guestDaysLeft(thread) <= 1
+                ? c.guestLocalNoticeToday
+                : c.guestLocalNotice.replace(
+                    "{days}",
+                    String(guestDaysLeft(thread)),
+                  )}
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <a
+                href={`/login?mode=signup&next=${encodeURIComponent(`/viewings/${viewingId}`)}`}
+                className="inline-flex rounded-full bg-[#1A1A1A] px-3 py-1.5 text-[12px] font-bold text-white"
+              >
+                {c.guestLocalSave}
+              </a>
+              <button
+                type="button"
+                onClick={() => setGuestSaveHint(false)}
+                className="text-[12px] font-semibold text-[#92400E] underline underline-offset-2"
+              >
+                {c.guestLimitCancel}
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {sharePublishHint ? (
+          <div
+            className="mt-2 space-y-2 rounded-xl bg-[#FEF3C7] px-3 py-2.5 text-center"
+            role="status"
+          >
+            <p className="text-[12px] font-semibold text-[#92400E]">{c.sharePublishAfterReport}</p>
+            <a
+              href="/shares"
+              className="inline-flex text-[12px] font-bold text-[#92400E] underline underline-offset-2"
+            >
+              {c.shareHubCta}
+            </a>
+          </div>
         ) : null}
         {status ? (
           <p className="mt-2 text-center text-[12px] font-semibold text-[#92400E]" role="status">
@@ -1491,10 +1952,9 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
             voiceToText: c.voiceToText,
             stop: c.stop,
             attach: c.attach,
-            camera: c.attachCamera,
-            uploadImage: c.attachImage,
+            camera: c.photo,
+            uploadImage: c.photo,
             uploadFile: c.attachFile,
-            uploadVideo: c.attachVideo,
             empty: c.emptyComposer,
             micDenied: c.micDenied,
             importAudio: c.importAudio,
@@ -1503,13 +1963,36 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
             imageBadType: t.composer.imageBadType,
             emptyFile: t.mediaImport.emptyFile,
             videoTooLarge: t.mediaImport.videoTooLarge,
-            processing: t.composer.transcribing,
+            fileTooLarge: t.mediaImport.fileTooLarge,
+            processing: c.uploadProcessing,
+            uploading: c.uploadProcessing,
           }}
           onSubmit={async (payload) => {
             await appendNote(payload);
           }}
         />
       </div>
+      {claimLimitOpen ? (
+        <ClaimLimitDialog
+          title={c.claimLimitTitle}
+          body={c.claimLimitBody}
+          upgradeLabel={c.claimLimitUpgrade}
+          manageLabel={c.claimLimitManage}
+          laterLabel={c.claimLimitLater}
+          onLater={() => setClaimLimitOpen(false)}
+          onManage={() => {
+            setClaimLimitOpen(false);
+            router.push("/");
+          }}
+          onUpgrade={() => {
+            setClaimLimitOpen(false);
+            void (async () => {
+              const result = await startProCheckout("claim_limit");
+              if (!result.ok) setStatus(result.error || t.paywall.syncFailed);
+            })();
+          }}
+        />
+      ) : null}
       <ShareReportDialog
         open={shareOpen}
         url={shareUrl}

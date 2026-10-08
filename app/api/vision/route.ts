@@ -45,20 +45,23 @@ export async function POST(request: Request) {
     }
 
     const languageLock = aiOutputLanguageInstruction(locale);
+    const captionMode = mode === "caption";
 
     const openai = new OpenAI({ apiKey });
     const completion = await openai.chat.completions.create(
       {
         model: "gpt-4o-mini",
-        temperature: 0.3,
-        max_tokens: 120,
+        temperature: captionMode ? 0.2 : 0.3,
+        max_tokens: captionMode ? 80 : 120,
         messages: [
           {
             role: "user",
             content: [
               {
                 type: "text",
-                text: `You are a home inspector for US/CA/TW markets. Looking at this "${tag}" photo, what risk do you see? Reply with ONLY one must-ask open-house question. ${languageLock} Keep the question sharp and concise. Do not invent facts; phrase as a check question.`,
+                text: captionMode
+                  ? `You help a home buyer take on-site notes. Describe this "${tag}" photo in ONE short sentence: only what is visibly present (stains, cracks, light, fixtures, finishes). Do not diagnose, price, or invent unseen facts. If unclear, say the image is unclear. ${languageLock}`
+                  : `You are a home inspector for US/CA/TW markets. Looking at this "${tag}" photo, what risk do you see? Reply with ONLY one must-ask open-house question. ${languageLock} Keep the question sharp and concise. Do not invent facts; phrase as a check question.`,
               },
               {
                 type: "image_url",
@@ -74,18 +77,24 @@ export async function POST(request: Request) {
       { signal: AbortSignal.timeout(aiTimeoutMs()) },
     );
 
-    const question = (completion.choices[0]?.message?.content || "")
+    const raw = (completion.choices[0]?.message?.content || "")
       .trim()
       .replace(/^["「『]|["」』]$/g, "")
       .replace(/^\d+[\.\、\)]\s*/, "")
       .split("\n")[0]
       ?.trim();
 
-    if (!question) {
+    if (!raw) {
       throw new AiInputError("ai_empty_response", 422);
     }
 
-    return boundary.applyCookie(NextResponse.json({ question, tag, jobId: mediaId }));
+    if (captionMode) {
+      return boundary.applyCookie(
+        NextResponse.json({ mode: "caption", caption: raw, tag, jobId: mediaId }),
+      );
+    }
+
+    return boundary.applyCookie(NextResponse.json({ question: raw, tag, jobId: mediaId }));
   } catch (error) {
     return aiErrorResponse(error);
   }

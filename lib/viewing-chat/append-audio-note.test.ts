@@ -4,7 +4,9 @@ import {
   appendMessageToList,
   buildAudioNoteMessage,
   mediaRefFromAudioBlob,
+  patchMessageMedia,
   patchMessageTranscript,
+  uploadedMediaNeedsCloudSync,
 } from "./append-audio-note";
 
 describe("append-audio-note", () => {
@@ -32,5 +34,28 @@ describe("append-audio-note", () => {
     expect(patched[0]?.transcript).toBe("廚房很吵");
     expect(patched[0]?.text).toBe("廚房很吵");
     expect(patched[0]?.media?.[0]?.id).toBe("media-2");
+  });
+
+  it("keeps the original media id when a late upload attaches a storage path", () => {
+    const audio = new Blob(["x"], { type: "audio/webm" });
+    const media = mediaRefFromAudioBlob(audio, "media-3", "note-1.webm");
+    const note = buildAudioNoteMessage({ audio, media });
+    const uploaded = {
+      id: "different-idb-id",
+      kind: "audio" as const,
+      name: "note-1.webm",
+      mime: "audio/webm",
+      size: 4,
+      path: "user-1/thread-1/audios/media-3",
+    };
+    const patched = patchMessageMedia([note], note.id, uploaded, media.id);
+    expect(patched[0]?.media?.[0]).toMatchObject({
+      id: "media-3",
+      path: "user-1/thread-1/audios/media-3",
+      kind: "audio",
+    });
+    expect(patched[0]?.transcript).toBeUndefined();
+    expect(uploadedMediaNeedsCloudSync(uploaded)).toBe(true);
+    expect(uploadedMediaNeedsCloudSync({ path: null })).toBe(false);
   });
 });

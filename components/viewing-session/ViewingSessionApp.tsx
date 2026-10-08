@@ -72,7 +72,9 @@ import {
   appendMessageToList,
   buildAudioNoteMessage,
   mediaRefFromAudioBlob,
+  patchMessageMedia,
   patchMessageTranscript,
+  uploadedMediaNeedsCloudSync,
 } from "@/lib/viewing-chat/append-audio-note";
 import { getEphemeralMedia, putEphemeralMedia } from "@/lib/viewing-chat/ephemeral-media";
 import { guestDaysLeft } from "@/lib/viewing-chat/guest-retention";
@@ -1049,25 +1051,20 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
         setNoteProcessingHint(t.composer.transcribing);
 
         // Best-effort durable/cloud media — failure must not remove the note.
+        // Transcription often finishes before upload; the first queueSync below
+        // would persist a path-less audio note. Re-sync once the path lands.
         void uploadNoteMedia(file, "audio").then((uploaded) => {
           const latest = getLocalThread(viewingId);
           if (!latest) return;
-          const patched = latest.messages.map((item) =>
-            item.id === message.id
-              ? {
-                  ...item,
-                  media: [
-                    {
-                      ...uploaded,
-                      // Keep the same id so ephemeral + IDB lookups stay aligned.
-                      id: media.id,
-                    },
-                  ],
-                }
-              : item,
+          const patched = patchMessageMedia(
+            latest.messages,
+            message.id,
+            uploaded,
+            media.id,
           );
           const next = saveLocalMessages(viewingId, patched);
           if (next) setThread(next);
+          if (uploadedMediaNeedsCloudSync(uploaded)) queueSync();
         });
 
         let transcript = "";

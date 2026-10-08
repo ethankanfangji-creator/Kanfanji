@@ -60,3 +60,35 @@ export function patchMessageTranscript(
       : item,
   );
 }
+
+/**
+ * Attach a completed cloud/IDB media upload onto an already-visible note.
+ * Keep the original media id so ephemeral + IndexedDB lookups still resolve.
+ */
+export function patchMessageMedia(
+  messages: ChatMessage[],
+  messageId: string,
+  uploaded: ChatMediaRef,
+  keepMediaId: string,
+): ChatMessage[] {
+  return messages.map((item) =>
+    item.id === messageId
+      ? {
+          ...item,
+          media: [
+            {
+              ...uploaded,
+              id: keepMediaId,
+            },
+          ],
+        }
+      : item,
+  );
+}
+
+/** True when an in-flight upload landed a storage path the first cloud PUT could not have. */
+export function uploadedMediaNeedsCloudSync(
+  uploaded: Pick<ChatMediaRef, "path">,
+): boolean {
+  return Boolean(uploaded.path?.trim());
+}

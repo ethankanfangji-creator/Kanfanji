@@ -128,7 +128,7 @@ export function WizardBottomNav({
 }) {
   return (
     <div className="fixed bottom-0 inset-x-0 z-40 flex justify-center pointer-events-none overflow-x-hidden">
-      <div className="box-border w-full max-w-[min(420px,100%)] px-4 pb-[max(12px,env(safe-area-inset-bottom))] pt-2 pointer-events-auto bg-gradient-to-t from-[#FDF6F0] via-[#FDF6F0]/95 to-transparent">
+      <div className="pointer-events-auto box-border w-full max-w-[min(var(--page-max-width-narrow),100%)] bg-gradient-to-t from-[#FDF6F0] via-[#FDF6F0]/95 to-transparent px-4 pb-[max(12px,env(safe-area-inset-bottom))] pt-2">
         <div className="flex min-w-0 gap-2">
           {onBack ? (
             <button

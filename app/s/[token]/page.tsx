@@ -1,19 +1,30 @@
-import Link from "next/link";
 import type { ReactNode } from "react";
 import { cookies, headers } from "next/headers";
-import { ArrowLeft, MapPin, ShieldAlert } from "lucide-react";
+import { ShieldAlert } from "lucide-react";
+import { ClientAuthBar } from "@/components/ClientAuthBar";
 import { ChatReportShareCard } from "@/components/share-card/ChatReportShareCard";
 import { LocalTime } from "@/components/share-card/LocalTime";
 import { DecisionSummaryCard } from "@/components/share-card/DecisionSummaryCard";
 import { ShareReportComments } from "@/components/share-card/ShareReportComments";
+import { ShareSaveButton } from "@/components/share-card/ShareSaveButton";
+import { BackHomeLink } from "@/components/ui/BackHomeLink";
+import { PageContainer } from "@/components/ui/primitives";
 import { detectLocale, htmlLang, isLocale, LOCALE_STORAGE_KEY, type Locale } from "@/lib/i18n/config";
 import { getMessages } from "@/lib/i18n";
+import {
+  browseOriginHome,
+  parseBrowseOrigin,
+  shouldShowShareBack,
+} from "@/lib/browse-origin";
 import { resolvePublicShare } from "@/lib/share";
 import type { PublicShareResult } from "@/lib/share-access";
+import { getShareSaveState } from "@/lib/share-access/saves";
 import {
   isDecisionSummarySnapshot,
   toPublicDecisionSummary,
 } from "@/lib/share-card";
+import { createAdminClient } from "@/utils/supabase/admin";
+import { createClient } from "@/utils/supabase/server";
 
 async function requestLocale(): Promise<Locale> {
   const jar = await cookies();
@@ -61,41 +72,47 @@ const READONLY_LABELS = {
 function ShareShell({
   children,
   labels,
+  loginNext,
 }: {
   children: ReactNode;
-  labels: { eyebrow: string; close: string; foot: string; openApp: string };
+  labels: {
+    eyebrow: string;
+    close?: string | null;
+    closeHref?: string | null;
+  };
+  loginNext: string;
 }) {
+  const backLabel = labels.close;
+  const backHref = labels.closeHref;
+  const showBack = Boolean(backLabel && backHref);
   return (
-    <div className="min-h-screen w-full flex justify-center bg-[#FDF6F0] text-[#1A1A1A]">
-      <div
-        className="w-full max-w-[720px] px-4"
+    <div className="flex min-h-screen w-full justify-center bg-[#FDF6F0] text-[#1A1A1A]">
+      <PageContainer
+        width="content"
         style={{
           paddingTop: "max(1.5rem, env(safe-area-inset-top, 0px))",
           paddingBottom: "max(7rem, calc(1.5rem + env(safe-area-inset-bottom, 0px)))",
         }}
       >
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <p className="text-[11px] font-[700] tracking-[0.18em] opacity-60">
-            {labels.eyebrow}
-          </p>
-          <Link
-            href="/"
-            className="inline-flex min-h-[var(--touch-target)] items-center gap-1 rounded-full border border-black/10 bg-white px-3 text-[11px] font-bold"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" /> {labels.close}
-          </Link>
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            {showBack && backLabel && backHref ? (
+              <BackHomeLink label={backLabel} href={backHref} />
+            ) : null}
+            <p
+              className={`text-[11px] font-[700] tracking-[0.18em] opacity-60 ${
+                showBack ? "mt-2" : ""
+              }`}
+            >
+              {labels.eyebrow}
+            </p>
+          </div>
+          <div className="shrink-0">
+            <ClientAuthBar loginNext={loginNext} />
+          </div>
         </div>
         {children}
-        <div className="mt-4 rounded-[18px] bg-[#F8F4EF] border border-black/5 p-3 flex items-start gap-2 text-[11px] text-[#6B7280]">
-          <MapPin className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-          <p>
-            {labels.foot}
-            <Link href="/" className="ml-1 font-bold text-[#1A1A1A] underline-offset-2 hover:underline">
-              {labels.openApp}
-            </Link>
-          </p>
-        </div>
-      </div>
+      </PageContainer>
     </div>
   );
 }
@@ -104,13 +121,19 @@ function ShareStatusPage({
   title,
   body,
   shell,
+  loginNext,
 }: {
   title: string;
   body: string;
-  shell: { eyebrow: string; close: string; foot: string; openApp: string };
+  shell: {
+    eyebrow: string;
+    close?: string | null;
+    closeHref?: string | null;
+  };
+  loginNext: string;
 }) {
   return (
-    <ShareShell labels={shell}>
+    <ShareShell labels={shell} loginNext={loginNext}>
       <div className="rounded-[28px] bg-white border border-black/5 shadow-[0_20px_60px_rgba(0,0,0,0.08)] p-8 text-center">
         <div className="mx-auto w-12 h-12 rounded-full bg-[#FEF3C7] flex items-center justify-center mb-4">
           <ShieldAlert className="w-6 h-6 text-[#92400E]" />
@@ -193,25 +216,39 @@ function LegacyMinimalCard({
   );
 }
 
-function renderResult(token: string, result: PublicShareResult, locale: Locale) {
+function renderResult(
+  token: string,
+  result: PublicShareResult,
+  locale: Locale,
+  fromParam: string | string[] | undefined,
+  isOwner: boolean,
+) {
   const messages = getMessages(locale);
   const share = messages.share;
   const chat = messages.chat;
+  const fromRaw = Array.isArray(fromParam) ? fromParam[0] : fromParam;
+  const back = browseOriginHome(parseBrowseOrigin(fromRaw));
+  const showBack = shouldShowShareBack(fromRaw, isOwner);
+  const loginNext = `/s/${token}`;
   const shell = {
     eyebrow: share.shellEyebrow,
-    close: share.closeHome,
-    foot: share.readonlyFoot,
-    openApp: share.openApp,
+    close: showBack ? messages.nav.back : null,
+    closeHref: showBack ? back.href : null,
   };
   if (result.status !== "active") {
     return (
-      <ShareStatusPage title={share.invalidTitle} body={share.invalidBody} shell={shell} />
+      <ShareStatusPage
+        title={share.invalidTitle}
+        body={share.invalidBody}
+        shell={shell}
+        loginNext={loginNext}
+      />
     );
   }
 
   if (result.chatReport) {
     return (
-      <ShareShell labels={shell}>
+      <ShareShell labels={shell} loginNext={loginNext}>
         <ChatReportShareCard
           report={result.chatReport}
           generatedAt={formatWhen(result.chatReport.reportGeneratedAt, locale)}
@@ -248,6 +285,16 @@ function renderResult(token: string, result: PublicShareResult, locale: Locale) 
             },
           }}
         />
+        <ShareSaveButton
+          token={token}
+          labels={{
+            save: share.saveReport,
+            saved: share.saveReportDone,
+            saving: share.saveReportSaving,
+            signInToSave: share.saveReportSignIn,
+            failed: share.saveReportFailed,
+          }}
+        />
         <ShareReportComments
           token={token}
           labels={{
@@ -274,7 +321,7 @@ function renderResult(token: string, result: PublicShareResult, locale: Locale) 
       : null;
 
   return (
-    <ShareShell labels={shell}>
+    <ShareShell labels={shell} loginNext={loginNext}>
       {summary ? (
         <DecisionSummaryCard
           snapshot={summary}
@@ -312,6 +359,16 @@ function renderResult(token: string, result: PublicShareResult, locale: Locale) 
           }}
         />
       )}
+      <ShareSaveButton
+        token={token}
+        labels={{
+          save: share.saveReport,
+          saved: share.saveReportDone,
+          saving: share.saveReportSaving,
+          signInToSave: share.saveReportSignIn,
+          failed: share.saveReportFailed,
+        }}
+      />
     </ShareShell>
   );
 }
@@ -326,11 +383,29 @@ export async function generateMetadata() {
 
 export default async function ShareCardPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ token: string }>;
+  searchParams: Promise<{ from?: string | string[] }>;
 }) {
   const { token } = await params;
+  const { from } = await searchParams;
   const locale = await requestLocale();
-  const result = await resolvePublicShare(token);
-  return renderResult(token, result, locale);
+  const [result, isOwner] = await Promise.all([
+    resolvePublicShare(token),
+    (async () => {
+      try {
+        const supabase = await createClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) return false;
+        const state = await getShareSaveState(createAdminClient(), token, user.id);
+        return state.ok && state.isOwner;
+      } catch {
+        return false;
+      }
+    })(),
+  ]);
+  return renderResult(token, result, locale, from, isOwner);
 }

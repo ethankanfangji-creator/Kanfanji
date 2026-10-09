@@ -12,11 +12,19 @@ import { setPersistenceAccountScope } from "@/lib/idb/draft-store";
 /**
  * Auth actions only — language lives inside the login UI (/login + LoginGateDialog).
  */
-export function ClientAuthBar() {
+export function ClientAuthBar({
+  loginNext,
+}: {
+  /** After sign-in, return here (e.g. public share path). */
+  loginNext?: string;
+} = {}) {
   const { messages } = useI18n();
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(() => !isSupabaseConfigured());
+  const loginHref = loginNext
+    ? `/login?next=${encodeURIComponent(loginNext)}`
+    : "/login";
 
   useEffect(() => {
     const supabase = getSupabase();
@@ -62,7 +70,7 @@ export function ClientAuthBar() {
   if (!user) {
     return (
       <Link
-        href="/login"
+        href={loginHref}
         className="inline-flex min-h-11 items-center rounded-full bg-black px-4 text-[12px] font-bold text-white"
       >
         {messages.nav.signIn}

@@ -5,6 +5,8 @@ export type Messages = {
     cardEyebrow: string;
   };
   nav: {
+    /** Shared ← Back control for browse / detail chrome (not destination-specific). */
+    back: string;
     records: string;
     signIn: string;
     signOut: string;
@@ -443,13 +445,21 @@ export type Messages = {
     commentsFailed: string;
     commentsRateLimited: string;
     commentsGuestDefault: string;
+    saveReport: string;
+    saveReportDone: string;
+    saveReportSaving: string;
+    saveReportSignIn: string;
+    saveReportFailed: string;
   };
   sharesHub: {
     title: string;
     subtitle: string;
     back: string;
+    /** Back from a detail opened via the hub (not generic Home). */
+    detailBack: string;
     tabLinks: string;
     tabComments: string;
+    tabReceived: string;
     searchPlaceholder: string;
     filterOpen: string;
     filterClosed: string;
@@ -461,6 +471,13 @@ export type Messages = {
     emptyLinksHint: string;
     emptyComments: string;
     emptyCommentsHint: string;
+    emptyReceived: string;
+    emptyReceivedHint: string;
+    countReceived: string;
+    openReceived: string;
+    removeReceived: string;
+    removeReceivedFailed: string;
+    receivedInvalid: string;
     loadFailed: string;
     statusActive: string;
     statusExpired: string;
@@ -484,6 +501,8 @@ export type Messages = {
     viewComments: string;
     signInRequired: string;
     signIn: string;
+    layoutList: string;
+    layoutGrid: string;
   };
   shareAccess: {
     title: string;
@@ -701,6 +720,7 @@ export type Messages = {
   };
   viewings: {
     title: string;
+    subtitle: string;
     /** Sidebar / nav label for the full browse page */
     navLabel: string;
     back: string;
@@ -720,6 +740,8 @@ export type Messages = {
     photos: string;
     videos: string;
     loading: string;
+    layoutList: string;
+    layoutGrid: string;
   };
   compare: {
     title: string;

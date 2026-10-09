@@ -21,6 +21,14 @@ import {
   type ViewingListItem,
 } from "@/lib/viewings/list-item";
 import { ViewingMapCover } from "@/components/viewings/ViewingMapCover";
+import {
+  BrowseLayoutToggle,
+  browseCardClass,
+  browseCoverClass,
+  browseListClass,
+  useBrowseLayout,
+  useBrowseLayoutWide,
+} from "@/components/ui/BrowseLayoutToggle";
 
 const FREQUENT_FILTER_LIMIT = 8;
 
@@ -97,6 +105,9 @@ export function ViewingsIndex({
   const [tagFilter, setTagFilter] = useState<ViewingListTagFilter>("all");
   const [hasReportOnly, setHasReportOnly] = useState(false);
   const [sort, setSort] = useState<ViewingListSort>("updated_desc");
+  const [layout, setLayout] = useBrowseLayout();
+  const layoutWide = useBrowseLayoutWide();
+  const effectiveLayout = layoutWide ? layout : "list";
 
   const displayLabels = useMemo(
     () => ({
@@ -180,18 +191,25 @@ export function ViewingsIndex({
           >
             {v.filterHasReport}
           </Chip>
-          <label className="ml-auto inline-flex shrink-0 items-center gap-1.5 text-[12px] font-semibold text-[#6B7280]">
-            <span className="sr-only">{v.sortLabel}</span>
-            <select
-              value={sort}
-              onChange={(event) => setSort(event.target.value as ViewingListSort)}
-              className="min-h-[var(--touch-target)] rounded-full border border-black/10 bg-white px-2.5 text-[12px] font-semibold text-[#374151] outline-none"
-              aria-label={v.sortLabel}
-            >
-              <option value="updated_desc">{v.sortUpdated}</option>
-              <option value="address_asc">{v.sortAddress}</option>
-            </select>
-          </label>
+          <div className="ml-auto flex shrink-0 items-center gap-1.5">
+            <BrowseLayoutToggle
+              layout={layout}
+              onChange={setLayout}
+              labels={{ list: v.layoutList, grid: v.layoutGrid }}
+            />
+            <label className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#6B7280]">
+              <span className="sr-only">{v.sortLabel}</span>
+              <select
+                value={sort}
+                onChange={(event) => setSort(event.target.value as ViewingListSort)}
+                className="min-h-[var(--touch-target)] rounded-full border border-black/10 bg-white px-2.5 text-[12px] font-semibold text-[#374151] outline-none"
+                aria-label={v.sortLabel}
+              >
+                <option value="updated_desc">{v.sortUpdated}</option>
+                <option value="address_asc">{v.sortAddress}</option>
+              </select>
+            </label>
+          </div>
         </div>
 
         {!loading && viewings.length > 0 ? (
@@ -246,7 +264,7 @@ export function ViewingsIndex({
         </div>
       ) : null}
 
-      <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+      <ul className={browseListClass(effectiveLayout)}>
         {filtered.map((viewing) => {
           const cover = viewingListCover(viewing);
           const photoCount = viewing.photo_urls.length;
@@ -254,10 +272,10 @@ export function ViewingsIndex({
           return (
             <li key={viewing.id}>
               <Link
-                href={`/viewings/${viewing.id}`}
-                className="flex h-full gap-3 rounded-2xl border border-black/[0.05] bg-white p-2.5 shadow-[0_2px_12px_rgba(0,0,0,0.03)] transition hover:border-black/10 hover:shadow-[0_4px_16px_rgba(0,0,0,0.06)] sm:flex-col sm:gap-2 sm:p-3"
+                href={`/viewings/${viewing.id}?from=viewings`}
+                className={browseCardClass(effectiveLayout)}
               >
-                <div className="h-20 w-20 shrink-0 overflow-hidden rounded-xl bg-[#F5F3F0] sm:aspect-[4/3] sm:h-auto sm:w-full">
+                <div className={browseCoverClass(effectiveLayout)}>
                   {cover.kind === "map" ? (
                     <ViewingMapCover lat={cover.lat} lng={cover.lng} />
                   ) : (

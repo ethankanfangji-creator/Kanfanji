@@ -63,7 +63,7 @@ export default function AcceptInvitePage({
 
   return (
     <div className="min-h-screen bg-[#FDF6F0] flex justify-center px-4 pt-16">
-      <section className="w-full max-w-[420px] h-fit rounded-[28px] bg-white border border-black/5 p-7 text-center shadow-[0_20px_60px_rgba(0,0,0,0.08)]">
+      <section className="h-fit w-full max-w-[var(--page-max-width-narrow)] rounded-[28px] border border-black/5 bg-white p-7 text-center shadow-[0_20px_60px_rgba(0,0,0,0.08)]">
         <div className="mx-auto w-12 h-12 rounded-full bg-[#EEF2FF] text-[#4338CA] flex items-center justify-center">
           <UserPlus className="w-6 h-6" />
         </div>

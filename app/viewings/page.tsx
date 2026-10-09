@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ClientAuthBar } from "@/components/ClientAuthBar";
 import { useI18n } from "@/components/I18nProvider";
-import { BackHomeLink } from "@/components/ui/BackHomeLink";
+import { BrowsePageHeader } from "@/components/ui/BrowsePageHeader";
 import { PageContainer } from "@/components/ui/primitives";
 import { ViewingsIndex } from "@/components/viewings/ViewingsIndex";
 import type { ViewingListItem } from "@/lib/viewings/list-item";
@@ -14,7 +14,6 @@ export default function ViewingsPage() {
   const { messages } = useI18n();
   const router = useRouter();
   const [viewings, setViewings] = useState<ViewingListItem[]>([]);
-  const [email, setEmail] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -28,7 +27,6 @@ export default function ViewingsPage() {
         router.replace("/login");
         return;
       }
-      setEmail(user.email ?? "");
       const response = await fetch("/api/viewings");
       const body = (await response.json()) as {
         viewings?: ViewingListItem[];
@@ -43,22 +41,12 @@ export default function ViewingsPage() {
   return (
     <div className="flex min-h-screen w-full justify-center bg-[var(--color-canvas)] text-[var(--color-text)]">
       <PageContainer className="pb-28 pt-6">
-        <div className="mb-5 flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <BackHomeLink label={messages.viewings.back} className="mb-2" />
-            <h1 className="text-[22px] font-[800] leading-[1.15] tracking-tight">
-              {messages.viewings.title}
-            </h1>
-            {email ? (
-              <p className="mt-1 truncate text-[11px] font-semibold tracking-wide text-[#9CA3AF]">
-                {email}
-              </p>
-            ) : null}
-          </div>
-          <div className="mt-1.5 shrink-0">
-            <ClientAuthBar />
-          </div>
-        </div>
+        <BrowsePageHeader
+          backLabel={messages.nav.back}
+          title={messages.viewings.title}
+          subtitle={messages.viewings.subtitle}
+          actions={<ClientAuthBar />}
+        />
 
         <ViewingsIndex viewings={viewings} loading={loading} error={error} />
       </PageContainer>

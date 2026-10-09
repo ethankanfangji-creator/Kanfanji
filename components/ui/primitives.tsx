@@ -93,15 +93,34 @@ export function Field({
   );
 }
 
+export type PageContainerWidth = "default" | "narrow" | "content" | "wide";
+
 export function PageContainer({
   className = "",
   narrow = false,
+  width = "default",
+  flush = false,
   ...props
-}: HTMLAttributes<HTMLDivElement> & { narrow?: boolean }) {
+}: HTMLAttributes<HTMLDivElement> & {
+  /** @deprecated Prefer `width="narrow"`. */
+  narrow?: boolean;
+  width?: PageContainerWidth;
+  /** Omit shared horizontal padding (children own gutters). */
+  flush?: boolean;
+}) {
+  const resolved: PageContainerWidth = narrow ? "narrow" : width;
+  const widthClass =
+    resolved === "narrow"
+      ? "page-container--narrow"
+      : resolved === "content"
+        ? "page-container--content"
+        : resolved === "wide"
+          ? "page-container--wide"
+          : "";
   return (
     <div
       {...props}
-      className={`page-container ${narrow ? "page-container--narrow" : ""} ${className}`}
+      className={`page-container ${widthClass} ${flush ? "page-container--flush" : ""} ${className}`.trim()}
     />
   );
 }

@@ -86,6 +86,27 @@ function publicPathForRow(row: ShareLinkRow): { urlPath: string; needsRegenerate
   return { urlPath: "", needsRegenerate: true };
 }
 
+function coordsFromPublishedSnapshot(
+  snapshot: unknown,
+): { lat: number; lng: number } | null {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return null;
+  const lat = (snapshot as { lat?: unknown }).lat;
+  const lng = (snapshot as { lng?: unknown }).lng;
+  if (
+    typeof lat === "number" &&
+    typeof lng === "number" &&
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= -90 &&
+    lat <= 90 &&
+    lng >= -180 &&
+    lng <= 180
+  ) {
+    return { lat, lng };
+  }
+  return null;
+}
+
 export function toShareLinkRecord(row: ShareLinkRow): ShareLinkRecord {
   const expired =
     row.expires_at && new Date(row.expires_at).getTime() <= Date.now();
@@ -219,11 +240,14 @@ export async function listOwnerShareLinksAcrossViewings(
     const path = publicPathForRow(row);
     const { token: _token, ...rest } = record;
     void _token;
+    const coords = coordsFromPublishedSnapshot(row.published_snapshot);
     return {
       ...rest,
       address: (viewing?.address ?? "").trim() || "—",
       urlPath: path.urlPath,
       needsRegenerate: path.needsRegenerate,
+      lat: coords?.lat ?? null,
+      lng: coords?.lng ?? null,
     };
   });
 }

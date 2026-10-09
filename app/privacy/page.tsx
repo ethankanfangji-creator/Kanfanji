@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useI18n } from "@/components/I18nProvider";
+import { PageContainer } from "@/components/ui/primitives";
 
 const SUPPORT = process.env.NEXT_PUBLIC_SUPPORT_EMAIL?.trim() || "support@kanfangji.app";
 const POSTHOG_HOST = process.env.NEXT_PUBLIC_POSTHOG_HOST || "https://us.i.posthog.com";
@@ -10,7 +11,10 @@ export default function PrivacyPage() {
   const { locale } = useI18n();
   const english = locale === "en";
   return (
-    <main className="mx-auto max-w-2xl px-5 py-10 text-[15px] leading-7 text-[#1F2937]">
+    <PageContainer
+      width="content"
+      className="py-10 text-[15px] leading-7 text-[#1F2937]"
+    >
       <p className="text-[12px] font-semibold uppercase tracking-wide text-[#6B7280]">
         {english ? "Draft for legal review" : "法律文字草稿，請自行或請顧問審閱"}
       </p>
@@ -68,6 +72,6 @@ export default function PrivacyPage() {
           {english ? "Back" : "返回"}
         </Link>
       </p>
-    </main>
+    </PageContainer>
   );
 }

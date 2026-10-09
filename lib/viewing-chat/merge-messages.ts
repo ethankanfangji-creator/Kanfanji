@@ -56,7 +56,7 @@ export function localNotesAreAuthoritative(input: {
   );
 }
 
-/** Prefer unsynced local notes so a refresh cannot resurrect a deleted/edited note. */
+/** Prefer pending/newer local notes; otherwise take the remote snapshot so deletes stick. */
 export function hydrateThreadMessages(input: {
   localMessages?: ChatMessage[];
   remoteMessages?: ChatMessage[];
@@ -76,5 +76,5 @@ export function hydrateThreadMessages(input: {
   ) {
     return input.localMessages;
   }
-  return appendChatMessages(input.localMessages, remote);
+  return remote;
 }

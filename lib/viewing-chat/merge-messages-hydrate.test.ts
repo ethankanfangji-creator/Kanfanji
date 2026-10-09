@@ -17,10 +17,10 @@ describe("mergeMessagesForHydrate", () => {
     expect(merged.map((m) => m.id)).toEqual(["a"]);
   });
 
-  it("takes remote as base when remote is newer, then appends local-only ids", () => {
+  it("takes the newer remote snapshot so another device's deletes are not resurrected", () => {
     const local = [
       { id: "a", text: "old" },
-      { id: "c", text: "local-only" },
+      { id: "c", text: "deleted-on-other-device" },
     ];
     const remote = [
       { id: "a", text: "new" },
@@ -32,7 +32,7 @@ describe("mergeMessagesForHydrate", () => {
       "2026-10-07T10:00:00.000Z",
       "2026-10-07T12:00:00.000Z",
     );
-    expect(merged.map((m) => m.id)).toEqual(["a", "b", "c"]);
+    expect(merged.map((m) => m.id)).toEqual(["a", "b"]);
     expect(merged[0]?.text).toBe("new");
   });
 });

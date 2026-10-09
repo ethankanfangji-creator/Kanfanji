@@ -62,9 +62,7 @@ import {
   pushViewingThread,
   withCloudSyncState,
 } from "@/lib/viewing-chat/cloud-push";
-import { appendChatMessages } from "@/lib/viewing-chat/append-messages";
 import { mergeMessagesForHydrate } from "@/lib/viewing-chat/merge-messages-hydrate";
-import { mergeChatMessages } from "@/lib/viewing-chat/merge-messages";
 import { ClaimLimitDialog } from "@/components/viewing-chat/ClaimLimitDialog";
 import { GuestLimitDialog } from "@/components/viewing-chat/GuestLimitDialog";
 import {
@@ -338,7 +336,16 @@ export function ViewingChatApp({
               ) {
                 return;
               }
-              saveLocalMessages(threadId, mergeChatMessages(local.messages, row.messages));
+              // In-flight local edits (newer clock) must not be replaced; a
+              // newer remote snapshot must replace the list so deletes stick.
+              if (
+                local.updatedAt &&
+                row.updated_at &&
+                local.updatedAt > row.updated_at
+              ) {
+                return;
+              }
+              saveLocalMessages(threadId, row.messages);
               patchLocalThread(threadId, {
                 cloud: {
                   state: "synced",

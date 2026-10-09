@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useI18n } from "@/components/I18nProvider";
+import { PageContainer } from "@/components/ui/primitives";
 import type { NotificationItem } from "@/lib/notifications/types";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 
@@ -80,7 +81,10 @@ export function NotificationsPage() {
   }
 
   return (
-    <main className="mx-auto min-h-screen w-full max-w-[var(--page-max-width-narrow)] bg-[var(--color-canvas)] px-4 py-6">
+    <PageContainer
+      width="narrow"
+      className="min-h-screen bg-[var(--color-canvas)] py-6"
+    >
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <p className="text-[12px] font-bold text-[#6B7280]">
@@ -143,6 +147,6 @@ export function NotificationsPage() {
           ))}
         </ul>
       )}
-    </main>
+    </PageContainer>
   );
 }

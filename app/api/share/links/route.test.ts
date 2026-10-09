@@ -115,6 +115,8 @@ describe("GET /api/share/links", () => {
         accessVersion: 1,
         urlPath: "/s/abc",
         needsRegenerate: false,
+        lat: null,
+        lng: null,
       },
     ]);
     const response = await GET(

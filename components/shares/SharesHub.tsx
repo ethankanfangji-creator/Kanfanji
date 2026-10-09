@@ -4,28 +4,40 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import {
-  Clock3,
+  Bookmark,
   Copy,
   ExternalLink,
   Link2,
+  MapPin,
   MessageSquareText,
   RefreshCw,
   Search,
   ShieldOff,
+  Trash2,
 } from "lucide-react";
 import { ClientAuthBar } from "@/components/ClientAuthBar";
 import { useI18n } from "@/components/I18nProvider";
-import { BackHomeLink } from "@/components/ui/BackHomeLink";
+import {
+  BrowseLayoutToggle,
+  browseCoverClass,
+  browseListClass,
+  useBrowseLayout,
+  useBrowseLayoutWide,
+} from "@/components/ui/BrowseLayoutToggle";
+import { BrowsePageHeader } from "@/components/ui/BrowsePageHeader";
 import { PageContainer } from "@/components/ui/primitives";
+import { ViewingMapCover } from "@/components/viewings/ViewingMapCover";
 import { formatMessage } from "@/lib/i18n";
 import { shortenAddressLabel } from "@/lib/shorten-address";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
+import type { SavedShareListItem } from "@/lib/share-access/saves";
+import { withBrowseOrigin } from "@/lib/browse-origin";
 import type {
   OwnerShareCommentListItem,
   OwnerShareLinkListItem,
 } from "@/lib/share-access/types";
 
-type Tab = "links" | "comments";
+type Tab = "links" | "comments" | "received";
 type LinkFilter = "open" | "closed" | "all";
 
 function formatWhen(iso: string | null | undefined, locale: string) {
@@ -51,9 +63,9 @@ function statusLabel(
 }
 
 function statusTone(status: OwnerShareLinkListItem["status"]) {
-  if (status === "active") return "bg-emerald-50 text-emerald-800 ring-emerald-100";
-  if (status === "expired") return "bg-amber-50 text-amber-900 ring-amber-100";
-  return "bg-stone-100 text-stone-600 ring-stone-200";
+  if (status === "active") return "bg-[#ECFDF5] text-[#065F46]";
+  if (status === "expired") return "bg-[#FFFBEB] text-[#92400E]";
+  return "bg-[#F3F4F6] text-[#4B5563]";
 }
 
 function Chip({
@@ -72,8 +84,8 @@ function Chip({
       aria-pressed={active}
       className={`inline-flex h-8 shrink-0 items-center rounded-full px-3 text-[12px] font-semibold transition ${
         active
-          ? "bg-black text-white"
-          : "bg-black/5 text-[#374151] hover:bg-black/10"
+          ? "bg-[#1A1A1A] text-white"
+          : "bg-white/80 text-[#4B5563] ring-1 ring-black/8 hover:bg-white"
       }`}
     >
       {children}
@@ -91,19 +103,19 @@ function EmptyState({
   hint: string;
 }) {
   return (
-    <div className="rounded-3xl border border-dashed border-black/10 bg-white/70 px-6 py-12 text-center">
-      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-black/[0.04] text-[#6B7280]">
+    <div className="rounded-[28px] bg-white/80 px-6 py-14 text-center shadow-[0_1px_0_rgba(0,0,0,0.04)] ring-1 ring-black/[0.04]">
+      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[#FAF6F1] text-[#6B7280]">
         {icon}
       </div>
-      <p className="mt-4 text-[15px] font-bold text-[#1A1A1A]">{title}</p>
-      <p className="mx-auto mt-1.5 max-w-sm text-[13px] leading-relaxed text-[#6B7280]">
+      <p className="mt-5 text-[16px] font-bold tracking-tight text-[#1A1A1A]">{title}</p>
+      <p className="mx-auto mt-2 max-w-sm text-[13px] leading-relaxed text-[#6B7280]">
         {hint}
       </p>
     </div>
   );
 }
 
-function ActionButton({
+function IconAction({
   label,
   onClick,
   href,
@@ -120,16 +132,15 @@ function ActionButton({
 }) {
   const toneClass =
     tone === "primary"
-      ? "bg-black text-white hover:bg-black/90"
+      ? "bg-[#1A1A1A] text-white hover:bg-black"
       : tone === "danger"
-        ? "border border-[#FECACA] bg-[#FEF2F2] text-[#991B1B] hover:bg-[#FEE2E2]"
-        : "border border-black/10 bg-white text-[#1F2937] hover:bg-black/[0.03]";
-  const className = `inline-flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center gap-1.5 rounded-full px-2.5 text-[12px] font-semibold transition disabled:opacity-40 sm:min-w-0 sm:justify-start sm:px-3 ${toneClass}`;
+        ? "text-[#991B1B] hover:bg-[#FEF2F2]"
+        : "text-[#374151] hover:bg-black/[0.04]";
+  const className = `inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition disabled:opacity-35 ${toneClass}`;
   if (href) {
     return (
       <Link href={href} aria-label={label} title={label} className={className}>
         {children}
-        <span className="hidden sm:inline">{label}</span>
       </Link>
     );
   }
@@ -143,8 +154,18 @@ function ActionButton({
       className={className}
     >
       {children}
-      <span className="hidden sm:inline">{label}</span>
     </button>
+  );
+}
+
+function ShareCover({ lat, lng }: { lat: number | null; lng: number | null }) {
+  if (lat != null && lng != null) {
+    return <ViewingMapCover lat={lat} lng={lng} />;
+  }
+  return (
+    <div className="flex h-full w-full items-center justify-center bg-[#F5F3F0]">
+      <MapPin className="h-4 w-4 text-[#9CA3AF] sm:h-5 sm:w-5" aria-hidden />
+    </div>
   );
 }
 
@@ -154,8 +175,13 @@ export function SharesHub() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  const tabParam = searchParams.get("tab");
   const initialTab: Tab =
-    searchParams.get("tab") === "comments" ? "comments" : "links";
+    tabParam === "comments"
+      ? "comments"
+      : tabParam === "received"
+        ? "received"
+        : "links";
   const initialViewingId = searchParams.get("viewingId")?.trim() || "";
 
   const [tab, setTab] = useState<Tab>(initialTab);
@@ -167,10 +193,21 @@ export function SharesHub() {
   const [viewingFilter, setViewingFilter] = useState(initialViewingId);
   const [links, setLinks] = useState<OwnerShareLinkListItem[]>([]);
   const [comments, setComments] = useState<OwnerShareCommentListItem[]>([]);
+  const [received, setReceived] = useState<SavedShareListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [toast, setToast] = useState("");
+  const [layout, setLayout] = useBrowseLayout();
+  const layoutWide = useBrowseLayoutWide();
+  const effectiveLayout = layoutWide ? layout : "list";
+  const cardShell =
+    "overflow-hidden rounded-2xl border border-black/[0.05] bg-white shadow-[0_2px_12px_rgba(0,0,0,0.03)] transition hover:border-black/10 hover:shadow-[0_4px_16px_rgba(0,0,0,0.06)]";
+  const cardMainClass =
+    effectiveLayout === "grid"
+      ? "flex gap-3 p-2.5 sm:flex-col sm:gap-2 sm:p-3"
+      : "flex gap-3 p-2.5";
+  const coverClass = browseCoverClass(effectiveLayout);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedQ(q.trim()), 250);
@@ -218,6 +255,16 @@ export function SharesHub() {
           };
           if (!response.ok) throw new Error(body.error || labels.loadFailed);
           if (!cancelled) setLinks(body.items ?? []);
+        } else if (tab === "received") {
+          const params = new URLSearchParams({ limit: "100" });
+          if (debouncedQ) params.set("q", debouncedQ);
+          const response = await fetch(`/api/share/saves?${params}`);
+          const body = (await response.json()) as {
+            items?: SavedShareListItem[];
+            error?: string;
+          };
+          if (!response.ok) throw new Error(body.error || labels.loadFailed);
+          if (!cancelled) setReceived(body.items ?? []);
         } else {
           const params = new URLSearchParams({ limit: "100" });
           if (debouncedQ) params.set("q", debouncedQ);
@@ -234,6 +281,7 @@ export function SharesHub() {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : labels.loadFailed);
           if (tab === "links") setLinks([]);
+          else if (tab === "received") setReceived([]);
           else setComments([]);
         }
       } finally {
@@ -352,52 +400,74 @@ export function SharesHub() {
     if (next === "links") {
       setViewingFilter("");
       router.replace("/shares");
-    } else {
-      const params = new URLSearchParams({ tab: "comments" });
-      if (viewingFilter) params.set("viewingId", viewingFilter);
-      router.replace(`/shares?${params}`);
+      return;
+    }
+    if (next === "received") {
+      setViewingFilter("");
+      router.replace("/shares?tab=received");
+      return;
+    }
+    const params = new URLSearchParams({ tab: "comments" });
+    if (viewingFilter) params.set("viewingId", viewingFilter);
+    router.replace(`/shares?${params}`);
+  }
+
+  async function removeReceived(item: SavedShareListItem) {
+    setBusyId(item.id);
+    try {
+      const response = await fetch(
+        `/api/share/saves?id=${encodeURIComponent(item.id)}`,
+        { method: "DELETE" },
+      );
+      if (!response.ok) {
+        showToast(labels.removeReceivedFailed);
+        return;
+      }
+      setReceived((prev) => prev.filter((row) => row.id !== item.id));
+    } catch {
+      showToast(labels.removeReceivedFailed);
+    } finally {
+      setBusyId(null);
     }
   }
 
+  const countLabel =
+    tab === "links"
+      ? formatMessage(labels.countLinks, { n: links.length })
+      : tab === "received"
+        ? formatMessage(labels.countReceived, { n: received.length })
+        : formatMessage(labels.countComments, { n: comments.length });
+
   return (
-    <div className="relative min-h-screen w-full overflow-x-hidden text-[var(--color-text)]">
+    <div className="relative min-h-screen w-full overflow-x-hidden text-[#1A1A1A]">
+      <div aria-hidden className="pointer-events-none absolute inset-0 bg-[#FAF6F1]" />
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 bg-[var(--color-canvas)]"
-      />
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-[280px] bg-[radial-gradient(90%_70%_at_10%_-10%,rgba(17,17,17,0.08),transparent_55%),radial-gradient(70%_50%_at_90%_0%,rgba(180,120,70,0.12),transparent_50%)]"
+        className="pointer-events-none absolute inset-x-0 top-0 h-[320px] bg-[radial-gradient(80%_60%_at_0%_0%,rgba(180,120,70,0.14),transparent_55%),radial-gradient(60%_50%_at_100%_10%,rgba(17,17,17,0.06),transparent_50%)]"
       />
 
-      <PageContainer narrow className="relative pb-28 pt-6">
-        <div className="mb-5 flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <BackHomeLink label={labels.back} className="mb-2" />
-            <h1 className="text-[22px] font-[800] leading-[1.15] tracking-tight">
-              {labels.title}
-            </h1>
-            <p className="mt-1 text-[13px] text-[#6B7280]">{labels.subtitle}</p>
-          </div>
-          <div className="mt-1.5 shrink-0">
-            <ClientAuthBar />
-          </div>
-        </div>
+      <PageContainer className="relative pb-28 pt-5">
+        <BrowsePageHeader
+          backLabel={messages.nav.back}
+          title={labels.title}
+          subtitle={labels.subtitle}
+          actions={<ClientAuthBar />}
+        />
 
         {!authReady ? (
           <div className="space-y-3">
-            <div className="h-11 animate-pulse rounded-full bg-black/[0.06]" />
-            <div className="h-28 animate-pulse rounded-3xl bg-black/[0.05]" />
+            <div className="h-12 animate-pulse rounded-2xl bg-black/[0.05]" />
+            <div className="h-32 animate-pulse rounded-[28px] bg-black/[0.04]" />
           </div>
         ) : !signedIn ? (
-          <div className="rounded-3xl border border-black/[0.05] bg-white/90 p-8 text-center shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-black/[0.04]">
+          <div className="rounded-[28px] bg-white px-6 py-12 text-center shadow-[0_8px_40px_rgba(0,0,0,0.05)] ring-1 ring-black/[0.04]">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[#FAF6F1]">
               <Link2 className="h-5 w-5 text-[#6B7280]" aria-hidden />
             </div>
-            <p className="mt-4 text-[15px] font-bold">{labels.signInRequired}</p>
+            <p className="mt-5 text-[16px] font-bold">{labels.signInRequired}</p>
             <Link
               href={`/login?next=${encodeURIComponent("/shares")}`}
-              className="mt-5 inline-flex h-11 items-center rounded-full bg-black px-5 text-[13px] font-bold text-white"
+              className="mt-6 inline-flex h-11 items-center rounded-full bg-[#1A1A1A] px-6 text-[13px] font-bold text-white"
             >
               {labels.signIn}
             </Link>
@@ -405,13 +475,14 @@ export function SharesHub() {
         ) : (
           <>
             <div
-              className="mb-4 inline-flex rounded-full bg-black/[0.05] p-1"
+              className="mb-4 grid grid-cols-3 gap-1 rounded-2xl bg-black/[0.04] p-1"
               role="tablist"
               aria-label={labels.title}
             >
               {(
                 [
                   ["links", labels.tabLinks, Link2],
+                  ["received", labels.tabReceived, Bookmark],
                   ["comments", labels.tabComments, MessageSquareText],
                 ] as const
               ).map(([id, label, Icon]) => (
@@ -421,21 +492,21 @@ export function SharesHub() {
                   role="tab"
                   aria-selected={tab === id}
                   onClick={() => switchTab(id)}
-                  className={`inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-[13px] font-bold transition ${
+                  className={`inline-flex min-h-10 flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-2 text-[11px] font-bold transition sm:flex-row sm:gap-1.5 sm:text-[13px] ${
                     tab === id
-                      ? "bg-white text-black shadow-sm"
+                      ? "bg-white text-[#1A1A1A] shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
                       : "text-[#6B7280] hover:text-[#111]"
                   }`}
                 >
-                  <Icon className="h-3.5 w-3.5" aria-hidden />
-                  {label}
+                  <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  <span className="truncate">{label}</span>
                 </button>
               ))}
             </div>
 
             <div
-              className="sticky top-0 z-10 -mx-1 space-y-3 bg-[var(--color-canvas)]/90 px-1 pb-3 backdrop-blur"
-              style={{ paddingTop: "max(0.25rem, env(safe-area-inset-top, 0px))" }}
+              className="sticky top-0 z-10 -mx-1 mb-4 space-y-2.5 bg-[#FAF6F1]/92 px-1 pb-3 backdrop-blur-md"
+              style={{ paddingTop: "max(0.35rem, env(safe-area-inset-top, 0px))" }}
             >
               <div className="relative">
                 <Search
@@ -446,7 +517,7 @@ export function SharesHub() {
                   value={q}
                   onChange={(event) => setQ(event.target.value)}
                   placeholder={labels.searchPlaceholder}
-                  className="h-11 w-full rounded-full border border-black/10 bg-white pl-10 pr-4 text-[14px] outline-none focus:border-black/25 focus:ring-2 focus:ring-black/5"
+                  className="h-11 w-full rounded-2xl border-0 bg-white pl-10 pr-4 text-[14px] shadow-[0_1px_0_rgba(0,0,0,0.04)] outline-none ring-1 ring-black/[0.06] focus:ring-2 focus:ring-black/15"
                 />
               </div>
 
@@ -467,7 +538,7 @@ export function SharesHub() {
                       {label}
                     </Chip>
                   ))
-                ) : viewingFilter ? (
+                ) : tab === "comments" && viewingFilter ? (
                   <Chip
                     active
                     onClick={() => {
@@ -479,164 +550,249 @@ export function SharesHub() {
                   </Chip>
                 ) : null}
 
-                {!loading ? (
-                  <p className="ml-auto text-[12px] font-semibold text-[#6B7280]">
-                    {tab === "links"
-                      ? formatMessage(labels.countLinks, { n: links.length })
-                      : formatMessage(labels.countComments, {
-                          n: comments.length,
-                        })}
-                  </p>
-                ) : null}
+                <div className="ml-auto flex items-center gap-2">
+                  <BrowseLayoutToggle
+                    layout={layout}
+                    onChange={setLayout}
+                    labels={{
+                      list: labels.layoutList,
+                      grid: labels.layoutGrid,
+                    }}
+                  />
+                  {!loading ? (
+                    <p className="text-[11px] font-semibold tracking-wide text-[#9CA3AF]">
+                      {countLabel}
+                    </p>
+                  ) : null}
+                </div>
               </div>
             </div>
 
             {error ? (
-              <div className="mb-3 rounded-2xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-[13px] font-medium text-[#991B1B]">
+              <div className="mb-3 rounded-2xl bg-[#FEF2F2] px-4 py-3 text-[13px] font-medium text-[#991B1B] ring-1 ring-[#FECACA]">
                 {error}
               </div>
             ) : null}
 
             {loading ? (
               <div className="space-y-3">
-                <div className="h-36 animate-pulse rounded-3xl bg-black/[0.05]" />
-                <div className="h-36 animate-pulse rounded-3xl bg-black/[0.04]" />
+                <div className="h-28 animate-pulse rounded-[24px] bg-black/[0.04]" />
+                <div className="h-28 animate-pulse rounded-[24px] bg-black/[0.03]" />
               </div>
+            ) : tab === "received" ? (
+              received.length === 0 ? (
+                <EmptyState
+                  icon={<Bookmark className="h-6 w-6" aria-hidden />}
+                  title={labels.emptyReceived}
+                  hint={labels.emptyReceivedHint}
+                />
+              ) : (
+                <ul className={browseListClass(effectiveLayout)}>
+                  {received.map((item) => {
+                    const openable =
+                      item.status === "active" &&
+                      !item.needsRegenerate &&
+                      Boolean(item.urlPath);
+                    const main = (
+                      <>
+                        <div className={coverClass}>
+                          <ShareCover lat={item.lat} lng={item.lng} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p
+                            className="truncate text-[13px] font-bold leading-snug text-[#1A1A1A] sm:text-[14px]"
+                            title={item.address}
+                          >
+                            {shortenAddressLabel(item.address, 48)}
+                          </p>
+                          <p className="mt-0.5 text-[11px] text-[#8A8A8A]">
+                            {formatWhen(item.savedAt, locale)}
+                          </p>
+                          <div className="mt-1.5">
+                            <span
+                              className={`rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${
+                                openable
+                                  ? statusTone(item.status)
+                                  : "bg-black/5 text-[#6B7280]"
+                              }`}
+                            >
+                              {openable
+                                ? statusLabel(item.status, labels)
+                                : labels.receivedInvalid}
+                            </span>
+                          </div>
+                        </div>
+                      </>
+                    );
+                    return (
+                      <li key={item.id}>
+                        <div
+                          className={`${cardShell} ${openable ? "" : "opacity-80"}`}
+                        >
+                          {openable ? (
+                            <Link
+                              href={withBrowseOrigin(item.urlPath, "shares")}
+                              className={cardMainClass}
+                              aria-label={labels.openReceived}
+                            >
+                              {main}
+                            </Link>
+                          ) : (
+                            <div className={cardMainClass}>{main}</div>
+                          )}
+                          <div className="flex items-center justify-end gap-0.5 border-t border-black/[0.04] px-2 py-1.5">
+                            <IconAction
+                              label={labels.removeReceived}
+                              tone="danger"
+                              disabled={busyId === item.id}
+                              onClick={() => void removeReceived(item)}
+                            >
+                              <Trash2 className="h-4 w-4" aria-hidden />
+                            </IconAction>
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )
             ) : tab === "links" ? (
               links.length === 0 ? (
                 <EmptyState
-                  icon={<Link2 className="h-5 w-5" aria-hidden />}
+                  icon={<Link2 className="h-6 w-6" aria-hidden />}
                   title={labels.emptyLinks}
                   hint={labels.emptyLinksHint}
                 />
               ) : (
-                <ul className="space-y-2.5">
-                  {links.map((item) => (
-                    <li
-                      key={item.id}
-                      className="rounded-3xl border border-black/[0.05] bg-white p-4 shadow-[0_2px_16px_rgba(0,0,0,0.03)] transition hover:border-black/10 hover:shadow-[0_6px_24px_rgba(0,0,0,0.05)]"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
+                <ul className={browseListClass(effectiveLayout)}>
+                  {links.map((item) => {
+                    const openable =
+                      item.status === "active" &&
+                      !item.needsRegenerate &&
+                      Boolean(item.urlPath);
+                    const main = (
+                      <>
+                        <div className={coverClass}>
+                          <ShareCover lat={item.lat} lng={item.lng} />
+                        </div>
+                        <div className="min-w-0 flex-1">
                           <p
-                            className="text-[15px] font-bold leading-snug text-[#111]"
+                            className="truncate text-[13px] font-bold leading-snug text-[#1A1A1A] sm:text-[14px]"
                             title={item.address}
                           >
-                            {shortenAddressLabel(item.address, 52)}
+                            {shortenAddressLabel(item.address, 48)}
                           </p>
-                          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold text-[#6B7280]">
+                          <p className="mt-0.5 text-[11px] text-[#8A8A8A]">
+                            {item.lastResolvedAt
+                              ? `${labels.lastOpened} ${formatWhen(item.lastResolvedAt, locale)}`
+                              : `${labels.created} ${formatWhen(item.createdAt, locale)}`}
+                          </p>
+                          <div className="mt-1.5">
                             <span
-                              className={`inline-flex items-center rounded-full px-2 py-0.5 ring-1 ring-inset ${statusTone(item.status)}`}
+                              className={`rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${statusTone(item.status)}`}
                             >
                               {statusLabel(item.status, labels)}
                             </span>
                           </div>
                         </div>
-                      </div>
-
-                      <div className="mt-3 grid gap-1.5 text-[12px] text-[#6B7280] sm:grid-cols-2">
-                        <p className="inline-flex items-center gap-1.5">
-                          <Clock3 className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
-                          <span>
-                            {labels.lastOpened}:{" "}
-                            <span className="font-semibold text-[#374151]">
-                              {item.lastResolvedAt
-                                ? formatWhen(item.lastResolvedAt, locale)
-                                : labels.neverOpened}
-                            </span>
-                          </span>
-                        </p>
-                        <p>
-                          {labels.created}:{" "}
-                          <span className="font-semibold text-[#374151]">
-                            {formatWhen(item.createdAt, locale)}
-                          </span>
-                        </p>
-                        {item.closedAt || item.revokedAt ? (
-                          <p>
-                            {labels.closedAt}:{" "}
-                            <span className="font-semibold text-[#374151]">
-                              {formatWhen(item.closedAt ?? item.revokedAt, locale)}
-                            </span>
-                          </p>
-                        ) : null}
-                      </div>
-
-                      <div className="mt-3.5 flex flex-wrap gap-2 border-t border-black/[0.04] pt-3">
-                        <ActionButton
-                          label={labels.copy}
-                          disabled={
-                            busyId === item.id ||
-                            item.status === "revoked" ||
-                            item.needsRegenerate ||
-                            !item.urlPath
-                          }
-                          onClick={() => void copyLink(item)}
-                        >
-                          <Copy className="h-3.5 w-3.5" aria-hidden />
-                        </ActionButton>
-                        {item.status === "closed" ? (
-                          <ActionButton
-                            label={labels.reopen}
-                            disabled={busyId === item.id}
-                            onClick={() => void reopenLink(item)}
-                          >
-                            <RefreshCw className="h-3.5 w-3.5" aria-hidden />
-                          </ActionButton>
-                        ) : item.status !== "revoked" ? (
-                          <ActionButton
-                            label={labels.stop}
-                            tone="danger"
-                            disabled={busyId === item.id}
-                            onClick={() => void stopLink(item)}
-                          >
-                            <ShieldOff className="h-3.5 w-3.5" aria-hidden />
-                          </ActionButton>
-                        ) : null}
-                        {item.status !== "revoked" ? (
-                          <ActionButton
-                            label={labels.publish}
-                            disabled={busyId === item.id}
-                            onClick={() => void publishLink(item)}
-                          >
-                            <RefreshCw className="h-3.5 w-3.5" aria-hidden />
-                          </ActionButton>
-                        ) : null}
-                        <ActionButton
-                          label={labels.viewComments}
-                          onClick={() => openCommentsFor(item.viewingId)}
-                        >
-                          <MessageSquareText className="h-3.5 w-3.5" aria-hidden />
-                        </ActionButton>
-                        <ActionButton
-                          label={labels.openViewing}
-                          tone="primary"
-                          href={`/viewings/${item.viewingId}`}
-                        >
-                          <ExternalLink className="h-3.5 w-3.5" aria-hidden />
-                        </ActionButton>
-                      </div>
-                    </li>
-                  ))}
+                      </>
+                    );
+                    return (
+                      <li key={item.id}>
+                        <div className={cardShell}>
+                          {openable ? (
+                            <Link
+                              href={withBrowseOrigin(item.urlPath, "shares")}
+                              className={cardMainClass}
+                              aria-label={`${labels.openReceived}: ${item.address}`}
+                            >
+                              {main}
+                            </Link>
+                          ) : (
+                            <div className={cardMainClass}>{main}</div>
+                          )}
+                          <div className="flex flex-wrap items-center gap-0.5 border-t border-black/[0.04] px-2 py-1.5">
+                            <IconAction
+                              label={labels.copy}
+                              disabled={
+                                busyId === item.id ||
+                                item.status === "revoked" ||
+                                item.needsRegenerate ||
+                                !item.urlPath
+                              }
+                              onClick={() => void copyLink(item)}
+                            >
+                              <Copy className="h-4 w-4" aria-hidden />
+                            </IconAction>
+                            {item.status === "closed" ? (
+                              <IconAction
+                                label={labels.reopen}
+                                disabled={busyId === item.id}
+                                onClick={() => void reopenLink(item)}
+                              >
+                                <RefreshCw className="h-4 w-4" aria-hidden />
+                              </IconAction>
+                            ) : item.status !== "revoked" ? (
+                              <IconAction
+                                label={labels.stop}
+                                tone="danger"
+                                disabled={busyId === item.id}
+                                onClick={() => void stopLink(item)}
+                              >
+                                <ShieldOff className="h-4 w-4" aria-hidden />
+                              </IconAction>
+                            ) : null}
+                            {item.status !== "revoked" ? (
+                              <IconAction
+                                label={labels.publish}
+                                disabled={busyId === item.id}
+                                onClick={() => void publishLink(item)}
+                              >
+                                <RefreshCw className="h-4 w-4" aria-hidden />
+                              </IconAction>
+                            ) : null}
+                            <IconAction
+                              label={labels.viewComments}
+                              onClick={() => openCommentsFor(item.viewingId)}
+                            >
+                              <MessageSquareText className="h-4 w-4" aria-hidden />
+                            </IconAction>
+                            <IconAction
+                              label={labels.openViewing}
+                              href={withBrowseOrigin(
+                                `/viewings/${item.viewingId}`,
+                                "shares",
+                              )}
+                            >
+                              <ExternalLink className="h-4 w-4" aria-hidden />
+                            </IconAction>
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ul>
               )
             ) : comments.length === 0 ? (
               <EmptyState
-                icon={<MessageSquareText className="h-5 w-5" aria-hidden />}
+                icon={<MessageSquareText className="h-6 w-6" aria-hidden />}
                 title={labels.emptyComments}
                 hint={labels.emptyCommentsHint}
               />
             ) : (
-              <ul className="space-y-2.5">
+              <ul className="space-y-3">
                 {comments.map((item) => (
                   <li key={item.id}>
                     <Link
-                      href={`/viewings/${item.viewingId}`}
-                      className="block rounded-3xl border border-black/[0.05] bg-white p-4 shadow-[0_2px_16px_rgba(0,0,0,0.03)] transition hover:border-black/10 hover:shadow-[0_6px_24px_rgba(0,0,0,0.05)]"
+                      href={withBrowseOrigin(
+                        `/viewings/${item.viewingId}`,
+                        "shares",
+                      )}
+                      className="block overflow-hidden rounded-[24px] bg-white p-4 shadow-[0_1px_0_rgba(0,0,0,0.04)] ring-1 ring-black/[0.04] transition hover:shadow-[0_8px_28px_rgba(0,0,0,0.06)]"
                     >
                       <div className="flex items-start justify-between gap-3">
                         <p
-                          className="min-w-0 text-[13px] font-bold text-[#111]"
+                          className="min-w-0 text-[13px] font-bold tracking-tight text-[#111]"
                           title={item.address}
                         >
                           {shortenAddressLabel(item.address, 48)}
@@ -645,10 +801,10 @@ export function SharesHub() {
                           {formatWhen(item.createdAt, locale)}
                         </span>
                       </div>
-                      <p className="mt-1 text-[12px] font-semibold text-[#6B7280]">
+                      <p className="mt-1.5 text-[12px] font-semibold text-[#9CA3AF]">
                         {item.authorLabel || messages.share.commentsGuestDefault}
                       </p>
-                      <p className="mt-2.5 whitespace-pre-wrap text-[14px] leading-relaxed text-[#1F2937]">
+                      <p className="mt-2.5 whitespace-pre-wrap text-[14px] leading-relaxed text-[#374151]">
                         {item.body}
                       </p>
                     </Link>
@@ -666,7 +822,7 @@ export function SharesHub() {
           className="pointer-events-none fixed inset-x-0 z-50 flex justify-center px-4"
           style={{ bottom: "max(1.5rem, env(safe-area-inset-bottom, 0px))" }}
         >
-          <p className="rounded-full bg-[#111] px-4 py-2.5 text-[12px] font-bold text-white shadow-[0_8px_30px_rgba(0,0,0,0.2)]">
+          <p className="rounded-full bg-[#1A1A1A] px-4 py-2.5 text-[12px] font-bold text-white shadow-[0_8px_30px_rgba(0,0,0,0.22)]">
             {toast}
           </p>
         </div>

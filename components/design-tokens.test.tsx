@@ -30,6 +30,9 @@ describe("design tokens and UI primitives", () => {
       "--touch-target: 44px",
       "--touch-target-comfortable: 48px",
       "--page-max-width: 960px",
+      "--page-max-width-narrow: 420px",
+      "--page-max-width-content: 720px",
+      "--page-max-width-wide: 1200px",
     ]) {
       expect(css).toContain(token);
     }
@@ -39,6 +42,9 @@ describe("design tokens and UI primitives", () => {
     expect(css).toContain(".setup-form-grid");
     expect(css).toContain("repeat(2, minmax(0, 1fr))");
     expect(css).toContain(".page-container");
+    expect(css).toContain(".page-container--content");
+    expect(css).toContain(".page-container--wide");
+    expect(css).toContain(".page-container--flush");
     expect(css).toContain(".ui-button");
     expect(css).toContain(".ui-input");
   });
@@ -67,6 +73,28 @@ describe("design tokens and UI primitives", () => {
     expect(screen.getByTestId("page")).toHaveClass(
       "page-container",
       "page-container--narrow",
+    );
+  });
+
+  it("supports content and wide width tiers plus flush gutters", () => {
+    render(
+      <>
+        <PageContainer width="content" data-testid="content">
+          content
+        </PageContainer>
+        <PageContainer width="wide" flush data-testid="wide">
+          wide
+        </PageContainer>
+      </>,
+    );
+    expect(screen.getByTestId("content")).toHaveClass(
+      "page-container",
+      "page-container--content",
+    );
+    expect(screen.getByTestId("wide")).toHaveClass(
+      "page-container",
+      "page-container--wide",
+      "page-container--flush",
     );
   });
 });

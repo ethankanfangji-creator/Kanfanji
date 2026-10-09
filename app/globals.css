@@ -78,9 +78,16 @@
   --z-modal: 1000;
   --z-toast: 1100;
 
-  /* Layout / interaction */
+  /* Layout / interaction
+     Tiers (use via .page-container / PageContainer):
+     - narrow  420  auth, notifications, invite cards
+     - content 720  focused single-column (ask, session, share, privacy)
+     - default 960  browse lists (viewings, shares, compare)
+     - wide   1200  multi-panel chat workspace */
   --page-max-width: 960px;
   --page-max-width-narrow: 420px;
+  --page-max-width-content: 720px;
+  --page-max-width-wide: 1200px;
   --touch-target: 44px;
   --touch-target-comfortable: 48px;
 }
@@ -110,8 +117,21 @@ body {
   max-width: var(--page-max-width-narrow);
 }
 
+.page-container--content {
+  max-width: var(--page-max-width-content);
+}
+
+.page-container--wide {
+  max-width: var(--page-max-width-wide);
+}
+
+/** Skip horizontal padding when children own their own gutters. */
+.page-container--flush {
+  padding-inline: 0;
+}
+
 @media (min-width: 640px) {
-  .page-container {
+  .page-container:not(.page-container--flush) {
     padding-inline: var(--space-page-inline-desktop);
   }
 }

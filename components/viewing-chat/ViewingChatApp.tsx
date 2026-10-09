@@ -1130,7 +1130,7 @@ export function ViewingChatApp({
           maxItems={compareItemMax}
         />
 
-        <section className="mx-auto flex min-h-0 min-w-0 max-w-[1200px] flex-1 flex-col">
+        <section className="mx-auto flex min-h-0 min-w-0 max-w-[var(--page-max-width-wide)] flex-1 flex-col">
           {viewingId ? (
             <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
               <div>

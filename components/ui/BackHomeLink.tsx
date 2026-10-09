@@ -7,7 +7,8 @@ const BACK_HOME_CLASS =
   "inline-flex min-h-[var(--touch-target)] items-center gap-1 text-[12px] font-medium text-[#6B7280] transition-colors hover:text-[#1A1A1A]";
 
 /**
- * Shared ← 回首頁 control for page headers (viewings, session, ask, shares, …).
+ * Shared ← Back control for browse / detail chrome.
+ * Prefer shared `nav.back` (“返回 / Back”); `href` may be `/`, a list hub, or in-flow.
  */
 export function BackHomeLink({
   label,

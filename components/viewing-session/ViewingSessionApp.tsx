@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
@@ -19,6 +19,8 @@ import {
 import { useI18n } from "@/components/I18nProvider";
 import { ViewingTagsPicker } from "@/components/portfolio/ViewingTagsPicker";
 import { BackHomeLink } from "@/components/ui/BackHomeLink";
+import { PageContainer } from "@/components/ui/primitives";
+import { browseOriginHome, parseBrowseOrigin } from "@/lib/browse-origin";
 import { ReportSectionsView } from "@/components/viewing-chat/ReportSectionsView";
 import { ShareReportCommentsPanel } from "@/components/viewing-chat/ShareReportCommentsPanel";
 import { ClaimLimitDialog } from "@/components/viewing-chat/ClaimLimitDialog";
@@ -318,8 +320,13 @@ function ReportGalleryItem({
 
 export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { messages: t, locale } = useI18n();
   const c = t.chat;
+  const browseBack = useMemo(() => {
+    const home = browseOriginHome(parseBrowseOrigin(searchParams.get("from")));
+    return { href: home.href, label: t.nav.back };
+  }, [searchParams, t.nav.back]);
   const [thread, setThread] = useState<ViewingChatThread | null>(null);
   const [ready, setReady] = useState(false);
   const [missing, setMissing] = useState(false);
@@ -606,16 +613,22 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
       }
 
       setShareUrl(absolute);
-      try {
-        await navigator.clipboard.writeText(absolute);
-        setShareCopied(true);
-      } catch {
-        setShareError("COPY_FAILED");
-      }
     } catch {
       setShareError(c.shareUnavailable);
     } finally {
       setShareBusy(false);
+    }
+  }
+
+  async function copyShareUrl() {
+    if (!shareUrl) return;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setShareCopied(true);
+      setShareError(null);
+    } catch {
+      setShareCopied(false);
+      setShareError("COPY_FAILED");
     }
   }
 
@@ -1372,15 +1385,19 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
     return (
       <div className="flex min-h-[100svh] flex-col items-center justify-center gap-3 bg-[#FAF6F1] px-6 text-center">
         <p className="text-[15px] font-bold">找不到這則看房。</p>
-        <BackHomeLink label={t.loginPage.backHome} />
+        <BackHomeLink label={browseBack.label} href={browseBack.href} />
       </div>
     );
   }
 
   return (
-    <div className="mx-auto flex min-h-[100svh] w-full max-w-[520px] flex-col bg-[#FAF6F1] text-[#1A1A1A]">
+    <PageContainer
+      width="content"
+      flush
+      className="flex min-h-[100svh] flex-col bg-[#FAF6F1] text-[#1A1A1A]"
+    >
       <header className="sticky top-0 z-10 border-b border-black/8 bg-[#FAF6F1]/95 px-4 py-3 backdrop-blur">
-        <BackHomeLink label={t.loginPage.backHome} />
+        <BackHomeLink label={browseBack.label} href={browseBack.href} />
         <h1 className="mt-2 text-[18px] font-bold leading-snug">{thread.address}</h1>
         <div className="mt-3">
           <ViewingTagsPicker
@@ -1711,39 +1728,39 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
         <h2 id="report-heading" className="text-[13px] font-bold tracking-wide">
           {c.reportTitle}
         </h2>
-        <div className="mt-3 rounded-2xl bg-white px-4 py-3 shadow-[0_4px_16px_rgba(0,0,0,0.04)]">
-          <p className="text-[12px] font-bold text-[#374151]">{c.reportYourRating}</p>
-          <div className="mt-1.5 flex items-center gap-1" role="group" aria-label={c.reportYourRating}>
-            {[1, 2, 3, 4, 5].map((n) => {
-              const active = (thread?.overallRating ?? 0) >= n;
-              return (
-                <button
-                  key={n}
-                  type="button"
-                  aria-label={`${c.reportYourRating}: ${n} / 5`}
-                  aria-pressed={(thread?.overallRating ?? null) === n}
-                  onClick={() =>
-                    setOverallRating(thread?.overallRating === n ? null : n)
-                  }
-                  className="inline-flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center rounded-full active:bg-black/5"
-                >
-                  <Star
-                    className={`h-6 w-6 ${
-                      active
-                        ? "fill-[#B45309] text-[#B45309]"
-                        : "fill-none text-[#D1D5DB]"
-                    }`}
-                    aria-hidden
-                  />
-                </button>
-              );
-            })}
-          </div>
-        </div>
         {!shownReport ? (
           <p className="mt-2 text-[13px] text-[#6B7280]">{c.reportNone}</p>
         ) : (
           <div className="mt-3 space-y-3 rounded-2xl bg-white px-4 py-4 shadow-[0_4px_16px_rgba(0,0,0,0.04)]">
+            <div>
+              <p className="text-[12px] font-bold text-[#374151]">{c.reportYourRating}</p>
+              <div className="mt-1.5 flex items-center gap-1" role="group" aria-label={c.reportYourRating}>
+                {[1, 2, 3, 4, 5].map((n) => {
+                  const active = (thread?.overallRating ?? 0) >= n;
+                  return (
+                    <button
+                      key={n}
+                      type="button"
+                      aria-label={`${c.reportYourRating}: ${n} / 5`}
+                      aria-pressed={(thread?.overallRating ?? null) === n}
+                      onClick={() =>
+                        setOverallRating(thread?.overallRating === n ? null : n)
+                      }
+                      className="inline-flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center rounded-full active:bg-black/5"
+                    >
+                      <Star
+                        className={`h-6 w-6 ${
+                          active
+                            ? "fill-[#B45309] text-[#B45309]"
+                            : "fill-none text-[#D1D5DB]"
+                        }`}
+                        aria-hidden
+                      />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
             {reportStale ? (
               <p className="rounded-xl bg-[#FEF3C7] px-3 py-2 text-[12px] font-semibold text-[#92400E]">
                 {c.reportStale}
@@ -2054,6 +2071,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
         labels={{
           title: c.shareNoticeTitle,
           copied: c.shareCopied,
+          copy: c.shareCopy,
           copyFailed: c.shareCopyFailed,
           hubGuide: c.shareHubGuide,
           hubCta: c.shareHubCta,
@@ -2061,7 +2079,8 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
           preparing: c.sharePreparing,
         }}
         onClose={() => setShareOpen(false)}
+        onCopy={() => void copyShareUrl()}
       />
-    </div>
+    </PageContainer>
   );
 }

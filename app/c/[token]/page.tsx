@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { connection } from "next/server";
 import { notFound } from "next/navigation";
+import { PageContainer } from "@/components/ui/primitives";
 import { resolveCompareShare } from "@/lib/comparison/share-server";
 import { serverTrack } from "@/lib/analytics/server";
 import zhHant from "@/lib/i18n/messages/zh-Hant";
@@ -25,7 +26,7 @@ export default async function CompareSharePage({
       columns?: Array<{ title?: string; cells?: { address?: { text?: string | null } } }>;
     };
     return (
-      <main className="mx-auto max-w-3xl px-4 py-8">
+      <PageContainer width="content" className="py-8">
         <p className="text-xs font-semibold text-[#6B7280]">{labels.sharedViewEyebrow}</p>
         <h1 className="mt-2 text-2xl font-bold">{labels.sharedViewTitle}</h1>
         <p className="mt-2 text-sm">{labels.sharedViewNotice.replace("{date}", resolved.createdAt.slice(0, 10))}</p>
@@ -38,7 +39,7 @@ export default async function CompareSharePage({
           ))}
         </ul>
         <Link href="/" className="mt-6 inline-flex font-bold underline">{labels.sharedViewCta}</Link>
-      </main>
+      </PageContainer>
     );
   }
   notFound();

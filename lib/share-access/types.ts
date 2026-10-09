@@ -39,6 +39,9 @@ export type OwnerShareLinkListItem = Omit<ShareLinkRecord, "token"> & {
   address: string;
   urlPath: string;
   needsRegenerate: boolean;
+  /** From published snapshot when available — list card map cover. */
+  lat: number | null;
+  lng: number | null;
 };
 
 export type OwnerShareCommentListItem = {

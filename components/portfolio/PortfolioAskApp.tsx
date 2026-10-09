@@ -6,7 +6,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { History, Plus, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { useI18n } from "@/components/I18nProvider";
 import { ViewingTagsPicker } from "@/components/portfolio/ViewingTagsPicker";
-import { BackHomeLink } from "@/components/ui/BackHomeLink";
+import { BrowsePageHeader } from "@/components/ui/BrowsePageHeader";
+import { PageContainer } from "@/components/ui/primitives";
 import { AI_CONSENT_VERSION } from "@/lib/ai-boundary/client";
 import {
   aiErrorUiCopyFromBoundary,
@@ -557,35 +558,39 @@ export function PortfolioAskApp() {
   return (
     <div className="flex min-h-[100dvh] flex-col bg-[#FAFAF8] text-[#111]">
       <header className="sticky top-0 z-10 border-b border-black/8 bg-[#FAFAF8]/95 backdrop-blur">
-        <div className="mx-auto flex max-w-2xl items-center gap-2 px-4 py-3">
-          <BackHomeLink label={p.backHome} className="shrink-0" />
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-[17px] font-bold tracking-tight">{p.title}</h1>
-            <p className="truncate text-[12px] text-[#6B7280]">
-              {session?.title || p.subtitle}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setHistoryOpen(true)}
-            className="flex h-10 w-10 items-center justify-center rounded-2xl text-[#374151] hover:bg-black/5"
-            aria-label={p.historyOpen}
-            title={p.historyOpen}
-          >
-            <History className="h-5 w-5" strokeWidth={2} />
-          </button>
-          <button
-            type="button"
-            onClick={startNewChat}
-            className="flex h-10 items-center gap-1 rounded-2xl bg-black px-3 text-[12px] font-bold text-white"
-          >
-            <Plus className="h-4 w-4" strokeWidth={2.5} />
-            {p.newChat}
-          </button>
-        </div>
+        <PageContainer width="content" className="py-3">
+          <BrowsePageHeader
+            compact
+            eyebrow={null}
+            backLabel={t.nav.back}
+            title={p.title}
+            subtitle={session?.title || p.subtitle}
+            actions={
+              <>
+                <button
+                  type="button"
+                  onClick={() => setHistoryOpen(true)}
+                  className="flex h-10 w-10 items-center justify-center rounded-2xl text-[#374151] hover:bg-black/5"
+                  aria-label={p.historyOpen}
+                  title={p.historyOpen}
+                >
+                  <History className="h-5 w-5" strokeWidth={2} />
+                </button>
+                <button
+                  type="button"
+                  onClick={startNewChat}
+                  className="flex h-10 items-center gap-1 rounded-2xl bg-black px-3 text-[12px] font-bold text-white"
+                >
+                  <Plus className="h-4 w-4" strokeWidth={2.5} />
+                  {p.newChat}
+                </button>
+              </>
+            }
+          />
+        </PageContainer>
       </header>
 
-      <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col px-4 pb-4 pt-3">
+      <PageContainer width="content" className="flex flex-1 flex-col pb-4 pt-3">
         <button
           type="button"
           onClick={openScopeSheet}
@@ -848,7 +853,7 @@ export function PortfolioAskApp() {
             {busy ? p.sending : p.send}
           </button>
         </form>
-      </main>
+      </PageContainer>
 
       {historyOpen ? (
         <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 md:items-center">

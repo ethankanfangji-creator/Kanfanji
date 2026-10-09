@@ -14,7 +14,7 @@ import {
   patchLocalThread,
   upsertLocalThread,
 } from "./local-store";
-import { appendChatMessages } from "./append-messages";
+import { mergeMessagesForHydrate } from "./merge-messages-hydrate";
 import { removeMediaByThread } from "./media-library";
 import type { ChatMessage, ViewingChatThread } from "./types";
 
@@ -144,7 +144,12 @@ export async function pullCloudThreads(userId: string) {
     upsertLocalThread({
       ...restored,
       address: row.address || restored.address,
-      messages: appendChatMessages(restored.messages ?? [], row.messages ?? []),
+      messages: mergeMessagesForHydrate(
+        restored.messages ?? [],
+        row.messages ?? [],
+        restored.updatedAt,
+        row.updated_at,
+      ),
       report: row.report ?? restored.report,
       metadata: row.metadata ?? restored.metadata,
       updatedAt: row.updated_at,

@@ -107,4 +107,16 @@ describe("hydrateThreadMessages", () => {
       }).map((message) => message.id),
     ).toEqual(["m1", "m2"]);
   });
+
+  it("drops a locally cached note that a newer cloud snapshot already deleted", () => {
+    expect(
+      hydrateThreadMessages({
+        localMessages: [base, remote],
+        remoteMessages: [base],
+        localUpdatedAt: "2026-10-04T11:00:00.000Z",
+        remoteUpdatedAt: "2026-10-04T12:00:00.000Z",
+        localCloudState: "synced",
+      }).map((message) => message.id),
+    ).toEqual(["m1"]);
+  });
 });

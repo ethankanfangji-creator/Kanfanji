@@ -1,9 +1,8 @@
-import { appendChatMessages } from "@/lib/viewing-chat/append-messages";
-
 /**
- * Merge cloud + local messages without resurrecting locally-deleted notes.
- * Newer local wins wholesale (covers deletes). Otherwise take remote as the
- * base and only append local ids the cloud has never seen.
+ * Merge cloud + local messages without resurrecting deleted notes.
+ * Newer local wins wholesale (covers in-flight local deletes/edits).
+ * Otherwise the remote owner snapshot replaces the list — appending
+ * local-only ids would bring back notes another device already removed.
  */
 export function mergeMessagesForHydrate<T extends { id: string }>(
   localMessages: T[],
@@ -14,5 +13,5 @@ export function mergeMessagesForHydrate<T extends { id: string }>(
   if (localUpdatedAt && remoteUpdatedAt && localUpdatedAt > remoteUpdatedAt) {
     return localMessages;
   }
-  return appendChatMessages(remoteMessages, localMessages);
+  return remoteMessages;
 }

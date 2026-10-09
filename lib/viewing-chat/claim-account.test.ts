@@ -246,3 +246,65 @@ describe("pull does not revive a thread deleted on the server", () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe("pull does not resurrect notes deleted on another device", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+
+  it("replaces a stale local snapshot with the newer cloud message list", async () => {
+    const kept = {
+      id: "keep",
+      role: "user" as const,
+      type: "text" as const,
+      timestamp: "2026-10-07T10:00:00.000Z",
+      text: "採光不錯",
+    };
+    const deleted = {
+      id: "gone",
+      role: "user" as const,
+      type: "text" as const,
+      timestamp: "2026-10-07T10:01:00.000Z",
+      text: "廚房小",
+    };
+    const thread = createLocalThread("12 Oak St, Vancouver, BC", [kept, deleted], null);
+    const local = getLocalThread(thread.id)!;
+    const remoteUpdatedAt = new Date(Date.parse(local.updatedAt) + 60_000).toISOString();
+    patchLocalThread(thread.id, {
+      ownerUserId: "user-1",
+      cloud: { state: "synced", revision: 2, lastSyncedAt: local.updatedAt },
+      updatedAt: local.updatedAt,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/viewing-chat/threads") {
+          return new Response(
+            JSON.stringify({ threads: [{ id: thread.id, updatedAt: remoteUpdatedAt }] }),
+            { status: 200 },
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            id: thread.id,
+            address: thread.address,
+            messages: [kept],
+            report: null,
+            metadata: null,
+            chat_state: { v: 1 },
+            revision: 3,
+            updated_at: remoteUpdatedAt,
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+    await pullCloudThreads("user-1");
+    const stored = getLocalThread(thread.id);
+    expect(stored?.messages.map((message) => message.id)).toEqual(["keep"]);
+    expect(stored?.cloud?.state).toBe("synced");
+    vi.unstubAllGlobals();
+  });
+});

@@ -1001,6 +1001,8 @@ const zhHant: Messages = {
     generatingReport: "正在生成報告…",
     generateReportNeedNotes: "先記一筆現場觀察（文字、語音或照片），再生成報告",
     generateReportUpToDate: "報告已是最新。有新筆記後再生成。",
+    generateReportNotesThin:
+      "筆記還不多，報告會較依賴公開資訊。多記一筆室內或屋況會更準——也可以直接生成。",
     briefingTitle: "物件簡介",
     briefingLoading: "正在搜尋這地址的公開資訊…",
     briefingLoadingStageLocate: "正在定位這個地址…",

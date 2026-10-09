@@ -54,6 +54,7 @@ import {
 } from "@/lib/viewing-chat/briefing";
 import { localPreferenceBlock } from "@/lib/viewing-chat/ai-preferences";
 import { applyChatStateToLocal } from "@/lib/viewing-chat/chat-state";
+import { notesAreThinForReport } from "@/lib/viewing-chat/notes-thin";
 import {
   buildChatStatePayload,
   pushViewingThreadWithConflictRetry,
@@ -361,6 +362,10 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
   );
   const reportUpToDate = Boolean(
     shownReport && fingerprint && reportFingerprint === fingerprint,
+  );
+  const notesThin = useMemo(
+    () => (thread ? notesAreThinForReport(thread.messages) : false),
+    [thread],
   );
 
   function refresh() {
@@ -1895,7 +1900,9 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
               ? "generate-report-need-notes"
               : reportUpToDate
                 ? "generate-report-up-to-date"
-                : undefined
+                : notesThin
+                  ? "generate-report-notes-thin"
+                  : undefined
           }
           aria-busy={reportBusy || undefined}
           className="mt-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-black text-[14px] font-bold text-white disabled:opacity-40"
@@ -1921,6 +1928,15 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
             role="status"
           >
             {c.generateReportUpToDate}
+          </p>
+        ) : null}
+        {notesThin && !reportBusy && !reportUpToDate ? (
+          <p
+            id="generate-report-notes-thin"
+            className="mt-2 text-center text-[12px] font-semibold text-[#6B7280]"
+            role="status"
+          >
+            {c.generateReportNotesThin}
           </p>
         ) : null}
         {guestSaveHint && !userId && thread ? (

@@ -1001,6 +1001,8 @@ const zhHans: Messages = {
     generatingReport: "正在生成报告…",
     generateReportNeedNotes: "先记一笔现场观察（文字、语音或照片），再生成报告",
     generateReportUpToDate: "报告已是最新。有新笔记后再生成。",
+    generateReportNotesThin:
+      "笔记还不多，报告会较依赖公开信息。多记一笔室内或屋况会更准——也可以直接生成。",
     briefingTitle: "物件简介",
     briefingLoading: "正在搜索这地址的公开信息…",
     briefingLoadingStageLocate: "正在定位这个地址…",

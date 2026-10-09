@@ -1022,6 +1022,8 @@ const en: Messages = {
     generateReportNeedNotes:
       "Add at least one on-site note (text, voice, or photo) before generating a report",
     generateReportUpToDate: "Report is up to date. Generate again after new notes.",
+    generateReportNotesThin:
+      "Few notes so far — the report will lean on public info. Add an interior or condition note for a sharper read, or generate anyway.",
     briefingTitle: "Property brief",
     briefingLoading: "Searching public info for this address…",
     briefingLoadingStageLocate: "Locating this address…",

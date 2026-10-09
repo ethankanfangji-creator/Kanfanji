@@ -969,6 +969,8 @@ export type Messages = {
     generateReportNeedNotes: string;
     /** Shown when Generate report is disabled because the report already matches current notes. */
     generateReportUpToDate: string;
+    /** Soft hint when notes exist but are thin — generate stays enabled. */
+    generateReportNotesThin: string;
     briefingTitle: string;
     briefingLoading: string;
     briefingLoadingStageLocate: string;

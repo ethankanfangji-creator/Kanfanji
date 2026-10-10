@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { emitShareContentUpdatedNotifications } from "@/lib/notifications/emit";
 import { republishOwnerShareLink } from "@/lib/share-access/server";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { createClient } from "@/utils/supabase/server";
@@ -18,7 +19,17 @@ export async function POST(_req: Request, ctx: Ctx) {
       return NextResponse.json({ error: "請先登入" }, { status: 401 });
     }
     const result = await republishOwnerShareLink(createAdminClient(), user.id, linkId);
-    return NextResponse.json(result);
+    emitShareContentUpdatedNotifications({
+      viewingId: result.link.viewingId,
+      shareLinkIds: result.republishedLinkIds,
+      actorUserId: user.id,
+      publishedAt: result.publishedAt,
+    });
+    return NextResponse.json({
+      link: result.link,
+      urlPath: result.urlPath,
+      needsRegenerate: result.needsRegenerate,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "更新公開內容失敗";
     const status =

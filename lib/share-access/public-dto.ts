@@ -145,6 +145,7 @@ export function toPublicSharePayload(input: {
   expiresAt?: string | null;
   passwordProtected?: boolean;
   snapshotUpdatedAt?: string | null;
+  recipientLabel?: string | null;
 }): PublicSharePayload {
   const raw =
     input.decisionSummary ??
@@ -184,6 +185,7 @@ export function toPublicSharePayload(input: {
         summary?.generatedAt ??
         input.viewing.updated_at ??
         null,
+      recipientLabel: input.recipientLabel?.trim() || null,
     },
   };
 

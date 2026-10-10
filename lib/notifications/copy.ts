@@ -58,6 +58,16 @@ export function buildNotificationCopy(input: {
       body = formatMessage(n.shareCommentBody, vars);
       emailSubject = formatMessage(n.shareCommentEmailSubject, vars);
       break;
+    case "share_comment_reply":
+      title = n.shareCommentReplyTitle;
+      body = formatMessage(n.shareCommentReplyBody, vars);
+      emailSubject = formatMessage(n.shareCommentReplyEmailSubject, vars);
+      break;
+    case "share_content_updated":
+      title = n.shareContentUpdatedTitle;
+      body = formatMessage(n.shareContentUpdatedBody, vars);
+      emailSubject = formatMessage(n.shareContentUpdatedEmailSubject, vars);
+      break;
     case "invite_created":
       title = n.inviteCreatedTitle;
       body = formatMessage(n.inviteCreatedBody, vars);

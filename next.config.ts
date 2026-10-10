@@ -7,6 +7,9 @@ const SHARE_PAGE_HEADERS = [
 ];
 
 const nextConfig: NextConfig = {
+  // LAN / VM hostname used when opening next via Network IP (not localhost).
+  // Without this, Next 16 blocks /_next/* and the page stays white.
+  allowedDevOrigins: ["100.115.92.204"],
   async headers() {
     return [
       { source: "/c/:token", headers: SHARE_PAGE_HEADERS },

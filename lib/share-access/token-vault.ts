@@ -32,3 +32,26 @@ export function decryptShareToken(payload: string, linkId: string): string {
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
 }
+
+/** Seal a guest notify email; AAD binds ciphertext to the comment row. */
+export function encryptCommentNotifyEmail(email: string, commentId: string): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", keyBytes(), iv);
+  cipher.setAAD(Buffer.from(`share_report_comments:${commentId}`));
+  const ciphertext = Buffer.concat([cipher.update(email, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `${PREFIX}.${iv.toString("base64url")}.${Buffer.concat([ciphertext, tag]).toString("base64url")}`;
+}
+
+export function decryptCommentNotifyEmail(payload: string, commentId: string): string {
+  const [version, ivPart, bodyPart] = payload.split(".");
+  if (version !== PREFIX || !ivPart || !bodyPart) throw new Error("share_cipher_invalid");
+  const body = Buffer.from(bodyPart, "base64url");
+  if (body.length < 17) throw new Error("share_cipher_invalid");
+  const tag = body.subarray(body.length - 16);
+  const ciphertext = body.subarray(0, body.length - 16);
+  const decipher = createDecipheriv("aes-256-gcm", keyBytes(), Buffer.from(ivPart, "base64url"));
+  decipher.setAAD(Buffer.from(`share_report_comments:${commentId}`));
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+}

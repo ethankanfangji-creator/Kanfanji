@@ -356,7 +356,12 @@ create table if not exists public.share_links (
   updated_at timestamptz not null default now(),
   revoked_at timestamptz,
   closed_at timestamptz,
-  last_resolved_at timestamptz
+  last_resolved_at timestamptz,
+  recipient_label text,
+  constraint share_links_recipient_label_len check (
+    recipient_label is null
+    or char_length(btrim(recipient_label)) between 1 and 40
+  )
 );
 
 create table if not exists public.share_comment_limits (
@@ -374,6 +379,10 @@ create table if not exists public.share_report_comments (
   body text not null,
   client_hash text,
   created_at timestamptz not null default now(),
+  parent_id uuid references public.share_report_comments (id) on delete cascade,
+  author_kind text not null default 'guest',
+  depth smallint not null default 0,
+  notify_email_ciphertext text,
   constraint share_report_comments_author_len check (
     char_length(author_label) between 1 and 40
   ),
@@ -382,6 +391,12 @@ create table if not exists public.share_report_comments (
   ),
   constraint share_report_comments_client_hash_len check (
     client_hash is null or char_length(client_hash) = 64
+  ),
+  constraint share_report_comments_author_kind_check check (
+    author_kind in ('guest', 'owner')
+  ),
+  constraint share_report_comments_depth_check check (
+    depth >= 0 and depth <= 8
   )
 );
 
@@ -391,14 +406,72 @@ create index if not exists share_report_comments_viewing_created_idx
 create index if not exists share_report_comments_share_link_created_idx
   on public.share_report_comments (share_link_id, created_at desc);
 
+create index if not exists share_report_comments_link_parent_created_idx
+  on public.share_report_comments (share_link_id, parent_id, created_at);
+
 alter table public.share_report_comments enable row level security;
 alter table public.share_comment_limits enable row level security;
 
 revoke all on table public.share_report_comments from public, anon, authenticated;
 revoke all on table public.share_comment_limits from public, anon, authenticated;
-grant select on table public.share_report_comments to authenticated;
+grant select (
+  id,
+  viewing_id,
+  share_link_id,
+  author_label,
+  body,
+  client_hash,
+  created_at,
+  parent_id,
+  author_kind,
+  depth
+) on table public.share_report_comments to authenticated;
 grant all on table public.share_report_comments to service_role;
 grant all on table public.share_comment_limits to service_role;
+
+create or replace function public.share_report_comments_reply_guard()
+returns trigger
+language plpgsql
+set search_path = pg_catalog, public
+as $$
+declare
+  v_parent public.share_report_comments;
+begin
+  if new.parent_id is null then
+    new.depth := 0;
+    return new;
+  end if;
+
+  select * into v_parent
+  from public.share_report_comments
+  where id = new.parent_id;
+
+  if not found then
+    raise exception 'SHARE_COMMENT_PARENT_MISSING';
+  end if;
+
+  if v_parent.share_link_id is distinct from new.share_link_id
+     or v_parent.viewing_id is distinct from new.viewing_id then
+    raise exception 'SHARE_COMMENT_PARENT_MISMATCH';
+  end if;
+
+  new.depth := v_parent.depth + 1;
+  if new.depth > 8 then
+    raise exception 'SHARE_COMMENT_DEPTH';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists share_report_comments_reply_guard on public.share_report_comments;
+create trigger share_report_comments_reply_guard
+  before insert or update of parent_id, share_link_id, viewing_id
+  on public.share_report_comments
+  for each row
+  execute function public.share_report_comments_reply_guard();
+
+revoke all on function public.share_report_comments_reply_guard() from public, anon, authenticated;
 
 drop policy if exists "owners select share report comments" on public.share_report_comments;
 create policy "owners select share report comments"
@@ -412,9 +485,16 @@ create policy "owners select share report comments"
 
 create index if not exists share_links_viewing_id_idx
   on public.share_links (viewing_id);
-create unique index if not exists share_links_one_active_per_viewing_uidx
+create unique index if not exists share_links_one_general_active_per_viewing_uidx
   on public.share_links (viewing_id)
-  where status = 'active' and revoked_at is null;
+  where status = 'active'
+    and revoked_at is null
+    and recipient_label is null;
+create unique index if not exists share_links_recipient_label_active_uidx
+  on public.share_links (viewing_id, lower(btrim(recipient_label)))
+  where status = 'active'
+    and revoked_at is null
+    and recipient_label is not null;
 
 alter table public.share_links enable row level security;
 

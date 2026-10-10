@@ -4,6 +4,7 @@ import {
   ChatReportShareSnapshotSchema,
   ChatReportShareSnapshotV2Schema,
   isPublishedShareSnapshot,
+  isSharePublicationStale,
 } from "./publication";
 
 describe("buildChatReportPublication", () => {
@@ -199,5 +200,38 @@ describe("buildChatReportPublication", () => {
     };
     expect(ChatReportShareSnapshotV2Schema.safeParse(legacy).success).toBe(true);
     expect(isPublishedShareSnapshot(legacy)).toBe(true);
+  });
+});
+
+describe("isSharePublicationStale", () => {
+  it("is false when there is no report yet", () => {
+    expect(isSharePublicationStale({ publishedAt: "2026-01-01T00:00:00.000Z" }, null)).toBe(
+      false,
+    );
+  });
+
+  it("is true when reportGeneratedAt differs from the current report", () => {
+    expect(
+      isSharePublicationStale(
+        {
+          version: 3,
+          reportGeneratedAt: "2026-01-01T00:00:00.000Z",
+          publishedAt: "2026-01-01T00:00:00.000Z",
+        },
+        { generatedAt: "2026-01-02T00:00:00.000Z" },
+      ),
+    ).toBe(true);
+  });
+
+  it("is false when the snapshot matches the current report", () => {
+    expect(
+      isSharePublicationStale(
+        {
+          reportGeneratedAt: "2026-01-02T00:00:00.000Z",
+          publishedAt: "2026-01-02T01:00:00.000Z",
+        },
+        { generatedAt: "2026-01-02T00:00:00.000Z" },
+      ),
+    ).toBe(false);
   });
 });

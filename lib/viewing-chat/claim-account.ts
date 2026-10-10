@@ -12,6 +12,7 @@ import {
   getLocalThread,
   listLocalThreads,
   patchLocalThread,
+  remintLocalThreadForCloud,
   upsertLocalThread,
 } from "./local-store";
 import { appendChatMessages } from "./append-messages";
@@ -175,20 +176,22 @@ export async function pullCloudThreads(userId: string) {
       void removeMediaByThread(thread.id);
       continue;
     }
+    const { threadId } = remintLocalThreadForCloud(thread.id);
+    const local = getLocalThread(threadId) ?? thread;
     const pushed = await pushViewingThread({
-      threadId: thread.id,
-      address: thread.address,
+      threadId,
+      address: local.address,
       previouslySynced: false,
-      messages: thread.messages,
-      chatState: buildChatStatePayload(thread),
+      messages: local.messages,
+      chatState: buildChatStatePayload(local),
       clientUpdatedAt: new Date().toISOString(),
-      report: thread.report,
-      metadata: thread.metadata,
+      report: local.report,
+      metadata: local.metadata,
     });
-    patchLocalThread(thread.id, {
+    patchLocalThread(threadId, {
       cloud: pushed.status >= 200 && pushed.status < 300
         ? { state: "synced", lastSyncedAt: new Date().toISOString(), revision: pushed.revision }
-        : withCloudSyncState(thread.cloud, "failed"),
+        : withCloudSyncState(local.cloud, "failed"),
     });
   }
 }

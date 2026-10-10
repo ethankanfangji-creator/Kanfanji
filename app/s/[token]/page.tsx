@@ -73,6 +73,7 @@ function ShareShell({
   children,
   labels,
   loginNext,
+  recipientLine,
 }: {
   children: ReactNode;
   labels: {
@@ -81,6 +82,8 @@ function ShareShell({
     closeHref?: string | null;
   };
   loginNext: string;
+  /** Provenance under eyebrow, e.g. shared for Mom. */
+  recipientLine?: string | null;
 }) {
   const backLabel = labels.close;
   const backHref = labels.closeHref;
@@ -106,6 +109,9 @@ function ShareShell({
             >
               {labels.eyebrow}
             </p>
+            {recipientLine ? (
+              <p className="mt-1.5 text-[13px] font-semibold text-[#374151]">{recipientLine}</p>
+            ) : null}
           </div>
           <div className="shrink-0">
             <ClientAuthBar loginNext={loginNext} />
@@ -235,6 +241,11 @@ function renderResult(
     close: showBack ? messages.nav.back : null,
     closeHref: showBack ? back.href : null,
   };
+  const recipientLabel =
+    result.status === "active" ? result.meta.recipientLabel : null;
+  const recipientLine = recipientLabel
+    ? share.sharedForLabel.replace("{name}", recipientLabel)
+    : share.sharedGeneralLabel;
   if (result.status !== "active") {
     return (
       <ShareStatusPage
@@ -248,7 +259,7 @@ function renderResult(
 
   if (result.chatReport) {
     return (
-      <ShareShell labels={shell} loginNext={loginNext}>
+      <ShareShell labels={shell} loginNext={loginNext} recipientLine={recipientLine}>
         <ChatReportShareCard
           report={result.chatReport}
           generatedAt={formatWhen(result.chatReport.reportGeneratedAt, locale)}
@@ -297,6 +308,7 @@ function renderResult(
         />
         <ShareReportComments
           token={token}
+          recipientLabel={recipientLabel}
           labels={{
             title: share.commentsTitle,
             empty: share.commentsEmpty,
@@ -309,6 +321,15 @@ function renderResult(
             failed: share.commentsFailed,
             rateLimited: share.commentsRateLimited,
             guestDefault: share.commentsGuestDefault,
+            namedAs: share.commentsNamedAs,
+            reply: share.commentsReply,
+            replyPlaceholder: share.commentsReplyPlaceholder,
+            replySubmit: share.commentsReplySubmit,
+            replyFailed: share.commentsReplyFailed,
+            ownerAuthor: share.commentsOwnerAuthor,
+            notifyOnReply: share.commentsNotifyOnReply,
+            notifyEmailPlaceholder: share.commentsNotifyEmailPlaceholder,
+            notifyEmailHint: share.commentsNotifyEmailHint,
           }}
         />
       </ShareShell>
@@ -321,7 +342,7 @@ function renderResult(
       : null;
 
   return (
-    <ShareShell labels={shell} loginNext={loginNext}>
+    <ShareShell labels={shell} loginNext={loginNext} recipientLine={recipientLine}>
       {summary ? (
         <DecisionSummaryCard
           snapshot={summary}

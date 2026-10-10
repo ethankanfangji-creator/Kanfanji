@@ -2,11 +2,14 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   createLocalThread,
   filterThreadsForAccount,
+  getLocalThread,
   listLocalThreads,
   LocalStoreFullError,
+  remintLocalThreadForCloud,
   threadVisibleToAccount,
   upsertLocalThread,
 } from "./local-store";
+import { isCloudThreadId } from "./thread-id";
 
 function memoryStorage() {
   const data = new Map<string, string>();
@@ -52,6 +55,28 @@ describe("local thread store", () => {
       metadata: null,
       ownerUserId: "user",
     })).toThrow(LocalStoreFullError);
+  });
+
+  it("creates UUID v4 ids (never local_ timestamps)", () => {
+    const thread = createLocalThread("99 Tyee Rd");
+    expect(isCloudThreadId(thread.id)).toBe(true);
+  });
+
+  it("remints local_ ids so cloud sync can succeed", () => {
+    upsertLocalThread({
+      id: "local_1791611244192",
+      address: "Unit 108, 369 Tyee Road",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      messages: [],
+      report: null,
+      metadata: null,
+    });
+    const result = remintLocalThreadForCloud("local_1791611244192");
+    expect(result.remapped).toBe(true);
+    expect(isCloudThreadId(result.threadId)).toBe(true);
+    expect(getLocalThread("local_1791611244192")).toBeNull();
+    expect(getLocalThread(result.threadId)?.address).toBe("Unit 108, 369 Tyee Road");
   });
 });
 

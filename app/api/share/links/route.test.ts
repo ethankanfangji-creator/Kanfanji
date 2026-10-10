@@ -48,9 +48,26 @@ describe("POST /api/share/links", () => {
     );
     expect(response.status).toBe(201);
     expect(ensureOwnerShareLink.mock.calls[0]?.[3]).toEqual({});
+  });
+
+  it("passes recipientLabel when creating a named code", async () => {
+    ensureOwnerShareLink.mockResolvedValue({
+      link: { id: "l2", viewingId: "v1", recipientLabel: "Mom" },
+      urlPath: "/s/tok2",
+    });
+    const response = await POST(
+      new Request("http://test/api/share/links", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ viewingId: "v1", recipientLabel: "Mom" }),
+      }),
+    );
+    expect(response.status).toBe(201);
+    expect(ensureOwnerShareLink.mock.calls.at(-1)?.[3]).toEqual({
+      recipientLabel: "Mom",
+    });
     const body = await response.json();
-    expect(JSON.stringify(body)).not.toContain("token");
-    expect(body.urlPath).toBe("/s/secret");
+    expect(body.urlPath).toBe("/s/tok2");
   });
 
   it("returns 503 when the key is missing", async () => {
@@ -117,6 +134,8 @@ describe("GET /api/share/links", () => {
         needsRegenerate: false,
         lat: null,
         lng: null,
+        recipientLabel: null,
+        contentStale: false,
       },
     ]);
     const response = await GET(

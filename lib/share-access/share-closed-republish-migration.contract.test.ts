@@ -15,6 +15,11 @@ describe("share_links closed + republish migration", () => {
     expect(body).toContain("closed_at");
     expect(body).toContain("set_share_link_closed");
     expect(body).toContain("republish_share_link");
+    // Fan-out republish lives in the recipient-codes migration.
+  });
+
+  it("keeps single-link republish RPC for compatibility", () => {
+    expect(body).toMatch(/create or replace function public\.republish_share_link/);
     expect(body).toContain("sl.closed_at is null");
   });
 

@@ -22,10 +22,16 @@ vi.mock("next/link", () => ({
   ),
 }));
 
+vi.mock("@/lib/share-or-copy", () => ({
+  canNativeShareUrl: () => false,
+}));
+
 const labels = {
   title: "Share this report",
   copied: "Link copied to clipboard",
+  shared: "Opened system share",
   copy: "Copy link",
+  share: "Share",
   copyFailed: "Copy failed",
   hubGuide: "Manage links in Shared reports.",
   hubCta: "Open Shared reports",
@@ -43,7 +49,7 @@ describe("ShareReportDialog", () => {
       <ShareReportDialog
         open
         url="https://example.com/s/abc"
-        copied={false}
+        feedback={null}
         busy={false}
         error={null}
         labels={labels}
@@ -71,7 +77,7 @@ describe("ShareReportDialog", () => {
       <ShareReportDialog
         open
         url="https://example.com/s/abc"
-        copied
+        feedback="copied"
         busy={false}
         error={null}
         labels={labels}
@@ -81,5 +87,28 @@ describe("ShareReportDialog", () => {
     );
     expect(screen.getByText("Link copied to clipboard")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Link copied to clipboard" })).toBeTruthy();
+  });
+
+  it("creates a general link without a recipient field", () => {
+    const onCreate = vi.fn();
+    render(
+      <ShareReportDialog
+        open
+        url={null}
+        feedback={null}
+        busy={false}
+        error={null}
+        labels={{
+          ...labels,
+          create: "Create link",
+        }}
+        onClose={vi.fn()}
+        onCopy={vi.fn()}
+        onCreate={onCreate}
+      />,
+    );
+    expect(screen.queryByRole("textbox")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Create link" }));
+    expect(onCreate).toHaveBeenCalledOnce();
   });
 });

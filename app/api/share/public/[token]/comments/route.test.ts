@@ -4,6 +4,7 @@ const resolveActiveShareForComments = vi.fn();
 const listShareCommentsForLink = vi.fn();
 const insertShareComment = vi.fn();
 const consumeShareCommentRateLimit = vi.fn();
+const emitShareCommentNotification = vi.fn();
 
 vi.mock("@/lib/share-access", () => ({
   isShareTokenFormat: (token: string) => /^[a-f0-9]{64}$/i.test(token),
@@ -27,7 +28,8 @@ vi.mock("@/utils/supabase/admin", () => ({
 }));
 
 vi.mock("@/lib/notifications/emit", () => ({
-  emitShareCommentNotification: vi.fn(),
+  emitShareCommentNotification: (...args: unknown[]) =>
+    emitShareCommentNotification(...args),
 }));
 
 import { GET, POST } from "./route";
@@ -41,6 +43,7 @@ describe("GET/POST /api/share/public/[token]/comments", () => {
       ok: true,
       viewingId: "v1",
       shareLinkId: "l1",
+      recipientLabel: null,
     });
     listShareCommentsForLink.mockResolvedValue([]);
     consumeShareCommentRateLimit.mockResolvedValue({ ok: true });
@@ -50,6 +53,9 @@ describe("GET/POST /api/share/public/[token]/comments", () => {
       body: "nice light",
       createdAt: "2026-10-04T00:00:00.000Z",
       shareLinkId: "l1",
+      parentId: null,
+      authorKind: "guest",
+      depth: 0,
     });
   });
 
@@ -109,5 +115,112 @@ describe("GET/POST /api/share/public/[token]/comments", () => {
         body: "nice light",
       }),
     );
+  });
+
+  it("forces authorLabel from named recipient codes", async () => {
+    resolveActiveShareForComments.mockResolvedValue({
+      ok: true,
+      viewingId: "v1",
+      shareLinkId: "l1",
+      recipientLabel: "媽媽",
+    });
+    insertShareComment.mockResolvedValue({
+      id: "c2",
+      authorLabel: "媽媽",
+      body: "ok",
+      createdAt: "2026-10-04T00:00:00.000Z",
+      shareLinkId: "l1",
+      parentId: null,
+      authorKind: "guest",
+      depth: 0,
+    });
+    const response = await POST(
+      new Request(`http://test/api/share/public/${token}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: "ok", authorLabel: "spoofed" }),
+      }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(response.status).toBe(201);
+    expect(insertShareComment).toHaveBeenCalledWith(
+      expect.objectContaining({ authorLabel: "媽媽", body: "ok" }),
+    );
+  });
+
+  it("accepts root notifyEmail opt-in and parentId replies on the same token link", async () => {
+    const responseRoot = await POST(
+      new Request(`http://test/api/share/public/${token}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          body: "root",
+          notifyEmail: "guest@example.com",
+        }),
+      }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(responseRoot.status).toBe(201);
+    expect(insertShareComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        shareLinkId: "l1",
+        parentId: null,
+        notifyEmail: "guest@example.com",
+      }),
+    );
+
+    insertShareComment.mockResolvedValue({
+      id: "c2",
+      viewingId: "v1",
+      authorLabel: "訪客",
+      body: "reply",
+      createdAt: "2026-10-04T00:00:01.000Z",
+      shareLinkId: "l1",
+      parentId: "c1",
+      authorKind: "guest",
+      depth: 1,
+    });
+
+    const responseReply = await POST(
+      new Request(`http://test/api/share/public/${token}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          body: "reply",
+          parentId: "c1",
+          notifyEmail: "ignored-on-reply@example.com",
+        }),
+      }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(responseReply.status).toBe(201);
+    expect(insertShareComment).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        parentId: "c1",
+        notifyEmail: null,
+        shareLinkId: "l1",
+      }),
+    );
+    expect(emitShareCommentNotification).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        parentId: "c1",
+        shareToken: token,
+        commentId: "c2",
+      }),
+    );
+  });
+
+  it("surfaces PARENT_MISMATCH when reply cannot inherit the link", async () => {
+    insertShareComment.mockRejectedValue(new Error("PARENT_MISMATCH"));
+    const response = await POST(
+      new Request(`http://test/api/share/public/${token}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: "nope", parentId: "other-link-comment" }),
+      }),
+      { params: Promise.resolve({ token }) },
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "PARENT_MISMATCH" });
   });
 });

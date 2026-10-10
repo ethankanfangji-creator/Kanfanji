@@ -38,9 +38,11 @@ export {
 export {
   buildSharePublication,
   isPublishedShareSnapshot,
+  isSharePublicationStale,
   parseMediaManifest,
   type SharePublication,
 } from "./publication";
+export { normalizeRecipientLabel } from "./server";
 export {
   isShareAccessState,
   newShareAccessState,

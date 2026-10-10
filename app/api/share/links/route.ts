@@ -80,7 +80,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "請先登入" }, { status: 401 });
     }
     const raw = await readJsonObject(req);
-    assertAllowedKeys(raw, ["viewingId", "expiresAt", "capability"]);
+    assertAllowedKeys(raw, ["viewingId", "expiresAt", "capability", "recipientLabel"]);
     const body: CreateShareLinkRequest = {
       viewingId: optionalString(raw, "viewingId", { min: 1, max: 128 }) ?? "",
       ...(Object.hasOwn(raw, "expiresAt")
@@ -89,9 +89,20 @@ export async function POST(req: Request) {
       ...(Object.hasOwn(raw, "capability")
         ? { capability: optionalEnum(raw, "capability", ["read"] as const) }
         : {}),
+      ...(Object.hasOwn(raw, "recipientLabel")
+        ? {
+            recipientLabel: optionalString(raw, "recipientLabel", {
+              max: 40,
+              nullable: true,
+            }),
+          }
+        : {}),
     };
-    const options: { expiresAt?: string | null } = {};
+    const options: { expiresAt?: string | null; recipientLabel?: string | null } = {};
     if (Object.hasOwn(body, "expiresAt")) options.expiresAt = body.expiresAt ?? null;
+    if (Object.hasOwn(body, "recipientLabel")) {
+      options.recipientLabel = body.recipientLabel ?? null;
+    }
     const result = await ensureOwnerShareLink(
       createAdminClient(),
       user.id,
@@ -111,6 +122,8 @@ export async function POST(req: Request) {
           ? 503
           : message === "SHARE_RATE_LIMITED"
             ? 429
+        : message === "RECIPIENT_EXISTS"
+          ? 409
         : message === "REPORT_NOT_READY"
           ? 409
           : message === "SHARE_EXPIRES_INVALID"

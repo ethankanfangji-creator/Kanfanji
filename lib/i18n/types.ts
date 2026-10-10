@@ -27,6 +27,16 @@ export type Messages = {
     shareCommentTitle: string;
     shareCommentBody: string;
     shareCommentEmailSubject: string;
+    shareCommentReplyTitle: string;
+    shareCommentReplyBody: string;
+    shareCommentReplyEmailSubject: string;
+    shareContentUpdatedTitle: string;
+    shareContentUpdatedBody: string;
+    shareContentUpdatedEmailSubject: string;
+    /** Email-only to guests who opted in on a public share thread. */
+    shareGuestReplyTitle: string;
+    shareGuestReplyBody: string;
+    shareGuestReplyEmailSubject: string;
     inviteCreatedTitle: string;
     inviteCreatedBody: string;
     inviteCreatedEmailSubject: string;
@@ -445,6 +455,20 @@ export type Messages = {
     commentsFailed: string;
     commentsRateLimited: string;
     commentsGuestDefault: string;
+    commentsReply: string;
+    commentsReplyPlaceholder: string;
+    commentsReplySubmit: string;
+    commentsReplyFailed: string;
+    commentsOwnerAuthor: string;
+    commentsNotifyOnReply: string;
+    commentsNotifyEmailPlaceholder: string;
+    commentsNotifyEmailHint: string;
+    /** Shown when commenting via a named recipient/group code. {name} */
+    commentsNamedAs: string;
+    /** Public page provenance for a named code. {name} */
+    sharedForLabel: string;
+    /** Public page provenance for the general (unnamed) link. */
+    sharedGeneralLabel: string;
     saveReport: string;
     saveReportDone: string;
     saveReportSaving: string;
@@ -458,51 +482,109 @@ export type Messages = {
     /** Back from a detail opened via the hub (not generic Home). */
     detailBack: string;
     tabLinks: string;
-    tabComments: string;
     tabReceived: string;
     searchPlaceholder: string;
     filterOpen: string;
     filterClosed: string;
+    /** Owner links: open snapshot behind current report. */
+    filterStale: string;
+    /** Owner links: unread share comments. */
+    filterUnread: string;
     filterAll: string;
+    /** Received tab: link still opens. */
+    filterReceivedOpen: string;
+    /** Received tab: closed / expired / revoked. */
+    filterReceivedInvalid: string;
+    /** Received tab: unread replies on the saved link. */
+    filterReceivedReplies: string;
     clearViewingFilter: string;
     countLinks: string;
-    countComments: string;
+    /** Grouped by viewing/address in the links tab. */
+    countReports: string;
     emptyLinks: string;
     emptyLinksHint: string;
+    /** Empty state for the per-report comments wall. */
     emptyComments: string;
-    emptyCommentsHint: string;
     emptyReceived: string;
     emptyReceivedHint: string;
     countReceived: string;
     openReceived: string;
+    /** Received tab — jump to public comments block. */
+    openReceivedComments: string;
+    /** Received tab — unread reply badge. */
+    hasReplies: string;
     removeReceived: string;
     removeReceivedFailed: string;
     receivedInvalid: string;
+    /** Received tab — public snapshot republished after save. */
+    contentUpdated: string;
+    /** Received tab — who created the share. {name} = sharer label. */
+    sharedBy: string;
     loadFailed: string;
     statusActive: string;
     statusExpired: string;
     statusClosed: string;
+    /** Open share snapshot behind current report — republish needed. */
+    contentStale: string;
     lastOpened: string;
     neverOpened: string;
     created: string;
     closedAt: string;
     copy: string;
+    /** System share sheet action (mobile). */
+    share: string;
     copyFailed: string;
     copied: string;
+    /** After native share sheet was presented. */
+    shared: string;
     needsRegenerate: string;
     stop: string;
     stopFailed: string;
+    /** Soft-close every open code for one report. */
+    stopAll: string;
+    stopAllConfirm: string;
+    stopAllFailed: string;
     reopen: string;
     reopenFailed: string;
+    /** Fan-out republish to all open codes for the report. */
     publish: string;
     publishDone: string;
     publishFailed: string;
     openViewing: string;
-    viewComments: string;
+    /** Preview the public /s/ page for one code. */
+    openPublicPage: string;
+    /** Owner aggregation wall on each shared-report card. */
+    commentsWall: string;
     signInRequired: string;
     signIn: string;
     layoutList: string;
     layoutGrid: string;
+    /** Unnamed general link label in the hub. */
+    recipientGeneral: string;
+    /** Named recipient/group column / chip. */
+    recipientNamed: string;
+    addRecipient: string;
+    addRecipientPlaceholder: string;
+    addRecipientHint: string;
+    addRecipientFailed: string;
+    recipientExists: string;
+    deleteComment: string;
+    deleteCommentFailed: string;
+    reply: string;
+    replyPlaceholder: string;
+    replySubmit: string;
+    replyFailed: string;
+    ownerAuthor: string;
+    /** Invalidate one recipient code and issue a new token. */
+    rotate: string;
+    rotateFailed: string;
+    rotateConfirm: string;
+    /** Per-recipient avatar sheet title / aria. */
+    manageRecipient: string;
+    unreadComments: string;
+    /** Avatar overflow chip; {n} = hidden count. */
+    moreRecipients: string;
+    close: string;
   };
   shareAccess: {
     title: string;
@@ -1258,6 +1340,7 @@ export type Messages = {
     shareManage: string;
     shareNeedsRegenerate: string;
     shareSyncing: string;
+    shareSyncFailed: string;
     shareBlockedLimit: string;
     shareNoticeTitle: string;
     shareNoticeBody: string;
@@ -1275,8 +1358,11 @@ export type Messages = {
     /** After regenerating a report while an active share link exists. */
     sharePublishAfterReport: string;
     shareCopy: string;
+    /** Open the OS share sheet when available. */
+    shareNative: string;
     shareCopyFailed: string;
     shareCopied: string;
+    shareShared: string;
     shareHubGuide: string;
     shareHubCta: string;
     sharePreparing: string;

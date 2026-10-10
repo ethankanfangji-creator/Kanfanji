@@ -81,7 +81,7 @@ export type ChatReportScores = {
 };
 
 export type ChatReportSnapshot = {
-  /** Report title, e.g. "1167 Victory Drive — 看房評估報告". */
+  /** Report title, e.g. "看房評估報告" (address shown separately in UI). */
   title?: string;
   meta?: ChatReportMeta;
   /** Markdown sections (ChatGPT template). */

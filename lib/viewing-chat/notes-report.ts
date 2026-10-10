@@ -25,6 +25,10 @@ import {
   normalizeReportMeta,
   normalizeReportScores,
 } from "@/lib/viewing-chat/report-sections";
+import {
+  DEFAULT_CHAT_REPORT_TITLE,
+  resolveChatReportTitle,
+} from "@/lib/viewing-chat/report-title";
 import type {
   ChatMediaRef,
   ChatMessage,
@@ -114,7 +118,7 @@ export async function buildNotesOnlyReport(input: {
   if (!notes.trim() && !(input.propertyFacts?.length) && !briefingHasContent(input.briefing)) {
     return {
       report: buildSnapshot({
-        title: `${input.address} — 看房評估報告`,
+        title: DEFAULT_CHAT_REPORT_TITLE,
         pros: [],
         risks: [],
         nextSteps: [],
@@ -181,8 +185,7 @@ Return the ChatGPT Victory Drive template JSON: title, meta, overview, interior,
   }
 
   const parsed = llmParsed.data;
-  const title =
-    parsed.title?.trim() || `${input.address} — 看房評估報告`;
+  const title = resolveChatReportTitle(parsed.title);
   const meta = normalizeReportMeta(parsed.meta);
   const overview = parsed.overview?.trim() || "";
   const interior = parsed.interior?.trim() || "";

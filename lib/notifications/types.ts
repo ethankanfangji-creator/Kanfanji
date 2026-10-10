@@ -1,5 +1,7 @@
 export const NOTIFICATION_TYPES = [
   "share_comment",
+  "share_comment_reply",
+  "share_content_updated",
   "invite_created",
   "invite_accepted",
   "ask_ready",

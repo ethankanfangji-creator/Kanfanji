@@ -474,6 +474,51 @@ export function isPublishedShareSnapshot(
   );
 }
 
+function reportGeneratedAt(report: unknown): string | null {
+  if (!report || typeof report !== "object" || Array.isArray(report)) return null;
+  const generatedAt = (report as { generatedAt?: unknown }).generatedAt;
+  return typeof generatedAt === "string" && generatedAt.trim()
+    ? generatedAt.trim()
+    : null;
+}
+
+/**
+ * True when the viewing has a newer report than the frozen public snapshot.
+ * Used for owner hub “needs update” badges on open share links.
+ */
+export function isSharePublicationStale(
+  publishedSnapshot: unknown,
+  viewingReport: unknown,
+): boolean {
+  const currentGeneratedAt = reportGeneratedAt(viewingReport);
+  if (!currentGeneratedAt) return false;
+  if (
+    !publishedSnapshot ||
+    typeof publishedSnapshot !== "object" ||
+    Array.isArray(publishedSnapshot)
+  ) {
+    return true;
+  }
+  const snap = publishedSnapshot as {
+    reportGeneratedAt?: unknown;
+    publishedAt?: unknown;
+  };
+  const snapGeneratedAt =
+    typeof snap.reportGeneratedAt === "string" && snap.reportGeneratedAt.trim()
+      ? snap.reportGeneratedAt.trim()
+      : null;
+  if (snapGeneratedAt) return snapGeneratedAt !== currentGeneratedAt;
+  const publishedAt =
+    typeof snap.publishedAt === "string" && snap.publishedAt.trim()
+      ? snap.publishedAt.trim()
+      : null;
+  if (!publishedAt) return true;
+  const currentMs = Date.parse(currentGeneratedAt);
+  const publishedMs = Date.parse(publishedAt);
+  if (!Number.isFinite(currentMs) || !Number.isFinite(publishedMs)) return false;
+  return currentMs > publishedMs;
+}
+
 export function parseMediaManifest(value: unknown): PublishedShareMediaItem[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {

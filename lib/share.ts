@@ -144,6 +144,11 @@ export async function resolvePublicShare(
           : mapStatusToFailure("forbidden");
       }
       void touchShareResolved(admin, finalRow).catch(() => undefined);
+      const recipientRaw = finalRow.shareLink.recipient_label;
+      const recipientLabel =
+        typeof recipientRaw === "string" && recipientRaw.trim()
+          ? recipientRaw.trim().slice(0, 40)
+          : null;
       return {
         version: 1,
         capability: "read",
@@ -158,6 +163,7 @@ export async function resolvePublicShare(
           passwordProtected: false,
           expiresAt: finalRow.shareLink.expires_at,
           snapshotUpdatedAt: published.publishedAt,
+          recipientLabel,
         },
       };
     }
@@ -191,6 +197,11 @@ export async function resolvePublicShare(
 
     void touchShareResolved(admin, finalRow).catch(() => undefined);
 
+    const recipientRaw = finalRow.shareLink.recipient_label;
+    const recipientLabel =
+      typeof recipientRaw === "string" && recipientRaw.trim()
+        ? recipientRaw.trim().slice(0, 40)
+        : null;
     return toPublicSharePayload({
       viewing,
       decisionSummary: decision,
@@ -199,6 +210,7 @@ export async function resolvePublicShare(
       expiresAt: finalRow.shareLink.expires_at ?? null,
       passwordProtected: false,
       snapshotUpdatedAt: published.publishedAt,
+      recipientLabel,
     });
   } catch {
     return mapStatusToFailure("error");

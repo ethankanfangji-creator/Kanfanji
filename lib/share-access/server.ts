@@ -13,6 +13,7 @@ import {
   buildChatReportPublication,
   buildSharePublication,
   isPublishedShareSnapshot,
+  isSharePublicationStale,
   parseMediaManifest,
 } from "./publication";
 import type {
@@ -53,12 +54,21 @@ export type ShareLinkRow = {
   last_resolved_at: string | null;
   published_snapshot: unknown;
   media_manifest: unknown;
+  recipient_label?: string | null;
 };
 
 const LINK_COLUMNS =
-  "id, viewing_id, token, token_ciphertext, capability, status, expires_at, password_hash, access_version, created_at, updated_at, revoked_at, closed_at, last_resolved_at, published_snapshot, media_manifest";
+  "id, viewing_id, token, token_ciphertext, capability, status, expires_at, password_hash, access_version, created_at, updated_at, revoked_at, closed_at, last_resolved_at, published_snapshot, media_manifest, recipient_label";
 const LINK_GATE_COLUMNS =
-  "id, viewing_id, capability, status, expires_at, password_hash, access_version, created_at, updated_at, revoked_at, closed_at, last_resolved_at";
+  "id, viewing_id, capability, status, expires_at, password_hash, access_version, created_at, updated_at, revoked_at, closed_at, last_resolved_at, recipient_label";
+
+/** Normalize optional recipient/group label; empty → null. */
+export function normalizeRecipientLabel(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const value = raw.replace(/\s+/g, " ").trim();
+  if (!value) return null;
+  return value.slice(0, 40);
+}
 
 export type PublishedShareRow = {
   shareLink: ShareLinkRow;
@@ -118,6 +128,8 @@ export function toShareLinkRecord(row: ShareLinkRow): ShareLinkRecord {
         : expired
           ? "expired"
           : "active";
+  const label =
+    typeof row.recipient_label === "string" ? row.recipient_label.trim() : "";
   return {
     id: row.id,
     viewingId: row.viewing_id,
@@ -132,6 +144,7 @@ export function toShareLinkRecord(row: ShareLinkRow): ShareLinkRecord {
     closedAt: row.closed_at,
     lastResolvedAt: row.last_resolved_at,
     accessVersion: row.access_version,
+    recipientLabel: label || null,
   };
 }
 
@@ -152,6 +165,10 @@ async function fetchOwnedViewing(
   return data as ViewingShareRow;
 }
 
+/**
+ * Returns the general (unnamed) active link for a viewing, if any.
+ * Named recipient codes are listed via listOwnerShareLinks / hub list.
+ */
 export async function getOwnerShareLink(
   supabase: SupabaseClient,
   userId: string,
@@ -165,6 +182,7 @@ export async function getOwnerShareLink(
     .eq("viewing_id", viewingId)
     .eq("status", "active")
     .is("revoked_at", null)
+    .is("recipient_label", null)
     .maybeSingle();
   if (error) throw error;
   const row = data as ShareLinkRow | null;
@@ -212,7 +230,7 @@ export async function listOwnerShareLinksAcrossViewings(
   let query = supabase
     .from("share_links")
     .select(
-      "id, viewing_id, token, token_ciphertext, capability, status, expires_at, password_hash, access_version, created_at, updated_at, revoked_at, closed_at, last_resolved_at, published_snapshot, media_manifest, viewings!inner(id, user_id, address)",
+      "id, viewing_id, token, token_ciphertext, capability, status, expires_at, password_hash, access_version, created_at, updated_at, revoked_at, closed_at, last_resolved_at, published_snapshot, media_manifest, recipient_label, viewings!inner(id, user_id, address, report)",
     )
     .eq("viewings.user_id", userId)
     .order("created_at", { ascending: false })
@@ -231,7 +249,12 @@ export async function listOwnerShareLinksAcrossViewings(
   const { data, error } = await query;
   if (error) throw error;
 
-  type ViewingJoin = { id: string; user_id: string; address: string };
+  type ViewingJoin = {
+    id: string;
+    user_id: string;
+    address: string;
+    report: unknown;
+  };
   return ((data ?? []) as unknown as Array<
     ShareLinkRow & { viewings: ViewingJoin | ViewingJoin[] | null }
   >).map((row) => {
@@ -241,6 +264,11 @@ export async function listOwnerShareLinksAcrossViewings(
     const { token: _token, ...rest } = record;
     void _token;
     const coords = coordsFromPublishedSnapshot(row.published_snapshot);
+    const open =
+      record.status === "active" && !record.revokedAt && !record.closedAt;
+    const contentStale =
+      open &&
+      isSharePublicationStale(row.published_snapshot, viewing?.report ?? null);
     return {
       ...rest,
       address: (viewing?.address ?? "").trim() || "—",
@@ -248,6 +276,7 @@ export async function listOwnerShareLinksAcrossViewings(
       needsRegenerate: path.needsRegenerate,
       lat: coords?.lat ?? null,
       lng: coords?.lng ?? null,
+      contentStale,
     };
   });
 }
@@ -259,26 +288,33 @@ export async function ensureOwnerShareLink(
   options?: {
     expiresAt?: string | null;
     rotateToken?: boolean;
+    /** When set, always insert a new named recipient/group code. */
+    recipientLabel?: string | null;
   },
 ): Promise<{ link: ShareLinkRecord; urlPath: string; needsRegenerate?: boolean }> {
   const viewing = await fetchOwnedViewing(supabase, userId, viewingId);
   if (!viewing) throw new Error("VIEWING_NOT_FOUND");
   if (options) assertChatShareExpiry(viewing, options);
 
+  const recipientLabel = normalizeRecipientLabel(options?.recipientLabel);
+
   if (options?.rotateToken) {
     const current = await getOwnerShareLink(supabase, userId, viewingId);
     if (current.link) return rotateOwnerShareLink(supabase, userId, current.link.id);
   }
 
-  const current = await getOwnerShareLink(supabase, userId, viewingId);
-  if (current.link) {
-    const patch: { expiresAt?: string | null } = {};
-    if (options && Object.hasOwn(options, "expiresAt")) patch.expiresAt = options.expiresAt ?? null;
-    const link =
-      Object.keys(patch).length > 0
-        ? await updateOwnerShareLink(supabase, userId, current.link.id, patch)
-        : current.link;
-    return { link, urlPath: current.urlPath, needsRegenerate: current.needsRegenerate };
+  // General link: reuse existing unnamed active row.
+  if (!recipientLabel) {
+    const current = await getOwnerShareLink(supabase, userId, viewingId);
+    if (current.link) {
+      const patch: { expiresAt?: string | null } = {};
+      if (options && Object.hasOwn(options, "expiresAt")) patch.expiresAt = options.expiresAt ?? null;
+      const link =
+        Object.keys(patch).length > 0
+          ? await updateOwnerShareLink(supabase, userId, current.link.id, patch)
+          : current.link;
+      return { link, urlPath: current.urlPath, needsRegenerate: current.needsRegenerate };
+    }
   }
 
   const token = generateShareToken();
@@ -316,12 +352,17 @@ export async function ensureOwnerShareLink(
         options && Object.hasOwn(options, "expiresAt") ? options.expiresAt ?? null : null,
       password_hash: null,
       closed_at: null,
+      recipient_label: recipientLabel,
       published_snapshot: publication.snapshot,
       media_manifest: publication.mediaManifest,
     })
     .select(LINK_COLUMNS)
     .single();
-  if (error) throw error;
+  if (error) {
+    const code = typeof error === "object" && error && "code" in error ? String(error.code) : "";
+    if (code === "23505") throw new Error("RECIPIENT_EXISTS");
+    throw error;
+  }
   const link = toShareLinkRecord(data as ShareLinkRow);
   return {
     link,
@@ -346,11 +387,48 @@ export async function setOwnerShareLinkClosed(
   return toShareLinkRecord(next);
 }
 
+/** Soft-close every open (non-revoked) link for a viewing the user owns. */
+export async function closeAllOwnerShareLinksForViewing(
+  supabase: SupabaseClient,
+  userId: string,
+  viewingId: string,
+): Promise<ShareLinkRecord[]> {
+  const viewing = await fetchOwnedViewing(supabase, userId, viewingId);
+  if (!viewing) throw new Error("VIEWING_NOT_FOUND");
+  const { data, error } = await supabase
+    .from("share_links")
+    .select("id")
+    .eq("viewing_id", viewingId)
+    .eq("status", "active")
+    .is("revoked_at", null)
+    .is("closed_at", null);
+  if (error) throw error;
+  const ids = (data ?? [])
+    .map((row) => (typeof row.id === "string" ? row.id : ""))
+    .filter(Boolean);
+  const closed: ShareLinkRecord[] = [];
+  for (const id of ids) {
+    closed.push(await setOwnerShareLinkClosed(supabase, userId, id, true));
+  }
+  return closed;
+}
+
+/**
+ * Refresh published snapshot on every active (non-revoked) link for the viewing.
+ * Tokens stay the same. Returns the link that triggered the publish when present.
+ */
 export async function republishOwnerShareLink(
   supabase: SupabaseClient,
   userId: string,
   linkId: string,
-): Promise<{ link: ShareLinkRecord; urlPath: string; needsRegenerate: boolean }> {
+): Promise<{
+  link: ShareLinkRecord;
+  urlPath: string;
+  needsRegenerate: boolean;
+  /** All open codes that received the new snapshot (for saver notifications). */
+  republishedLinkIds: string[];
+  publishedAt: string;
+}> {
   const row = await fetchOwnedLink(supabase, userId, linkId);
   if (!row || row.status !== "active") throw new Error("LINK_NOT_FOUND");
   const viewing = await fetchOwnedViewing(supabase, userId, row.viewing_id);
@@ -370,20 +448,30 @@ export async function republishOwnerShareLink(
       })
     : buildSharePublication(viewing);
   if (!publication.snapshot) throw new Error("REPORT_NOT_READY");
-  const { data, error } = await supabase.rpc("republish_share_link", {
-    p_link_id: linkId,
+  const { data, error } = await supabase.rpc("republish_viewing_share_links", {
+    p_viewing_id: row.viewing_id,
     p_user_id: userId,
     p_snapshot: publication.snapshot,
     p_manifest: publication.mediaManifest,
   });
   if (error) throw error;
-  const next = (Array.isArray(data) ? data[0] : data) as ShareLinkRow | null;
+  const rows = (Array.isArray(data) ? data : data ? [data] : []) as ShareLinkRow[];
+  const next = rows.find((item) => item.id === linkId) ?? rows[0] ?? null;
   if (!next) throw new Error("LINK_NOT_FOUND");
   const path = publicPathForRow(next);
+  const publishedAt =
+    publication.snapshot &&
+    typeof publication.snapshot === "object" &&
+    typeof (publication.snapshot as { publishedAt?: unknown }).publishedAt ===
+      "string"
+      ? String((publication.snapshot as { publishedAt: string }).publishedAt)
+      : new Date().toISOString();
   return {
     link: toShareLinkRecord(next),
     urlPath: path.urlPath,
     needsRegenerate: path.needsRegenerate,
+    republishedLinkIds: rows.map((item) => item.id),
+    publishedAt,
   };
 }
 

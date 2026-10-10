@@ -7,6 +7,7 @@ import {
   listShareCommentsForLink,
   normalizeCommentAuthor,
   normalizeCommentBody,
+  normalizeNotifyEmail,
   optionalClientHash,
   resolveActiveShareForComments,
 } from "@/lib/share-access/comments";
@@ -31,7 +32,6 @@ export async function GET(_req: Request, ctx: Ctx) {
   if (!isShareTokenFormat(token)) {
     return NextResponse.json({ error: "INVALID_TOKEN" }, { status: 404, headers });
   }
-  // Password sharing is retired; always treat as unlocked.
   const resolved = await resolveActiveShareForComments(token, true);
   if (!resolved.ok) {
     return NextResponse.json(
@@ -64,8 +64,12 @@ export async function POST(req: Request, ctx: Ctx) {
   if (!commentBody) {
     return NextResponse.json({ error: "INVALID_COMMENT" }, { status: 400, headers });
   }
-  const authorLabel = normalizeCommentAuthor(record.authorLabel, "訪客");
   const clientHash = optionalClientHash(record.clientHash);
+  const parentId =
+    typeof record.parentId === "string" && record.parentId.trim()
+      ? record.parentId.trim()
+      : null;
+  const notifyEmail = normalizeNotifyEmail(record.notifyEmail);
 
   try {
     const limited = await consumeShareCommentRateLimit(clientIp(req), token);
@@ -87,24 +91,41 @@ export async function POST(req: Request, ctx: Ctx) {
       );
     }
 
+    const authorLabel = resolved.recipientLabel
+      ? resolved.recipientLabel
+      : normalizeCommentAuthor(record.authorLabel, "訪客");
+
     const comment = await insertShareComment({
       viewingId: resolved.viewingId,
       shareLinkId: resolved.shareLinkId,
       authorLabel,
       body: commentBody,
       clientHash,
+      parentId,
+      authorKind: "guest",
+      notifyEmail: parentId ? null : notifyEmail,
     });
     emitShareCommentNotification({
       viewingId: resolved.viewingId,
+      shareLinkId: resolved.shareLinkId,
       commentId: comment.id,
       authorLabel: comment.authorLabel,
       bodyPreview: comment.body,
+      parentId: comment.parentId,
+      shareToken: token,
     });
     return NextResponse.json({ comment }, { status: 201, headers });
   } catch (error) {
     const message = error instanceof Error ? error.message : "COMMENT_FAILED";
     if (message === "SHARE_UNAVAILABLE") {
       return NextResponse.json({ error: message }, { status: 503, headers });
+    }
+    if (
+      message === "PARENT_NOT_FOUND" ||
+      message === "PARENT_MISMATCH" ||
+      message === "DEPTH_EXCEEDED"
+    ) {
+      return NextResponse.json({ error: message }, { status: 400, headers });
     }
     return NextResponse.json({ error: "COMMENT_FAILED" }, { status: 503, headers });
   }

@@ -7,6 +7,7 @@ import type { PropertyReport } from "@/lib/property-facts/report-types";
 import type { ChatMessage, ChatReportSnapshot, ViewingChatThread } from "./types";
 import { isExpiredGuestThread } from "./guest-retention";
 import { coerceOverallRating } from "./overall-rating";
+import { createCloudThreadId, isCloudThreadId } from "./thread-id";
 
 const STORAGE_KEY = "kanfangji.viewingChat.threads.v1";
 
@@ -135,10 +136,7 @@ export function createLocalThread(
 ): ViewingChatThread {
   const now = new Date().toISOString();
   const thread: ViewingChatThread = {
-    id:
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : `local_${Date.now()}`,
+    id: createCloudThreadId(),
     address: address.trim(),
     createdAt: now,
     updatedAt: now,
@@ -207,6 +205,27 @@ export function deleteLocalThread(id: string): boolean {
   if (next.length === all.length) return false;
   writeAll(next);
   return true;
+}
+
+/**
+ * Guest fallbacks used `local_<timestamp>` which cloud create rejects.
+ * Remap to a UUID v4 in place so sync/share can proceed.
+ */
+export function remintLocalThreadForCloud(
+  id: string,
+): { threadId: string; remapped: boolean } {
+  if (isCloudThreadId(id)) return { threadId: id, remapped: false };
+  const existing = getLocalThread(id);
+  if (!existing) return { threadId: id, remapped: false };
+  const nextId = createCloudThreadId();
+  deleteLocalThread(id);
+  upsertLocalThread({
+    ...existing,
+    id: nextId,
+    cloud: undefined,
+    updatedAt: new Date().toISOString(),
+  });
+  return { threadId: nextId, remapped: true };
 }
 
 export function setLocalThreadPinned(id: string, pinned: boolean): ViewingChatThread | null {

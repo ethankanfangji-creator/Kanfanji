@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { resolveAccountFaces } from "@/lib/auth/account-face";
 import { fetchViewingByShareTokenAdmin, type ShareLinkRow } from "./server";
 import { decryptShareToken } from "./token-vault";
 import { isShareTokenFormat } from "./crypto";
@@ -11,9 +12,36 @@ export type SavedShareListItem = {
   status: "active" | "closed" | "revoked" | "expired";
   savedAt: string;
   needsRegenerate: boolean;
+  /** True when the public snapshot was republished after this save. */
+  contentUpdated: boolean;
   lat: number | null;
   lng: number | null;
+  /** Viewing owner who created the share link. */
+  sharedByLabel: string;
+  sharedByAvatarUrl: string | null;
+  /** Named recipient code on the saved link, if any. */
+  recipientLabel: string | null;
 };
+
+/** Exported for tests — publishedAt after save means owner republished. */
+export function contentUpdatedSinceSave(
+  snapshot: unknown,
+  savedAt: string,
+): boolean {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
+    return false;
+  }
+  const snap = snapshot as { publishedAt?: unknown };
+  const publishedAt =
+    typeof snap.publishedAt === "string" && snap.publishedAt.trim()
+      ? snap.publishedAt.trim()
+      : null;
+  if (!publishedAt) return false;
+  const publishedMs = Date.parse(publishedAt);
+  const savedMs = Date.parse(savedAt);
+  if (!Number.isFinite(publishedMs) || !Number.isFinite(savedMs)) return false;
+  return publishedMs > savedMs;
+}
 
 function addressFromSnapshot(snapshot: unknown): string {
   if (!snapshot || typeof snapshot !== "object") return "";
@@ -170,12 +198,37 @@ export async function listSavedShares(
   const { data: links, error: linkError } = await admin
     .from("share_links")
     .select(
-      "id, viewing_id, token, token_ciphertext, capability, status, expires_at, password_hash, access_version, created_at, updated_at, revoked_at, closed_at, last_resolved_at, published_snapshot, media_manifest",
+      "id, viewing_id, token, token_ciphertext, capability, status, expires_at, password_hash, access_version, created_at, updated_at, revoked_at, closed_at, last_resolved_at, published_snapshot, media_manifest, recipient_label",
     )
     .in("id", linkIds);
   if (linkError) throw linkError;
   const byId = new Map(
     ((links ?? []) as ShareLinkRow[]).map((link) => [link.id, link]),
+  );
+
+  const viewingIds = [
+    ...new Set(
+      [...byId.values()]
+        .map((link) => link.viewing_id)
+        .filter((id): id is string => typeof id === "string" && id.length > 0),
+    ),
+  ];
+  const ownerByViewing = new Map<string, string>();
+  if (viewingIds.length > 0) {
+    const { data: viewings, error: viewingError } = await admin
+      .from("viewings")
+      .select("id, user_id")
+      .in("id", viewingIds);
+    if (viewingError) throw viewingError;
+    for (const viewing of (viewings ?? []) as Array<{ id: string; user_id: string }>) {
+      if (viewing.id && viewing.user_id) {
+        ownerByViewing.set(viewing.id, viewing.user_id);
+      }
+    }
+  }
+  const faces = await resolveAccountFaces(
+    admin,
+    [...new Set(ownerByViewing.values())],
   );
 
   const q = input?.q?.trim().toLowerCase();
@@ -184,7 +237,18 @@ export async function listSavedShares(
     const link = byId.get(row.share_link_id);
     if (!link) continue;
     const address = addressFromSnapshot(link.published_snapshot) || "—";
-    if (q && !address.toLowerCase().includes(q)) continue;
+    const ownerId = ownerByViewing.get(link.viewing_id) ?? "";
+    const face = faces.get(ownerId) ?? { label: "—", avatarUrl: null };
+    const recipientRaw =
+      typeof link.recipient_label === "string" ? link.recipient_label.trim() : "";
+    if (
+      q &&
+      !address.toLowerCase().includes(q) &&
+      !face.label.toLowerCase().includes(q) &&
+      !recipientRaw.toLowerCase().includes(q)
+    ) {
+      continue;
+    }
     const path = pathForRow(link);
     const coords = coordsFromSnapshot(link.published_snapshot);
     items.push({
@@ -195,8 +259,15 @@ export async function listSavedShares(
       status: linkStatus(link),
       savedAt: row.created_at,
       needsRegenerate: path.needsRegenerate,
+      contentUpdated: contentUpdatedSinceSave(
+        link.published_snapshot,
+        row.created_at,
+      ),
       lat: coords?.lat ?? null,
       lng: coords?.lng ?? null,
+      sharedByLabel: face.label,
+      sharedByAvatarUrl: face.avatarUrl,
+      recipientLabel: recipientRaw || null,
     });
   }
   return items;

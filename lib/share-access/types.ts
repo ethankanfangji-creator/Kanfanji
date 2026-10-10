@@ -32,6 +32,8 @@ export type ShareLinkRecord = {
   lastResolvedAt: string | null;
   /** Increments whenever existing unlock cookies must stop working. */
   accessVersion: number;
+  /** Named recipient/group code; null = general anonymous link. */
+  recipientLabel: string | null;
 };
 
 /** Cross-viewing row for the owner shares hub (never includes raw token). */
@@ -42,6 +44,11 @@ export type OwnerShareLinkListItem = Omit<ShareLinkRecord, "token"> & {
   /** From published snapshot when available — list card map cover. */
   lat: number | null;
   lng: number | null;
+  /**
+   * Open link whose frozen snapshot is behind the viewing’s current report
+   * (owner should republish).
+   */
+  contentStale: boolean;
 };
 
 export type OwnerShareCommentListItem = {
@@ -52,6 +59,10 @@ export type OwnerShareCommentListItem = {
   body: string;
   createdAt: string;
   shareLinkId: string;
+  recipientLabel: string | null;
+  parentId: string | null;
+  authorKind: "guest" | "owner";
+  depth: number;
 };
 
 export type PublicShareTextItem = {
@@ -167,6 +178,8 @@ export type PublicSharePayload = {
     expiresAt: string | null;
     /** ISO time when the shared snapshot was last published. */
     snapshotUpdatedAt: string | null;
+    /** Named recipient/group for this token; null = general link. */
+    recipientLabel: string | null;
   };
 };
 
@@ -241,6 +254,8 @@ export type CreateShareLinkRequest = {
   viewingId: string;
   expiresAt?: string | null;
   capability?: ShareCapability;
+  /** When set, creates a new named recipient/group code (does not reuse general). */
+  recipientLabel?: string | null;
 };
 
 export type CreateShareLinkResponse = {

@@ -25,6 +25,7 @@ import { ReportSectionsView } from "@/components/viewing-chat/ReportSectionsView
 import { ShareReportCommentsPanel } from "@/components/viewing-chat/ShareReportCommentsPanel";
 import { ClaimLimitDialog } from "@/components/viewing-chat/ClaimLimitDialog";
 import { ShareReportDialog } from "@/components/viewing-chat/ShareReportDialog";
+import { shareOrCopyUrl } from "@/lib/share-or-copy";
 import { ViewingChatComposer } from "@/components/viewing-chat/ViewingChatComposer";
 import { claimAccountThreads } from "@/lib/viewing-chat/claim-account";
 import {
@@ -66,6 +67,7 @@ import {
   getLocalThread,
   listLocalThreads,
   patchLocalThread,
+  remintLocalThreadForCloud,
   saveLocalMessages,
   threadVisibleToAccount,
   upsertLocalThread,
@@ -346,7 +348,9 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
   const [shareOpen, setShareOpen] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [shareBusy, setShareBusy] = useState(false);
-  const [shareCopied, setShareCopied] = useState(false);
+  const [shareFeedback, setShareFeedback] = useState<"shared" | "copied" | null>(
+    null,
+  );
   const [shareError, setShareError] = useState<string | null>(null);
   const [sharePublishHint, setSharePublishHint] = useState(false);
   const [guestSaveHint, setGuestSaveHint] = useState(false);
@@ -469,10 +473,15 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
 
   async function flushCloudSync(ownerId: string | null) {
     if (!ownerId) return false;
-    const current = getLocalThread(viewingId);
+    const { threadId, remapped } = remintLocalThreadForCloud(viewingId);
+    if (remapped) {
+      const qs = searchParams.toString();
+      router.replace(`/viewings/${threadId}${qs ? `?${qs}` : ""}`);
+    }
+    const current = getLocalThread(threadId);
     if (!current) return false;
     const pushed = await pushViewingThreadWithConflictRetry({
-      threadId: viewingId,
+      threadId,
       address: current.address,
       baseRevision: current.cloud?.revision,
       previouslySynced:
@@ -484,7 +493,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
       metadata: current.metadata,
     });
     if (pushed.status >= 200 && pushed.status < 300) {
-      patchLocalThread(viewingId, {
+      patchLocalThread(threadId, {
         ownerUserId: ownerId,
         cloud: {
           state: "synced",
@@ -496,7 +505,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
       return true;
     }
     if (pushed.status === 409) {
-      patchLocalThread(viewingId, { cloud: { state: "failed" } });
+      patchLocalThread(threadId, { cloud: { state: "failed" } });
     }
     return false;
   }
@@ -509,13 +518,22 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
     }, 600);
   }
 
-  async function ensureSyncedForShare(): Promise<boolean> {
-    const current = getLocalThread(viewingId);
-    if (!current) return false;
-    if (current.cloud?.state === "synced") return true;
+  async function ensureSyncedForShare(): Promise<
+    { ok: true; threadId: string } | { ok: false; message: string }
+  > {
+    const { threadId, remapped } = remintLocalThreadForCloud(viewingId);
+    if (remapped) {
+      const qs = searchParams.toString();
+      router.replace(`/viewings/${threadId}${qs ? `?${qs}` : ""}`);
+    }
+    const current = getLocalThread(threadId);
+    if (!current) {
+      return { ok: false, message: c.shareUnavailable };
+    }
+    if (current.cloud?.state === "synced") return { ok: true, threadId };
     const previouslySynced = typeof current.cloud?.revision === "number";
     const pushed = await pushViewingThreadWithConflictRetry({
-      threadId: viewingId,
+      threadId,
       address: current.address,
       baseRevision: current.cloud?.revision,
       previouslySynced,
@@ -526,10 +544,14 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
       metadata: current.metadata,
     });
     if (pushed.status < 200 || pushed.status >= 300) {
-      setStatus(pushed.status === 403 ? c.shareBlockedLimit : c.shareSyncing);
-      return false;
+      const message =
+        pushed.status === 402 || pushed.status === 403
+          ? c.shareBlockedLimit
+          : c.shareSyncFailed;
+      setStatus(message);
+      return { ok: false, message };
     }
-    patchLocalThread(viewingId, {
+    patchLocalThread(threadId, {
       ownerUserId: userId ?? undefined,
       cloud: {
         state: "synced",
@@ -538,10 +560,10 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
       },
     });
     refresh();
-    return true;
+    return { ok: true, threadId };
   }
 
-  async function requestShare() {
+  async function openShareDialog() {
     if (!shownReport) {
       setStatus(c.shareNoReportYet);
       return;
@@ -550,18 +572,44 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
       router.push(`/login?next=${encodeURIComponent(`/viewings/${viewingId}`)}`);
       return;
     }
-    if (!(await ensureSyncedForShare())) return;
     setShareError(null);
-    setShareCopied(false);
+    setShareFeedback(null);
+    setShareUrl(null);
+    setShareBusy(false);
+    setShareOpen(true);
+  }
+
+  async function requestShare() {
+    if (!shownReport) {
+      setShareOpen(true);
+      setShareError(c.shareNoReportYet);
+      setStatus(c.shareNoReportYet);
+      return;
+    }
+    if (!getSupabase() || !userId) {
+      router.push(`/login?next=${encodeURIComponent(`/viewings/${viewingId}`)}`);
+      return;
+    }
+    setShareOpen(true);
+    setShareError(null);
+    setShareFeedback(null);
     setShareUrl(null);
     setShareBusy(true);
-    setShareOpen(true);
 
     try {
-      const existingRes = await fetch(
-        `/api/share/links?viewingId=${encodeURIComponent(viewingId)}`,
-      );
+      const synced = await ensureSyncedForShare();
+      if (!synced.ok) {
+        setShareError(synced.message);
+        return;
+      }
+      const cloudViewingId = synced.threadId;
+
       let absolute: string | null = null;
+
+      // General link only — named recipient codes are created in Shares hub.
+      const existingRes = await fetch(
+        `/api/share/links?viewingId=${encodeURIComponent(cloudViewingId)}`,
+      );
       if (existingRes.ok) {
         const existing = (await existingRes.json()) as {
           url?: string | null;
@@ -583,11 +631,12 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
         const createRes = await fetch("/api/share/links", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ viewingId }),
+          body: JSON.stringify({ viewingId: cloudViewingId }),
         });
         const created = (await createRes.json()) as {
           urlPath?: string;
           code?: string;
+          error?: string;
         };
         if (createRes.status === 429) {
           setShareError(c.shareRateLimited);
@@ -613,6 +662,17 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
       }
 
       setShareUrl(absolute);
+      const result = await shareOrCopyUrl({
+        url: absolute,
+        title: c.shareNoticeTitle,
+      });
+      if (result === "shared" || result === "copied") {
+        setShareFeedback(result);
+        setShareError(null);
+      } else if (result === "failed") {
+        setShareFeedback(null);
+        setShareError("COPY_FAILED");
+      }
     } catch {
       setShareError(c.shareUnavailable);
     } finally {
@@ -622,12 +682,15 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
 
   async function copyShareUrl() {
     if (!shareUrl) return;
-    try {
-      await navigator.clipboard.writeText(shareUrl);
-      setShareCopied(true);
+    const result = await shareOrCopyUrl({
+      url: shareUrl,
+      title: c.shareNoticeTitle,
+    });
+    if (result === "shared" || result === "copied") {
+      setShareFeedback(result);
       setShareError(null);
-    } catch {
-      setShareCopied(false);
+    } else if (result === "failed") {
+      setShareFeedback(null);
       setShareError("COPY_FAILED");
     }
   }
@@ -1854,7 +1917,7 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
               </div>
               <button
                 type="button"
-                onClick={() => void requestShare()}
+                onClick={() => void openShareDialog()}
                 aria-label={c.shareReport}
                 title={c.shareReport}
                 className="ml-auto inline-flex min-h-[var(--touch-target)] min-w-[var(--touch-target)] items-center justify-center rounded-full bg-black text-white hover:bg-black/85"
@@ -1897,6 +1960,14 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
                 empty: c.shareCommentsEmpty,
                 guestDefault: c.shareCommentsGuestDefault,
                 loadFailed: c.shareCommentsLoadFailed,
+                deleteComment: t.sharesHub.deleteComment,
+                deleteCommentFailed: t.sharesHub.deleteCommentFailed,
+                recipientGeneral: t.sharesHub.recipientGeneral,
+                reply: t.sharesHub.reply,
+                replyPlaceholder: t.sharesHub.replyPlaceholder,
+                replySubmit: t.sharesHub.replySubmit,
+                replyFailed: t.sharesHub.replyFailed,
+                ownerAuthor: t.sharesHub.ownerAuthor,
               }}
             />
           </div>
@@ -2065,21 +2136,25 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
       <ShareReportDialog
         open={shareOpen}
         url={shareUrl}
-        copied={shareCopied}
+        feedback={shareFeedback}
         busy={shareBusy}
         error={shareError}
         labels={{
           title: c.shareNoticeTitle,
           copied: c.shareCopied,
+          shared: c.shareShared,
           copy: c.shareCopy,
+          share: c.shareNative,
           copyFailed: c.shareCopyFailed,
           hubGuide: c.shareHubGuide,
           hubCta: c.shareHubCta,
           close: c.shareClose,
           preparing: c.sharePreparing,
+          create: c.shareCreate,
         }}
         onClose={() => setShareOpen(false)}
         onCopy={() => void copyShareUrl()}
+        onCreate={() => void requestShare()}
       />
     </PageContainer>
   );

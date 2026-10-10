@@ -18,7 +18,11 @@ vi.mock("./crypto", async () => {
   };
 });
 
-import { getShareSaveState, saveShareForUser } from "./saves";
+import {
+  contentUpdatedSinceSave,
+  getShareSaveState,
+  saveShareForUser,
+} from "./saves";
 
 const TOKEN = "a".repeat(64);
 
@@ -91,5 +95,31 @@ describe("share saves", () => {
       "user-2",
     );
     expect(result).toEqual({ ok: true, already: false });
+  });
+});
+
+describe("contentUpdatedSinceSave", () => {
+  it("is true when publishedAt is after savedAt", () => {
+    expect(
+      contentUpdatedSinceSave(
+        { publishedAt: "2026-10-10T12:00:00.000Z" },
+        "2026-10-09T12:00:00.000Z",
+      ),
+    ).toBe(true);
+  });
+
+  it("is false when published before or at save time", () => {
+    expect(
+      contentUpdatedSinceSave(
+        { publishedAt: "2026-10-09T12:00:00.000Z" },
+        "2026-10-09T12:00:00.000Z",
+      ),
+    ).toBe(false);
+    expect(
+      contentUpdatedSinceSave(
+        { publishedAt: "2026-10-08T12:00:00.000Z" },
+        "2026-10-09T12:00:00.000Z",
+      ),
+    ).toBe(false);
   });
 });

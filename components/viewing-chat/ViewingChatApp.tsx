@@ -42,6 +42,7 @@ import {
   getLocalThread,
   listLocalThreads,
   patchLocalThread,
+  remintLocalThreadForCloud,
   saveLocalMessages,
   setLocalThreadPinned,
   threadVisibleToAccount,
@@ -488,14 +489,17 @@ export function ViewingChatApp({
 
   async function pushLocalThread(threadId: string) {
     if (userId) await attachStoredMedia(threadId);
-    const thread = getLocalThread(threadId);
+    const reminted = remintLocalThreadForCloud(threadId);
+    const cloudId = reminted.threadId;
+    if (reminted.remapped && activeId === threadId) setActiveId(cloudId);
+    const thread = getLocalThread(cloudId);
     if (!thread || !userId || thread.cloud?.state === "blocked_limit") return;
     const result = await syncWithRetry({
       put: async () => {
-        const current = getLocalThread(threadId);
+        const current = getLocalThread(cloudId);
         if (!current) return { status: 404 };
         const pushed = await pushViewingThread({
-          threadId,
+          threadId: cloudId,
           address: current.address,
           baseRevision: current.cloud?.revision,
           previouslySynced: current.cloud?.state === "synced" || typeof current.cloud?.revision === "number",
@@ -506,21 +510,21 @@ export function ViewingChatApp({
           metadata: current.metadata,
         });
         if (pushed.deleted) {
-          deleteLocalThread(threadId);
-          if (activeId === threadId) setActiveId(null);
+          deleteLocalThread(cloudId);
+          if (activeId === cloudId) setActiveId(null);
           return { status: 200 };
         }
         if (pushed.status === 409 && typeof pushed.revision === "number") {
           // Keep LOCAL messages (incl. deletes); only adopt the newer revision and retry.
           // Merging remote messages here used to resurrect notes the user just deleted.
-          patchLocalThread(threadId, {
+          patchLocalThread(cloudId, {
             cloud: { ...current.cloud, state: "syncing", revision: pushed.revision },
           });
           setStatus(c.syncNewer);
           return { status: 409 };
         }
         if (pushed.status >= 200 && pushed.status < 300) {
-          patchLocalThread(threadId, {
+          patchLocalThread(cloudId, {
             ownerUserId: userId,
             cloud: {
               state: "synced",
@@ -533,8 +537,8 @@ export function ViewingChatApp({
       },
     });
     if (result !== "synced") {
-      const latest = getLocalThread(threadId);
-      patchLocalThread(threadId, { cloud: withCloudSyncState(latest?.cloud, result) });
+      const latest = getLocalThread(cloudId);
+      patchLocalThread(cloudId, { cloud: withCloudSyncState(latest?.cloud, result) });
     }
     refreshLocal();
   }

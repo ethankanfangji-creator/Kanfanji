@@ -6,6 +6,7 @@ import {
   hasSectionedReport,
   stripLeadingMarkdownHeading,
 } from "@/lib/viewing-chat/report-sections";
+import { resolveChatReportTitle } from "@/lib/viewing-chat/report-title";
 import type { ChatReportMeta, ChatReportSnapshot } from "@/lib/viewing-chat/types";
 
 export type ReportSectionLabels = {
@@ -91,7 +92,9 @@ export function ReportSectionsView({
   return (
     <div className={`space-y-4 ${className}`}>
       {report.title?.trim() ? (
-        <h2 className="text-[17px] font-bold leading-snug">{report.title.trim()}</h2>
+        <h2 className="text-[17px] font-bold leading-snug">
+          {resolveChatReportTitle(report.title)}
+        </h2>
       ) : null}
       {metaRows.length ? (
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[12px]">

@@ -10,22 +10,25 @@ export const shareApiContract = {
     method: "POST",
     path: "/api/share/links",
     auth: "owner",
-    body: "{ viewingId, expiresAt?, password?, capability?: 'read' }",
+    body: "{ viewingId, expiresAt?, capability?: 'read', recipientLabel? }",
     success: "201 CreateShareLinkResponse",
-    errors: ["401", "403", "404"],
+    errors: ["401", "403", "404", "409 RECIPIENT_EXISTS"],
+    notes:
+      "recipientLabel creates a named recipient/group code; omit/null ensures the general link.",
   },
   getLink: {
     method: "GET",
     path: "/api/share/links?viewingId=",
     auth: "owner",
-    success: "200 { link: ShareLinkRecord | null, history: ShareLinkRecord[] }",
+    success:
+      "200 { link: ShareLinkRecord | null /* general */, history: ShareLinkRecord[] }",
     errors: ["401", "403", "404"],
   },
   updateLink: {
     method: "PATCH",
     path: "/api/share/links/:linkId",
     auth: "owner",
-    body: "{ expiresAt?, password? }",
+    body: "{ expiresAt? }",
     success: "200 { link: ShareLinkRecord }",
     errors: ["401", "403", "404"],
   },
@@ -42,6 +45,14 @@ export const shareApiContract = {
     auth: "owner",
     success: "200 RotateShareLinkResponse",
     errors: ["401", "403", "404"],
+    notes: "Copies recipientLabel onto the replacement row; old token dies.",
+  },
+  deleteComment: {
+    method: "DELETE",
+    path: "/api/share/comments/:id",
+    auth: "owner",
+    success: "200 { ok: true }",
+    errors: ["401", "404", "503"],
   },
   resolvePublic: {
     method: "GET",
@@ -49,7 +60,7 @@ export const shareApiContract = {
     auth: "none",
     success: "200 PublicShareResult",
     notes:
-      "Never returns user_id, notes, audio, transcripts, account fields. Soft-close / revoke / expiry only — password sharing retired.",
+      "Never returns user_id, notes, audio, transcripts, account fields. Soft-close / revoke / expiry only — password sharing retired. meta.recipientLabel exposes named provenance.",
   },
 } as const;
 

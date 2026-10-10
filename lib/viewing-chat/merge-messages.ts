@@ -40,13 +40,32 @@ export function resolveThreadMessages(input: {
   return mergeChatMessages(input.existing, input.incoming);
 }
 
+export function localRevisionIsBehind(
+  localRevision: number | null | undefined,
+  remoteRevision: number | null | undefined,
+): boolean {
+  return (
+    typeof localRevision === "number" &&
+    typeof remoteRevision === "number" &&
+    localRevision < remoteRevision
+  );
+}
+
 export function localNotesAreAuthoritative(input: {
   hasLocalMessages: boolean;
   localUpdatedAt?: string;
   remoteUpdatedAt?: string;
   localCloudState?: string | null;
+  localRevision?: number | null;
+  remoteRevision?: number | null;
 }): boolean {
   if (!input.hasLocalMessages) return false;
+  // A metadata-only bump (star / tags) can make the local clock newer while
+  // this device is still on an older snapshot. Those writes must not hide
+  // notes another device already committed.
+  if (localRevisionIsBehind(input.localRevision, input.remoteRevision)) {
+    return false;
+  }
   return (
     input.localCloudState === "syncing" ||
     input.localCloudState === "failed" ||
@@ -63,6 +82,8 @@ export function hydrateThreadMessages(input: {
   localUpdatedAt?: string;
   remoteUpdatedAt?: string;
   localCloudState?: string | null;
+  localRevision?: number | null;
+  remoteRevision?: number | null;
 }): ChatMessage[] {
   const remote = input.remoteMessages ?? [];
   if (!input.localMessages) return remote;
@@ -72,9 +93,11 @@ export function hydrateThreadMessages(input: {
       localUpdatedAt: input.localUpdatedAt,
       remoteUpdatedAt: input.remoteUpdatedAt,
       localCloudState: input.localCloudState,
+      localRevision: input.localRevision,
+      remoteRevision: input.remoteRevision,
     })
   ) {
     return input.localMessages;
   }
-  return appendChatMessages(input.localMessages, remote);
+  return appendChatMessages(remote, input.localMessages);
 }

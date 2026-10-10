@@ -4,6 +4,7 @@ import {
   buildChatStatePayload,
   isLocalThreadNewer,
   pushViewingThread,
+  shouldSkipCloudPull,
   syncedThreadIdsMissingFromCloud,
   withCloudSyncState,
 } from "./cloud-push";
@@ -15,7 +16,7 @@ import {
   remintLocalThreadForCloud,
   upsertLocalThread,
 } from "./local-store";
-import { appendChatMessages } from "./append-messages";
+import { mergeMessagesForHydrate } from "./merge-messages-hydrate";
 import { removeMediaByThread } from "./media-library";
 import type { ChatMessage, ViewingChatThread } from "./types";
 
@@ -106,7 +107,7 @@ export async function pullCloudThreads(userId: string) {
   const listResponse = await fetch("/api/viewing-chat/threads");
   if (!listResponse.ok) return;
   const list = (await listResponse.json()) as {
-    threads?: Array<{ id: string; updatedAt: string }>;
+    threads?: Array<{ id: string; updatedAt: string; revision?: number }>;
   };
   const remoteIds = new Set((list.threads ?? []).map((thread) => thread.id));
   for (const id of syncedThreadIdsMissingFromCloud(listLocalThreads(), remoteIds, userId)) {
@@ -117,7 +118,16 @@ export async function pullCloudThreads(userId: string) {
   }
   for (const remote of list.threads ?? []) {
     const local = getLocalThread(remote.id);
-    if (isLocalThreadNewer(local?.updatedAt, remote.updatedAt)) continue;
+    if (
+      shouldSkipCloudPull({
+        localUpdatedAt: local?.updatedAt,
+        remoteUpdatedAt: remote.updatedAt,
+        localRevision: local?.cloud?.revision,
+        remoteRevision: remote.revision,
+      })
+    ) {
+      continue;
+    }
     const detail = await fetch(`/api/viewing-chat/threads/${remote.id}`);
     if (!detail.ok) continue;
     const row = (await detail.json()) as {
@@ -142,15 +152,35 @@ export async function pullCloudThreads(userId: string) {
       pinned: false,
     };
     const restored = applyChatStateToLocal(base, row.chat_state);
+    const freshLocal = getLocalThread(remote.id) ?? local;
+    const keepLocalMeta = isLocalThreadNewer(freshLocal?.updatedAt, row.updated_at);
     upsertLocalThread({
       ...restored,
       address: row.address || restored.address,
-      messages: appendChatMessages(restored.messages ?? [], row.messages ?? []),
+      messages: mergeMessagesForHydrate(
+        freshLocal?.messages ?? restored.messages ?? [],
+        row.messages ?? [],
+        freshLocal?.updatedAt ?? restored.updatedAt,
+        row.updated_at,
+        freshLocal?.cloud?.revision,
+        row.revision,
+      ),
       report: row.report ?? restored.report,
       metadata: row.metadata ?? restored.metadata,
-      updatedAt: row.updated_at,
+      ...(keepLocalMeta && freshLocal
+        ? {
+            overallRating: freshLocal.overallRating,
+            tags: freshLocal.tags,
+            decisionStatus: freshLocal.decisionStatus,
+          }
+        : {}),
+      updatedAt: keepLocalMeta && freshLocal ? freshLocal.updatedAt : row.updated_at,
       ownerUserId: userId,
-      cloud: { state: "synced", lastSyncedAt: row.updated_at, revision: row.revision },
+      cloud: {
+        state: keepLocalMeta ? "syncing" : "synced",
+        lastSyncedAt: row.updated_at,
+        revision: row.revision,
+      },
     });
   }
   for (const thread of listLocalThreads()) {

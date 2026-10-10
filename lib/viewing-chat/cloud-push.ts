@@ -3,6 +3,7 @@ import {
   decisionStatusFromTags,
 } from "@/lib/portfolio/viewing-tags";
 import { coerceDecisionStatus } from "@/lib/portfolio/decision-status";
+import { localRevisionIsBehind } from "@/lib/viewing-chat/merge-messages";
 import { coerceOverallRating } from "@/lib/viewing-chat/overall-rating";
 
 export type CloudRow = {
@@ -77,6 +78,17 @@ export function isLocalThreadNewer(
   remoteUpdatedAt: string | undefined,
 ) {
   return Boolean(localUpdatedAt && remoteUpdatedAt && localUpdatedAt >= remoteUpdatedAt);
+}
+
+/** Skip a cloud GET only when this device is not sitting on an older revision. */
+export function shouldSkipCloudPull(input: {
+  localUpdatedAt?: string;
+  remoteUpdatedAt?: string;
+  localRevision?: number | null;
+  remoteRevision?: number | null;
+}) {
+  if (localRevisionIsBehind(input.localRevision, input.remoteRevision)) return false;
+  return isLocalThreadNewer(input.localUpdatedAt, input.remoteUpdatedAt);
 }
 
 export function syncedThreadIdsMissingFromCloud(

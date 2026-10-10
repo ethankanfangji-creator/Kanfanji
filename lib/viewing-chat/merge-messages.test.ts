@@ -92,8 +92,23 @@ describe("hydrateThreadMessages", () => {
         localUpdatedAt: "2026-10-04T12:00:00.000Z",
         remoteUpdatedAt: "2026-10-04T11:00:00.000Z",
         localCloudState: "synced",
+        localRevision: 4,
+        remoteRevision: 4,
       }),
     ).toBe(true);
+  });
+
+  it("does not treat a newer local clock as authoritative when the cloud revision is ahead", () => {
+    expect(
+      localNotesAreAuthoritative({
+        hasLocalMessages: true,
+        localUpdatedAt: "2026-10-10T12:00:00.000Z",
+        remoteUpdatedAt: "2026-10-10T11:00:00.000Z",
+        localCloudState: "synced",
+        localRevision: 2,
+        remoteRevision: 3,
+      }),
+    ).toBe(false);
   });
 
   it("still pulls newer remote notes when local is already synced and older", () => {

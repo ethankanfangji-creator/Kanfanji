@@ -111,6 +111,8 @@ async function hydrateViewingThread(threadId: string, ownerUserId: string) {
     row.messages ?? [],
     freshLocal?.updatedAt ?? local?.updatedAt ?? restored.updatedAt,
     row.updated_at,
+    freshLocal?.cloud?.revision ?? local?.cloud?.revision,
+    row.revision,
   );
   const keepLocalClock =
     Boolean(freshLocal?.updatedAt) && freshLocal!.updatedAt > row.updated_at;
@@ -120,6 +122,13 @@ async function hydrateViewingThread(threadId: string, ownerUserId: string) {
     messages: mergedMessages,
     report: row.report ?? restored.report,
     metadata: row.metadata ?? restored.metadata,
+    ...(keepLocalClock && freshLocal
+      ? {
+          overallRating: freshLocal.overallRating,
+          tags: freshLocal.tags,
+          decisionStatus: freshLocal.decisionStatus,
+        }
+      : {}),
     updatedAt: keepLocalClock ? freshLocal!.updatedAt : row.updated_at,
     ownerUserId,
     cloud: {

@@ -141,11 +141,14 @@ async function hydrateViewingThread(
   const localUpdatedAt =
     freshLocal?.updatedAt ?? local?.updatedAt ?? restored.updatedAt;
   const localCloudState = freshLocal?.cloud?.state ?? local?.cloud?.state;
+  const localRevision = freshLocal?.cloud?.revision ?? local?.cloud?.revision;
   const keepLocalNotes = localNotesAreAuthoritative({
     hasLocalMessages: Boolean(freshLocal ?? local),
     localUpdatedAt,
     remoteUpdatedAt: row.updated_at,
     localCloudState,
+    localRevision,
+    remoteRevision: row.revision,
   });
   const localMessages = freshLocal?.messages ?? restored.messages ?? [];
   const mergedMessages = keepLocalNotes
@@ -155,31 +158,45 @@ async function hydrateViewingThread(
         row.messages ?? [],
         localUpdatedAt,
         row.updated_at,
+        localRevision,
+        row.revision,
       );
+  const keepLocalMeta = Boolean(
+    freshLocal?.updatedAt && row.updated_at && freshLocal.updatedAt > row.updated_at,
+  );
   upsertLocalThread({
     ...restored,
     address: row.address || restored.address,
     messages: mergedMessages,
     report: row.report ?? restored.report,
     metadata: row.metadata ?? restored.metadata,
-    // Keep the newer clock so a just-deleted local note is not treated as stale.
-    updatedAt: keepLocalNotes && (freshLocal ?? local)
-      ? (freshLocal ?? local)!.updatedAt
-      : row.updated_at,
-    ownerUserId,
-    cloud: keepLocalNotes
+    ...(keepLocalMeta && freshLocal
       ? {
-          state: "syncing",
-          lastSyncedAt: (freshLocal ?? local)?.cloud?.lastSyncedAt ?? null,
-          revision: row.revision,
+          overallRating: freshLocal.overallRating,
+          tags: freshLocal.tags,
+          decisionStatus: freshLocal.decisionStatus,
         }
-      : {
-          state: "synced",
-          lastSyncedAt: row.updated_at,
-          revision: row.revision,
-        },
+      : {}),
+    // Keep the newer clock so a just-deleted local note is not treated as stale.
+    updatedAt:
+      (keepLocalNotes || keepLocalMeta) && (freshLocal ?? local)
+        ? (freshLocal ?? local)!.updatedAt
+        : row.updated_at,
+    ownerUserId,
+    cloud:
+      keepLocalNotes || keepLocalMeta
+        ? {
+            state: "syncing",
+            lastSyncedAt: (freshLocal ?? local)?.cloud?.lastSyncedAt ?? null,
+            revision: row.revision,
+          }
+        : {
+            state: "synced",
+            lastSyncedAt: row.updated_at,
+            revision: row.revision,
+          },
   });
-  return { ok: true, needsSync: keepLocalNotes };
+  return { ok: true, needsSync: keepLocalNotes || keepLocalMeta };
 }
 
 /** Compact note footer actions — same visual weight, keeps timestamp optically centered. */
@@ -356,6 +373,8 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
   const [guestSaveHint, setGuestSaveHint] = useState(false);
   const [claimLimitOpen, setClaimLimitOpen] = useState(false);
   const syncTimer = useRef(0);
+  const hydrateReady = useRef(false);
+  const pendingSync = useRef(false);
   const notesEndRef = useRef<HTMLDivElement>(null);
 
   const notes = useMemo(
@@ -512,6 +531,10 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
 
   function queueSync() {
     if (!userId) return;
+    if (!hydrateReady.current) {
+      pendingSync.current = true;
+      return;
+    }
     window.clearTimeout(syncTimer.current);
     syncTimer.current = window.setTimeout(() => {
       void flushCloudSync(userId);
@@ -777,6 +800,8 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
       }
     }
 
+    hydrateReady.current = false;
+    pendingSync.current = false;
     void (async () => {
       let uid: string | null = null;
       if (supabase) {
@@ -805,7 +830,11 @@ export function ViewingSessionApp({ viewingId }: { viewingId: string }) {
           setReady(true);
           return;
         }
-        if (hydrated.needsSync) {
+        // Only push after a successful hydrate so a star/tag on a stale cache
+        // cannot overwrite notes another device already synced.
+        hydrateReady.current = hydrated.ok;
+        if (hydrated.ok && (hydrated.needsSync || pendingSync.current)) {
+          pendingSync.current = false;
           window.setTimeout(() => {
             void flushCloudSync(uid);
           }, 0);

@@ -3,6 +3,7 @@ import {
   isLocalThreadNewer,
   pushViewingThread,
   pushViewingThreadWithConflictRetry,
+  shouldSkipCloudPull,
   syncedThreadIdsMissingFromCloud,
   withCloudSyncState,
 } from "./cloud-push";
@@ -141,5 +142,24 @@ describe("cloud sync metadata helpers", () => {
     expect(isLocalThreadNewer("2026-09-30T12:00:00.000Z", "2026-09-30T12:00:00.000Z")).toBe(true);
     expect(isLocalThreadNewer("2026-09-30T11:00:00.000Z", "2026-09-30T12:00:00.000Z")).toBe(false);
     expect(isLocalThreadNewer(undefined, "2026-09-30T12:00:00.000Z")).toBe(false);
+  });
+
+  it("still pulls when a newer local clock is sitting on an older revision", () => {
+    expect(
+      shouldSkipCloudPull({
+        localUpdatedAt: "2026-10-10T12:00:00.000Z",
+        remoteUpdatedAt: "2026-10-10T11:00:00.000Z",
+        localRevision: 2,
+        remoteRevision: 3,
+      }),
+    ).toBe(false);
+    expect(
+      shouldSkipCloudPull({
+        localUpdatedAt: "2026-10-10T12:00:00.000Z",
+        remoteUpdatedAt: "2026-10-10T11:00:00.000Z",
+        localRevision: 3,
+        remoteRevision: 3,
+      }),
+    ).toBe(true);
   });
 });

@@ -89,7 +89,7 @@ export async function GET() {
   const admin = createAdminClient();
   const { data, error } = await admin
     .from("viewings")
-    .select("id, address, updated_at, created_at, chat_state, report")
+    .select("id, address, updated_at, created_at, chat_state, report, revision")
     .eq("user_id", user.id)
     .not("chat_state", "is", null);
   if (error) return noStore({ code: "unavailable" }, 503);
@@ -105,7 +105,7 @@ export async function GET() {
   const shared = memberIds.length
     ? await admin
         .from("viewings")
-        .select("id, address, updated_at, created_at, chat_state, report")
+        .select("id, address, updated_at, created_at, chat_state, report, revision")
         .in("id", memberIds)
         .not("chat_state", "is", null)
     : { data: [], error: null };
@@ -128,6 +128,7 @@ export async function GET() {
       address: row.address,
       updatedAt: row.updated_at,
       createdAt: row.created_at,
+      revision: Number((row as { revision?: number }).revision ?? 1),
       pinned: Boolean((row.chat_state as { pinned?: boolean } | null)?.pinned),
       hasReport: row.report != null,
     })),

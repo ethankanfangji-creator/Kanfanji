@@ -219,6 +219,64 @@ describe("pull keeps newer local answers after a failed sync", () => {
   });
 });
 
+describe("pull does not hide newer cloud notes behind a local metadata bump", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+
+  it("fetches and keeps remote-only notes when a star rating made the local clock newer", async () => {
+    const thread = createLocalThread("12 Oak St, Vancouver, BC", [], null);
+    patchLocalThread(thread.id, {
+      ownerUserId: "user-1",
+      cloud: { state: "synced", revision: 2 },
+      overallRating: 4,
+    });
+    const local = getLocalThread(thread.id)!;
+    const remoteUpdatedAt = new Date(Date.parse(local.updatedAt) - 30_000).toISOString();
+    const remoteNote = {
+      id: "note-phone",
+      role: "user",
+      type: "text",
+      timestamp: remoteUpdatedAt,
+      text: "漏水要修",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/viewing-chat/threads") {
+          return new Response(
+            JSON.stringify({
+              threads: [{ id: thread.id, updatedAt: remoteUpdatedAt, revision: 3 }],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            id: thread.id,
+            address: thread.address,
+            messages: [remoteNote],
+            report: null,
+            metadata: null,
+            chat_state: { v: 1, overallRating: null },
+            revision: 3,
+            updated_at: remoteUpdatedAt,
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+    await pullCloudThreads("user-1");
+    const stored = getLocalThread(thread.id);
+    expect(stored?.messages.map((message) => message.id)).toEqual(["note-phone"]);
+    expect(stored?.overallRating).toBe(4);
+    expect(stored?.cloud?.revision).toBe(3);
+    vi.unstubAllGlobals();
+  });
+});
+
 describe("pull does not revive a thread deleted on the server", () => {
   beforeEach(() => {
     localStorage.clear();

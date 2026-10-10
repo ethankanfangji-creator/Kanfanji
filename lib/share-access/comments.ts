@@ -323,6 +323,12 @@ async function loadParentComment(
   return data as ParentRow;
 }
 
+type NotifyEmailWalkRow = {
+  id: string;
+  parent_id: string | null;
+  notify_email_ciphertext: string | null;
+};
+
 /** Walk to thread root for guest notify email lookup. */
 export async function findThreadRootNotifyEmail(
   startCommentId: string,
@@ -336,18 +342,19 @@ export async function findThreadRootNotifyEmail(
       .eq("id", currentId)
       .maybeSingle();
     if (error || !data) return null;
-    const parentId =
-      typeof data.parent_id === "string" ? data.parent_id : null;
+    const row = data as NotifyEmailWalkRow;
+    const parentId: string | null =
+      typeof row.parent_id === "string" ? row.parent_id : null;
     if (!parentId) {
       const sealed =
-        typeof data.notify_email_ciphertext === "string"
-          ? data.notify_email_ciphertext
+        typeof row.notify_email_ciphertext === "string"
+          ? row.notify_email_ciphertext
           : null;
       if (!sealed) return null;
       try {
         return {
-          commentId: data.id as string,
-          email: decryptCommentNotifyEmail(sealed, data.id as string),
+          commentId: row.id,
+          email: decryptCommentNotifyEmail(sealed, row.id),
         };
       } catch {
         return null;
